@@ -1,0 +1,32 @@
+# Septet: one shell hosting all the *craft apps as tabs.
+#
+# The seven app repositories stay independent cargo workspaces; this workspace only builds the
+# shell (`septet/`) and pulls their crates in as path dependencies.
+[workspace]
+resolver = "3"
+members = ["septet"]
+exclude = ["designcraft", "effectcraft", "filmcraft", "lightcraft", "pdfcraft", "photocraft", "vectorcraft"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "PolyForm-Noncommercial-1.0.0"
+rust-version = "1.95"
+
+# pdfcraft carries fixes to these crates (pdfcraft/vendor); designcraft's hayro 0.7 picks them up too.
+[patch.crates-io]
+hayro-interpret = { path = "pdfcraft/vendor/hayro-interpret" }
+hayro = { path = "pdfcraft/vendor/hayro" }
+hayro-syntax = { path = "pdfcraft/vendor/hayro-syntax" }
+hayro-jbig2 = { path = "pdfcraft/vendor/hayro-jbig2" }
+lopdf = { path = "pdfcraft/vendor/lopdf" }
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 16

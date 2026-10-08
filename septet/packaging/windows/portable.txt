@@ -1,0 +1,7 @@
+Septet portable
+
+As long as this file is next to septet.exe, Septet and its seven apps keep all their settings, recovery
+copies, libraries and caches in the "Data" folder next to it, not in your user profile. Put the whole
+folder on a USB stick and take it with you.
+
+Delete this file to make Septet use the normal per-user folders instead.

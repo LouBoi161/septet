@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Septet
+GenericName=Creative Suite
+Comment=Photocraft, Vectorcraft, Lightcraft, Designcraft, Pdfcraft, Filmcraft and Effectcraft in one tabbed workspace
+Exec=septet %F
+Icon=septet
+Terminal=false
+StartupWMClass=septet
+Categories=Graphics;2DGraphics;RasterGraphics;VectorGraphics;Photography;Publishing;AudioVideo;Video;
+MimeType=image/png;image/jpeg;image/tiff;image/webp;image/gif;image/bmp;image/vnd.adobe.photoshop;image/x-psd;image/svg+xml;application/pdf;image/x-adobe-dng;image/x-canon-cr2;image/x-canon-cr3;image/x-nikon-nef;image/x-sony-arw;image/x-fuji-raf;video/mp4;video/quicktime;video/x-matroska;video/webm;
