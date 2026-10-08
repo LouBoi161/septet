@@ -39,7 +39,7 @@ impl NativeMenu {
         let app_menu = Submenu::new("DesignCraft", true);
         // Our own About splash (with the community links) instead of the stock panel.
         let about = MenuItem::with_id("dc-about", "About DesignCraft", true, None);
-        let discord = MenuItem::with_id("dc-discord", "Join the ArtCraft Discord…", true, None);
+        let discord = MenuItem::with_id("dc-discord", "Join the Discord Community…", true, None);
         let _ = app_menu.append_items(&[
             &about,
             &discord,

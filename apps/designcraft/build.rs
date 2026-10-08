@@ -4,12 +4,16 @@
 //! On every other target this does nothing. A missing resource compiler is a warning, so a
 //! cross-compile from macOS or Linux still links, unless `DESIGNCRAFT_REQUIRE_WINRES=1` turns it
 //! into an error (for release builds).
+//!
+//! `HOSTED_BUILD` (set by a host app that builds this package as a dependency) skips it: the
+//! resources would go into the host's executable.
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../../assets/app-icon/designcraft.ico");
     println!("cargo:rerun-if-env-changed=DESIGNCRAFT_REQUIRE_WINRES");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+    println!("cargo:rerun-if-env-changed=HOSTED_BUILD");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") || std::env::var_os("HOSTED_BUILD").is_some() {
         return;
     }
     let mut res = winresource::WindowsResource::new();

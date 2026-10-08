@@ -1330,6 +1330,25 @@ fn fmt_tick(v: f64) -> String {
     if (v - r).abs() < 1e-6 { format!("{}", r as i64) } else { format!("{v:.1}") }
 }
 
+/// Forget a pointer drag whose release the canvas never saw (hosted: it ended in another app
+/// while this one was hidden): the tool's move is undone and the press forgotten.
+pub fn forget_drag(app: &mut DesignApp, ctx: &egui::Context) {
+    if app.session.active().is_some_and(|st| st.interaction.is_some()) {
+        app.session.cancel_interaction();
+        // The release the tool missed ends its drag; the commit it asks for finds nothing.
+        let up = PointerEvent { kind: PointerKind::Up, pos: Point::ZERO, mods: Mods::default() };
+        if let Err(e) = app.session.pointer(&up, app.view_info()) {
+            app.status(e.to_string());
+        }
+        app.after_engine();
+    }
+    ctx.data_mut(|d| {
+        for pane in [0u8, 1] {
+            d.remove::<bool>(egui::Id::new(("canvas_pointer_down", pane)));
+        }
+    });
+}
+
 fn handle_input(app: &mut DesignApp, ui: &mut egui::Ui, resp: &egui::Response, rect: Rect) {
     let Some(v) = app.view().copied() else { return };
     let xf = Xf::new(rect, &v);

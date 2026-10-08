@@ -12,16 +12,10 @@ use serde_json::{Value, json};
 
 use crate::{DocState, EngineError, Result, Session};
 
-/// The platform's per-user recovery folder.
+/// The per-user recovery folder ([`crate::user_dirs::recovery_dir`]: the data root's when one
+/// is set).
 pub fn default_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    if cfg!(target_os = "macos") {
-        return home.map(|h| h.join("Library/Application Support/DesignCraft/Recovery"));
-    }
-    if cfg!(target_os = "windows") {
-        return std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("DesignCraft").join("Recovery"));
-    }
-    std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| home.map(|h| h.join(".local/share"))).map(|d| d.join("designcraft/recovery"))
+    crate::user_dirs::recovery_dir()
 }
 
 fn files(dir: &Path, uid: u64) -> (PathBuf, PathBuf) {

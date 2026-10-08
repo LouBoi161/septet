@@ -1,10 +1,5 @@
 <p align="center">
-  <a href="https://getartcraft.com/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/brand/artcraft-logo-white.svg">
-      <img alt="ArtCraft" src="docs/brand/artcraft-logo.svg" width="200">
-    </picture>
-  </a>
+  <img alt="" src="assets/app-icon/hicolor/128x128/apps/ai.storyteller.designcraft.png" width="96">
 </p>
 
 
@@ -17,7 +12,7 @@
 <p align="center">
   A fast, open-source, clean-room take on the Adobe InDesign workflow. It runs natively on macOS,
   Windows and Linux, and in the browser via WebAssembly.<br>
-  <i>By the ArtCraft team.</i>
+  <i>Based on DesignCraft by the ArtCraft team.</i>
 </p>
 
 <p align="center">
@@ -251,16 +246,15 @@ with its author, source and license in [ASSETS.md](ASSETS.md).
 The bundled fonts, and the craft-fonts fonts embedded by release builds, are under the SIL Open
 Font License; all UI icons are drawn in code and are original.
 
-The ArtCraft name, wordmark and logos in [`docs/brand/`](docs/brand/) are trademarks of the
-ArtCraft Team and are not covered by this license. They may be used only unmodified, and only as
-part of this repository and DesignCraft, under [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt).
-Forks and modified versions must remove them.
+The ArtCraft name, wordmark and logos are trademarks of the ArtCraft Team and are not covered by
+this license; their terms are in [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt).
+Forks and modified versions must remove them, so this modified version no longer contains them
+([`docs/brand/README.md`](docs/brand/README.md)).
 
 <sub>Adobe, Photoshop, Illustrator, Premiere Pro, Lightroom, Acrobat, After Effects and InDesign are trademarks or registered trademarks of Adobe Inc. in the United States and/or other countries. DesignCraft is an independent, open-source project and is not affiliated with, sponsored by or endorsed by Adobe Inc.; these names are used only to describe the workflows it is compatible with.</sub>
 
 <br>
 
 <p align="center">
-  <a href="https://getartcraft.com/"><img alt="ArtCraft" src="docs/brand/artcraft-mark.svg" width="28"></a><br>
-  <sub>Made by the <a href="https://getartcraft.com/">ArtCraft</a> team and community.</sub>
+  <sub>Based on DesignCraft by the <a href="https://getartcraft.com/">ArtCraft</a> team and community.</sub>
 </p>

@@ -1880,6 +1880,23 @@ pub fn links_panel(app: &mut DesignApp, ui: &mut egui::Ui) {
         if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Embed"))).clicked() {
             let _ = app.run("links.embed", json!({"asset": aid}));
         }
+        // Hosted: the linked file opens in the app that edits it; its changes come back with
+        // Update (the host updates modified links when DesignCraft shows again).
+        let original = rows.iter().find(|r| r["asset"].as_u64() == Some(aid)).and_then(|r| {
+            let path = r["path"].as_str()?;
+            Some((path.to_string(), r["status"].as_str() != Some("missing")))
+        });
+        if app.services.open_externally.is_some()
+            && let Some((path, found)) = original
+            && ui
+                .add_enabled(found, egui::Button::new(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Edit Original"))))
+                .on_hover_text(&path)
+                .clicked()
+            && let Some(open) = app.services.open_externally.as_mut()
+            && !open(&path)
+        {
+            app.status(format!("Couldn't open {path}"));
+        }
     });
     ui.horizontal(|ui| {
         // Choose any file in the folder: missing links are looked up there by name.

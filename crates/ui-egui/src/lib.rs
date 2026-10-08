@@ -13,6 +13,7 @@ pub mod control;
 pub mod credits;
 pub mod dialogs;
 pub mod dock;
+pub mod hosted;
 pub mod i18n;
 pub mod icons;
 pub mod menus;
@@ -40,6 +41,10 @@ pub type WriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
 pub type PickFn = Box<dyn FnMut(&str) -> Option<String>>;
 pub type OpenAsyncFn = Box<dyn FnMut(&str)>;
 pub type DownloadFn = Box<dyn FnMut(&str, &[u8])>;
+/// Opens a file in another application; true when it did.
+pub type OpenExternallyFn = Box<dyn FnMut(&str) -> bool>;
+/// Opens a sibling app by its lowercase name (`photocraft`, `vectorcraft` …).
+pub type OpenAppFn = Box<dyn FnMut(&str)>;
 /// Files `(name, bytes)` delivered asynchronously by the host (web file picker, dropped files).
 pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
@@ -61,6 +66,11 @@ pub struct Services {
     /// Files delivered asynchronously, drained every frame: `.designcraft` → `file.openBytes`,
     /// anything else → `file.place`.
     pub inbox: Option<Inbox>,
+    /// Open a linked file in the application that edits it (a host app's sibling tab). When set,
+    /// the Links panel shows Edit Original.
+    pub open_externally: Option<OpenExternallyFn>,
+    /// Open a sibling app (a host app's tab) instead of its page on the upstream website.
+    pub open_app: Option<OpenAppFn>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -586,8 +596,9 @@ impl DesignApp {
                 let _ = designcraft_color::cms::set_active(&cs);
             }
         }
+        // Hosted, the host owns the UI zoom.
         let scale = self.ui.ui_scale.clamp(0.5, 3.0);
-        if (ctx.zoom_factor() - scale).abs() > 1e-3 {
+        if !hosted::is_hosted() && (ctx.zoom_factor() - scale).abs() > 1e-3 {
             ctx.set_zoom_factor(scale);
         }
         if !self.styled {
@@ -646,6 +657,14 @@ impl DesignApp {
                 let _ = self.run(cmd, json!({"path": p}));
             }
         }
+    }
+
+    /// Forget a drag whose release the app never saw (hosted: it was dropped in another app while
+    /// this one was hidden): a canvas move is undone and a Pages panel drag dropped, so nothing
+    /// happens when the app shows again.
+    pub fn forget_drag(&mut self, ctx: &egui::Context) {
+        canvas::forget_drag(self, ctx);
+        panels::pages::forget_drag(ctx);
     }
 
     /// Inject synthetic events (one pointer event per frame).
@@ -782,6 +801,12 @@ impl DesignApp {
         about::show(self, &ctx);
         menus::palette(self, &ctx);
         for url in std::mem::take(&mut self.ui.pending_urls) {
+            if let Some(open_app) = self.services.open_app.as_mut()
+                && let Some(name) = about::sibling_app(&url)
+            {
+                open_app(name);
+                continue;
+            }
             ctx.open_url(egui::OpenUrl::new_tab(url));
         }
         self.perf.frame_ms = now_ms() - t0;

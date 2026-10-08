@@ -254,8 +254,17 @@ impl Tokens {
 }
 
 /// Install the UI fonts for the interface language `lang` (it orders the CJK fallbacks).
+/// Hosted ([`crate::hosted`]), the host installs the fonts of [`ui_font_definitions`] itself.
 pub fn install_fonts(ctx: &egui::Context, lang: &str) {
-    ctx.set_fonts(font_definitions(designcraft_fonts::CRAFT_FONTS, lang));
+    if crate::hosted::is_hosted() {
+        return;
+    }
+    ctx.set_fonts(ui_font_definitions(lang));
+}
+
+/// The UI fonts [`install_fonts`] installs for the interface language `lang`.
+pub fn ui_font_definitions(lang: &str) -> FontDefinitions {
+    font_definitions(designcraft_fonts::CRAFT_FONTS, lang)
 }
 
 /// The UI fonts: the app's own, then the craft-fonts faces from `craft` (empty without

@@ -9,9 +9,16 @@ default-run = "designcraft"
 [lints]
 workspace = true
 
+# The app as a library (`designcraft_embed::Embedded`): DesignCraft as a tab inside a host app.
+[lib]
+name = "designcraft_embed"
+path = "src/lib.rs"
+
 [dependencies]
 designcraft-engine = { workspace = true }
 designcraft-ui-egui = { workspace = true }
+designcraft-textimport = { workspace = true }
+designcraft-render = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }
 egui = { workspace = true }
 serde_json = { workspace = true }

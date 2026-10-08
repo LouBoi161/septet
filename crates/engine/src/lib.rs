@@ -16,6 +16,7 @@ pub mod recovery;
 pub mod sample;
 pub mod script;
 mod tooling;
+pub mod user_dirs;
 
 use std::sync::Arc;
 

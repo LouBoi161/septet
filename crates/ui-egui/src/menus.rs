@@ -129,12 +129,12 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("window.split", "Split Window", None, "{on?: bool} — two views of the document side by side, each with its own zoom and scroll"),
     ("window.newWindow", "New Window", None, "{on?: bool} — another view of the active document in its own window"),
     ("window.taskBar", "Contextual Task Bar", None, "{}"),
-    ("help.discord", "Join the ArtCraft Discord…", None, "{} — opens https://discord.gg/artcraft in the browser"),
+    ("help.discord", "Join the Discord Community…", None, "{} — opens https://discord.gg/artcraft in the browser"),
     ("help.appPage", "DesignCraft Website…", None, "{} — opens https://getartcraft.com/apps/designcraft"),
     ("help.github", "DesignCraft on GitHub…", None, "{} — opens https://github.com/storytold/designcraft"),
     ("help.issues", "Report an Issue…", None, "{} — opens the GitHub issue tracker"),
-    ("help.website", "ArtCraft Website…", None, "{} — opens https://getartcraft.com"),
-    ("help.app", "ArtCraft App Page…", None, "{app} — opens https://getartcraft.com/apps/{app} (e.g. photocraft)"),
+    ("help.website", "Upstream Website…", None, "{} — opens https://getartcraft.com"),
+    ("help.app", "App Page…", None, "{app} — opens https://getartcraft.com/apps/{app} (e.g. photocraft)"),
     (
         "help.about",
         "About DesignCraft",
@@ -1651,7 +1651,31 @@ fn parse_entries(entries: &[&str]) -> Vec<Item> {
 
 /// The whole menu tree (InDesign order).
 pub fn menu_tree() -> Vec<(&'static str, Vec<Item>)> {
-    MENUS.iter().map(|(m, e)| (*m, parse_entries(e))).collect()
+    MENUS
+        .iter()
+        .map(|(m, e)| {
+            let items = parse_entries(e);
+            (*m, if crate::hosted::show_community() { items } else { without_community(items) })
+        })
+        .collect()
+}
+
+/// The items without the community commands ([`crate::hosted::is_community_command`]), and
+/// without the separators that leaves at an end or doubled.
+fn without_community(items: Vec<Item>) -> Vec<Item> {
+    let mut out: Vec<Item> = Vec::new();
+    for it in items {
+        match it {
+            Item::Cmd { ref id, .. } if crate::hosted::is_community_command(id) => {}
+            Item::Sep if out.last().is_none_or(|last| matches!(last, Item::Sep)) => {}
+            Item::Sub(name, children) => out.push(Item::Sub(name, without_community(children))),
+            it => out.push(it),
+        }
+    }
+    if matches!(out.last(), Some(Item::Sep)) {
+        out.pop();
+    }
+    out
 }
 
 /// Check state of a toggle command (None = not a toggle).
@@ -1997,6 +2021,7 @@ pub fn quick_apply_items(session: &designcraft_engine::Session, query: &str) -> 
         .filter(|c| !c.menu.is_empty() || c.shortcut.is_some())
         .map(|c| (c.id, c.label, c.shortcut))
         .chain(UI_COMMANDS.iter().map(|c| (c.0, c.1, c.2)))
+        .filter(|(id, _, _)| crate::hosted::show_community() || !crate::hosted::is_community_command(id))
         .filter(|(id, l, _)| hit(l, id))
         .map(|(id, l, sc)| QuickItem { label: l.to_string(), id: id.to_string(), params: json!({}), shortcut: sc.map(str::to_string), kind: "" });
     out.extend(commands);

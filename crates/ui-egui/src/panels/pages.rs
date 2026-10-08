@@ -51,6 +51,21 @@ enum PageDrag {
     Parent(Option<String>),
 }
 
+/// The document page (absolute index) being dragged from the Pages panel, if any.
+pub fn dragged_page(ctx: &egui::Context) -> Option<usize> {
+    match egui::DragAndDrop::payload::<PageDrag>(ctx).as_deref() {
+        Some(PageDrag::Page(abs)) => Some(*abs),
+        _ => None,
+    }
+}
+
+/// Drop a Pages panel drag (it ended outside the app).
+pub fn forget_drag(ctx: &egui::Context) {
+    if egui::DragAndDrop::has_payload_of_type::<PageDrag>(ctx) {
+        egui::DragAndDrop::clear_payload(ctx);
+    }
+}
+
 /// Selected-page tint (multiplied over the thumbnail).
 const SELECTED_TINT: Color32 = Color32::from_rgb(0x88, 0xc7, 0xfb);
 /// Page-number badge of the selected page.

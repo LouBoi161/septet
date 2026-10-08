@@ -858,6 +858,8 @@ name = "designcraft"
 version = "0.4.0"
 dependencies = [
  "designcraft-engine",
+ "designcraft-render",
+ "designcraft-textimport",
  "designcraft-ui-egui",
  "eframe",
  "egui",
