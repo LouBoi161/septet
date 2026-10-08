@@ -16,6 +16,9 @@ env:
   CARGO_INCREMENTAL: "0"
   # The apps' build scripts must not put their own icons into septet.exe.
   HOSTED_BUILD: "1"
+  # Chinese, Japanese and Arabic fonts (checked out below); a bad checkout fails the build.
+  CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+  CRAFT_FONTS_REQUIRED: "1"
   CARGO_PROFILE_RELEASE_DEBUG: "0"
   CARGO_PROFILE_RELEASE_STRIP: "symbols"
 
@@ -44,6 +47,12 @@ jobs:
             arch: x86_64
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: storytold/craft-fonts
+          ref: 8dcdacd5153e64560d109541a47d806f26f048c0 # bump deliberately
+          path: craft-fonts
 
       - name: Version
         shell: bash

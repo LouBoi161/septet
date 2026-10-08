@@ -33,6 +33,9 @@ documentation for comparison belong to their owners.
 The libraries Septet and the apps are built with, and their licenses, are listed in
 `THIRD-PARTY-LICENSES.md`, which ships with every download. Fonts (Inter, JetBrains Mono, Source Sans 3,
 Source Serif 4, Noto Serif, Dancing Script) are under the SIL Open Font License 1.1, as listed in each
-app's `ATTRIBUTION.md` / `ASSETS.md`. The audio decoders from the Symphonia project are under the
-Mozilla Public License 2.0; their source is available at <https://github.com/pdeljanov/Symphonia>
-and on crates.io.
+app's `ATTRIBUTION.md` / `ASSETS.md`. The release builds also embed Shippori Mincho, BIZ UDPGothic,
+BIZ UDMincho, Noto Sans CJK SC and Noto Sans Arabic from
+[craft-fonts](https://github.com/storytold/craft-fonts), unmodified and under the SIL Open Font
+License 1.1; their license texts are at the end of `THIRD-PARTY-LICENSES.md`. The audio decoders
+from the Symphonia project are under the Mozilla Public License 2.0; their source is available at
+<https://github.com/pdeljanov/Symphonia> and on crates.io.

@@ -70,6 +70,10 @@ septet/packaging/linux/install.sh    # Linux: menu entry and icon
 On Linux you need the ALSA and Wayland/X11 development packages (Debian/Ubuntu: `libasound2-dev
 libwayland-dev libxkbcommon-dev pkg-config`).
 
+For Chinese, Japanese and Arabic text, clone [craft-fonts](https://github.com/storytold/craft-fonts)
+and build with `CRAFT_FONTS_DIR=<absolute path to the checkout>` (the release builds do this);
+without it those scripts show as empty boxes.
+
 ```
 septet/        the shell: tabs, windows, Home, clipboard and drag-and-drop bridges
 photocraft/ …  the seven apps (each with an `embed` API: apps/<app>/src/embed.rs)

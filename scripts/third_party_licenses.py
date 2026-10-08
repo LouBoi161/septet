@@ -100,7 +100,30 @@ def main() -> None:
         out.write("\n## MIT License (standard text)\n\n```text\n" + MIT + "\n```\n\n")
         if os.path.isfile(apache):
             with open(apache, encoding="utf-8") as f:
-                out.write("## Apache License 2.0 (standard text)\n\n```text\n" + f.read().strip() + "\n```\n")
+                out.write("## Apache License 2.0 (standard text)\n\n```text\n" + f.read().strip() + "\n```\n\n")
+    fonts = os.environ.get("CRAFT_FONTS_DIR")
+    if fonts:
+        write_fonts(out, fonts)
+
+
+def write_fonts(out, root: str) -> None:
+    """The craft-fonts faces the apps embed (CRAFT_FONTS_DIR), with each one's license text."""
+    with open(os.path.join(root, "fonts", "manifest.txt"), encoding="utf-8") as f:
+        lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+    out.write("# Bundled fonts\n\n")
+    out.write("The apps embed these fonts from [craft-fonts](https://github.com/storytold/craft-fonts), unmodified.\n\n")
+    out.write("| Font | Style | License | Source |\n|---|---|---|---|\n")
+    licenses = {}  # license file -> families
+    for line in lines:
+        family, style, _, _, license_, license_file, _, source = (field.strip() for field in line.split(" | "))
+        out.write(f"| {family} | {style} | {license_} | {source} |\n")
+        licenses.setdefault(license_file, [])
+        if family not in licenses[license_file]:
+            licenses[license_file].append(family)
+    out.write("\n")
+    for license_file, families in licenses.items():
+        with open(os.path.join(root, license_file), encoding="utf-8") as f:
+            out.write(f"## {', '.join(families)}\n\n```text\n{f.read().strip()}\n```\n\n")
 
 
 def license_files(package: dict) -> list:
