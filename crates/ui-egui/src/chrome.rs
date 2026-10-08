@@ -15,10 +15,13 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
         .show(ui, |ui| {
             let full = ui.max_rect();
             let drag = ui.interact(full, ui.id().with("titledrag"), Sense::click_and_drag());
-            if drag.drag_started() {
+            // In a host window the strip is a tab's toolbar, not the title bar: the host's own
+            // chrome moves and maximizes the window.
+            let hosted = crate::hosted::is_hosted();
+            if drag.drag_started() && !hosted {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
             }
-            if drag.double_clicked() {
+            if drag.double_clicked() && !hosted {
                 let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
             }
@@ -54,8 +57,10 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                     if icons::button(ui, "circle-help", 28.0, false, tl!("Keyboard shortcuts")).clicked() {
                         app.dialog = Some(Dialog::Shortcuts);
                     }
-                    // One click to the community, from anywhere in the app.
-                    if widgets::ghost_button(ui, "messages-square", "Discord").on_hover_text(pdfcraft_engine::links::DISCORD).clicked() {
+                    // One click to the community, from anywhere in the app (not in a host build).
+                    if crate::hosted::shows_community_links()
+                        && widgets::ghost_button(ui, "messages-square", "Discord").on_hover_text(pdfcraft_engine::links::DISCORD).clicked()
+                    {
                         app.execute("help.discord");
                     }
                 });

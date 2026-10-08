@@ -31,7 +31,9 @@ pub fn image(name: &str, size: f32, tint: Color32) -> egui::Image<'static> {
         Some(b) => (name, b.clone()),
         None => ("square", white_icons()["square"].clone()),
     };
-    egui::Image::from_bytes(format!("bytes://icons/{key}.svg"), egui::load::Bytes::Shared(bytes)).fit_to_exact_size(Vec2::splat(size)).tint(tint)
+    egui::Image::from_bytes(format!("bytes://pdfcraft/icons/{key}.svg"), egui::load::Bytes::Shared(bytes))
+        .fit_to_exact_size(Vec2::splat(size))
+        .tint(tint)
 }
 
 pub fn paint(ui: &egui::Ui, rect: Rect, name: &str, size: f32, tint: Color32) {

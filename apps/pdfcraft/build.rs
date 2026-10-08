@@ -3,13 +3,15 @@
 //!
 //! On every other target this does nothing. A missing resource compiler is a warning, so a
 //! cross-compile from macOS or Linux still links, unless `PDFCRAFT_REQUIRE_WINRES=1` turns it
-//! into an error (for release builds).
+//! into an error (for release builds). With `HOSTED_BUILD` set, the package is a library of a
+//! host app (Septet) whose executable carries its own icon and version info: nothing is embedded.
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../../assets/app-icon/pdfcraft.ico");
     println!("cargo:rerun-if-env-changed=PDFCRAFT_REQUIRE_WINRES");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+    println!("cargo:rerun-if-env-changed=HOSTED_BUILD");
+    if std::env::var_os("HOSTED_BUILD").is_some() || std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
     let mut res = winresource::WindowsResource::new();

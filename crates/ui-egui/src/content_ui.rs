@@ -495,14 +495,43 @@ impl crate::PdfCraftApp {
 
     /// Place image `bytes` in the middle of the current page and select it.
     pub fn add_image(&mut self, name: String, bytes: Vec<u8>) {
+        self.add_image_at(name, bytes, None);
+    }
+
+    /// Place image `bytes` centred on screen position `at` (where a file was dropped) when that
+    /// is over a page in the document area, at the size [`Self::add_image`] gives it and kept
+    /// on the page; otherwise as `add_image` does. The new image is selected.
+    pub fn add_image_at(&mut self, name: String, bytes: Vec<u8>, at: Option<Pos2>) {
         let Some((i, id)) = self.active_ids() else { return };
-        let page = self.views[i].current;
+        let placed = at.and_then(|p| self.image_rect_at(i, id, &name, &bytes, p));
+        let page = placed.map_or(self.views[i].current, |(page, _)| page);
+        let rect = placed.map(|(_, rect)| rect);
         let before = self.session.get(id).map_or(0, |d| d.added.iter().filter(|a| a.page == page).count());
-        if self.apply_edit(Edit::AddImage { page, rect: None, name, bytes: std::sync::Arc::new(bytes) }) {
+        if self.apply_edit(Edit::AddImage { page, rect, name, bytes: std::sync::Arc::new(bytes) }) {
             self.views[i].content.select_added = Some((page, before));
             self.left = crate::LeftPanel::Tool("edit");
             self.left_open = true;
         }
+    }
+
+    /// The page under screen position `at` in tab `index` and the display-space box an image
+    /// gets there: the engine's default size (its natural size, at most 80 % of the page)
+    /// centred on `at`, moved inside the page where it would stick out.
+    fn image_rect_at(&self, index: usize, id: pdfcraft_engine::DocId, name: &str, bytes: &[u8], at: Pos2) -> Option<(usize, [f64; 4])> {
+        let (page, xf) = self.views.get(index)?.page_at(at)?;
+        let info = &self.session.get(id)?.info;
+        let size = info.pages.get(page)?;
+        let (pw, ph) = (f64::from(size.width), f64::from(size.height));
+        let (nw, nh) = pdfcraft_engine::image_natural_size(name, bytes).ok()?;
+        if ![pw, ph, nw, nh].iter().all(|v| v.is_finite() && *v > 0.0) {
+            return None;
+        }
+        let k = ((pw * 0.8) / nw).min((ph * 0.8) / nh).min(1.0);
+        let (w, h) = (nw * k, nh * k);
+        let [x, y] = to_display(&xf, info, page, at);
+        let x0 = (x - w / 2.0).clamp(0.0, (pw - w).max(0.0));
+        let y0 = (y - h / 2.0).clamp(0.0, (ph - h).max(0.0));
+        Some((page, [x0, y0, x0 + w, y0 + h]))
     }
 }
 

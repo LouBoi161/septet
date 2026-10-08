@@ -135,12 +135,29 @@ impl PdfCraftApp {
         let (w, h) = (out.width, out.height);
         #[cfg(not(target_arch = "wasm32"))]
         if self.system_clipboard {
-            let img = arboard::ImageData { width: w as usize, height: h as usize, bytes: std::borrow::Cow::Borrowed(&out.rgba) };
+            // The renderer's pixels are premultiplied; the clipboard takes straight alpha.
+            let img = arboard::ImageData { width: w as usize, height: h as usize, bytes: std::borrow::Cow::Owned(unpremultiply(&out.rgba)) };
             arboard::Clipboard::new().and_then(|mut c| c.set_image(img)).map_err(|e| e.to_string())?;
         }
         self.last_snapshot = Some((w, h, out.rgba));
         Ok((w, h))
     }
+}
+
+/// Premultiplied RGBA8 → straight alpha (fully transparent pixels stay all zero).
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+fn unpremultiply(rgba: &[u8]) -> Vec<u8> {
+    let mut out = rgba.to_vec();
+    for p in out.as_chunks_mut::<4>().0 {
+        let a = u16::from(p[3]);
+        if a != 0 && a != 255 {
+            for c in &mut p[..3] {
+                // Rounded; a premultiplied channel never exceeds alpha, but clamp a malformed one.
+                *c = ((u16::from(*c) * 255 + a / 2) / a).min(255) as u8;
+            }
+        }
+    }
+    out
 }
 
 /// The normalised bounds [u0, v0, u1, v1] of the pixels that aren't (near) white, if any.
@@ -174,5 +191,13 @@ mod tests {
         }
         assert_eq!(super::ink_bounds(w, h, &px), Some([0.2, 0.25, 0.8, 0.8]));
         assert_eq!(super::ink_bounds(w, h, &vec![255u8; w * h * 4]), None);
+    }
+
+    #[test]
+    fn unpremultiply_restores_straight_alpha() {
+        let px = [255, 128, 0, 255, 64, 32, 0, 128, 0, 0, 0, 0, 200, 0, 0, 100];
+        // Opaque and transparent pixels are unchanged; half-covered ones get their colour back
+        // (a malformed channel above alpha clamps to 255).
+        assert_eq!(super::unpremultiply(&px), vec![255, 128, 0, 255, 128, 64, 0, 128, 0, 0, 0, 0, 255, 0, 0, 100]);
     }
 }

@@ -270,6 +270,11 @@ pub struct DocView {
     pub sign: crate::sign_ui::SignView,
     /// Organize: the pages being dragged to a new place.
     pub org_drag: Option<Vec<usize>>,
+    /// In a host window only: pages being dragged from the Pages panel, out to another app.
+    pub panel_drag: Option<Vec<usize>>,
+    /// In a host window only: pages whose drag (Organize grid or Pages panel) was let go outside
+    /// PdfCraft's pages, for the app it went to. Kept until the next press.
+    pub dropped_outside: Option<Vec<usize>>,
     /// Marquee Zoom / Snapshot: the rectangle being dragged (page, start), and a finished one.
     pub marquee: Option<(usize, Pos2)>,
     pub marquee_done: Option<crate::zoom_snap::Marquee>,
@@ -378,6 +383,8 @@ impl DocView {
             crop_drag: None,
             sign: Default::default(),
             org_drag: None,
+            panel_drag: None,
+            dropped_outside: None,
             marquee: None,
             marquee_done: None,
             fill_text: None,
@@ -502,6 +509,16 @@ impl DocView {
     /// Where `page` is drawn this frame, with its coordinate mapping.
     pub(crate) fn page_xform(&self, page: usize) -> Option<PageXform> {
         self.screen_xforms.iter().find(|(p, _)| *p == page).map(|(_, xf)| *xf)
+    }
+
+    /// The page drawn under screen position `pos` last frame, with its coordinate mapping.
+    /// `None` outside the document area and in the organize grid, whose thumbnails don't map
+    /// to page coordinates.
+    pub(crate) fn page_at(&self, pos: Pos2) -> Option<(usize, PageXform)> {
+        if self.organize || !self.viewport_screen.contains(pos) {
+            return None;
+        }
+        self.screen_xforms.iter().find(|(_, xf)| xf.rect.contains(pos)).copied()
     }
 
     /// The text selection as markup quadrilaterals in user space: (page, quads).
@@ -1149,6 +1166,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if view.organize {
         organize_grid(view, info, &doc.renderer, doc.allows_assembly(), unobstructed, ui, &t);
         return;
+    }
+    // In a host window, a page drag lives only in the grid: the host asks about it every frame.
+    if crate::hosted::is_hosted() {
+        view.org_drag = None;
     }
 
     let avail = ui.available_rect_before_wrap();
@@ -2565,6 +2586,10 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, pool: &RenderPool, editable
     let middle_gesture = view.auto_scroll.blocks_input();
     let mut cells: Vec<(usize, Rect)> = Vec::with_capacity(info.pages.len());
     let mut drop = false;
+    // In a host window pages can also be dragged out to another app, even from a document whose
+    // pages can't be moved; a drag let go outside the grid went there (or nowhere) and moves nothing.
+    let hosted = crate::hosted::is_hosted();
+    let mut dragging = false;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         if middle_gesture {
             let opacity = ui.opacity();
@@ -2584,7 +2609,7 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, pool: &RenderPool, editable
                 let i = row * cols + col;
                 let Some(p) = info.pages.get(i) else { break };
                 let c = Rect::from_min_size(pos2(row_rect.left() + left + col as f32 * cell.x, row_rect.top()), cell);
-                let resp = ui.interact(c, ui.id().with(("org", i)), if editable { Sense::click_and_drag() } else { Sense::click() });
+                let resp = ui.interact(c, ui.id().with(("org", i)), if editable || hosted { Sense::click_and_drag() } else { Sense::click() });
                 cells.push((i, c));
                 // Drag pages to move them (the selection, or the page grabbed).
                 if resp.drag_started() {
@@ -2599,6 +2624,7 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, pool: &RenderPool, editable
                 if resp.drag_stopped() {
                     drop = true;
                 }
+                dragging |= resp.dragged();
                 let info = crate::i18n::fmt(tl!("Page {label}"), &[("label", &p.label)]);
                 resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, view.selected.contains(&i), info.clone()));
                 let s = (cell.x - 44.0) / p.width.max(1.0);
@@ -2647,9 +2673,16 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, pool: &RenderPool, editable
                 });
             }
         }
+        // Pages left over from a drag that ended while the grid wasn't drawn (the host showed
+        // another app) are no drag any more.
+        if hosted && !dragging && !drop {
+            view.org_drag = None;
+        }
+        let pointer = ui.input(|i| i.pointer.hover_pos());
+        let outside = hosted && !pointer.is_some_and(|p| viewport.contains(p));
         // While dragging: the gap the pages would go to, drawn as a bar.
-        if let (Some(pages), Some(p)) = (view.org_drag.clone(), ui.input(|i| i.pointer.hover_pos())) {
-            if let Some(gap) = drop_gap(&cells, p) {
+        if let (Some(pages), Some(p)) = (view.org_drag.clone(), pointer) {
+            if let Some(gap) = drop_gap(&cells, p).filter(|_| !outside) {
                 let x = match cells.iter().find(|(i, _)| *i == gap) {
                     Some((_, r)) => r.left() + 3.0,
                     None => cells.last().map_or(0.0, |(_, r)| r.right() - 3.0),
@@ -2664,7 +2697,12 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, pool: &RenderPool, editable
                     t.accent_text,
                 );
             }
-            if drop {
+            if drop && (outside || !editable) {
+                view.org_drag = None;
+                if outside {
+                    view.dropped_outside = Some(pages);
+                }
+            } else if drop {
                 view.org_drag = None;
                 if let Some(gap) = drop_gap(&cells, p) {
                     // `to` counts positions without the moving pages.
@@ -2678,7 +2716,10 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, pool: &RenderPool, editable
                 }
             }
         } else if drop {
-            view.org_drag = None;
+            let pages = view.org_drag.take();
+            if hosted {
+                view.dropped_outside = pages;
+            }
         }
     });
     view.auto_scroll.paint(ui, viewport);

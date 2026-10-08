@@ -102,6 +102,16 @@ pub fn merge_data_files(files: &[(String, Vec<u8>)]) -> Result<String, String> {
     Ok(pdfcraft_xfdf::merge_csv(&rows))
 }
 
+/// The size in points (width, height) an image file has at its own resolution (72 dpi when it
+/// records none): what [`Edit::AddImage`] places without a `rect`, before shrinking it to fit.
+pub fn image_natural_size(name: &str, bytes: &[u8]) -> Result<(f64, f64), String> {
+    // The image is untrusted: a decoder panic becomes an error.
+    guard(|| {
+        let mut scratch = pdfcraft_cos::Document::new_empty();
+        pdfcraft_create::image_xobject(&mut scratch, name, bytes).map(|(_, size)| size).map_err(|e| e.to_string())
+    })?
+}
+
 pub type SplitPart = (usize, usize, Arc<Vec<u8>>);
 
 use std::sync::Arc;

@@ -128,13 +128,21 @@ impl Tokens {
 }
 
 pub fn install_fonts(ctx: &egui::Context) {
+    // A host window installs one set of fonts for all its apps, ours among them.
+    if crate::hosted::is_hosted() {
+        return;
+    }
     ctx.set_fonts(font_definitions());
 }
 
 /// Install the interface fonts with the CJK fallback order for the UI language (Chinese
 /// first for Simplified Chinese, Japanese first otherwise). Call it when the language
-/// changes; the new faces take effect next frame.
+/// changes; the new faces take effect next frame. Does nothing in a host window, which owns
+/// the fonts (see [`crate::hosted`]).
 pub fn install_fonts_for(ctx: &egui::Context, prefer_hans: bool) {
+    if crate::hosted::is_hosted() {
+        return;
+    }
     ctx.set_fonts(installed_font_definitions(prefer_hans));
 }
 

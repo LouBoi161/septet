@@ -545,6 +545,9 @@ impl PdfCraftApp {
 pub(crate) fn registry_menu(app: &mut PdfCraftApp, ui: &mut egui::Ui, menu: &str) {
     let mac = cfg!(target_os = "macos") || cfg!(target_arch = "wasm32");
     for spec in commands::menu(menu) {
+        if !crate::hosted::shows_community_links() && crate::hosted::is_community_command(spec.id) {
+            continue;
+        }
         let label = commands::current_label(spec, &app.session, app.active_ids().map(|(_, id)| id));
         let label = crate::i18n::menu_label(spec.id, &label);
         let shortcut = spec.shortcut.map(|s| s.label(mac)).unwrap_or_default();

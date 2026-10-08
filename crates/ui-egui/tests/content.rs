@@ -154,3 +154,45 @@ fn typing_moving_styling_and_deleting_added_content() {
     let pdfcraft_engine::AddedContent::Image(img) = &added(&h)[0].content else { panic!() };
     assert!(img.flip_h);
 }
+
+#[test]
+fn placed_files_land_where_they_are_dropped() {
+    let mut h = harness();
+    let dir = std::env::temp_dir().join(format!("pdfcraft-place-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = |name: &str, bytes: &[u8]| {
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path.to_string_lossy().into_owned()
+    };
+    let mut png = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut png, 30, 20);
+        enc.set_color(png::ColorType::Rgb);
+        enc.write_header().unwrap().write_image_data(&[90u8; 1800]).unwrap();
+    }
+    let image = file("logo.png", &png);
+    let pdf = file("more.pdf", include_bytes!("data/form.pdf"));
+    let text = file("notes.txt", b"Placed text opens as its own PDF.");
+    // An image is centred where it is dropped (display space: y up on the 300 x 400 page).
+    let p = at(&h, 60.0, 100.0);
+    h.state_mut().place_paths(std::slice::from_ref(&image), Some(p));
+    h.run_steps(3);
+    assert_eq!(added(&h)[0].content.rect(), [45.0, 290.0, 75.0, 310.0]);
+    assert_eq!(h.state().views[0].content.selected, Some((0, 0)));
+    // Dropped at the corner, it stays on the page; without a position, it goes in the middle.
+    let p = at(&h, 2.0, 2.0);
+    h.state_mut().place_paths(std::slice::from_ref(&image), Some(p));
+    h.state_mut().place_paths(std::slice::from_ref(&image), None);
+    h.run_steps(3);
+    let rects: Vec<[f64; 4]> = added(&h).iter().map(|a| a.content.rect()).collect();
+    assert_eq!(rects[1..], [[0.0, 380.0, 30.0, 400.0], [135.0, 190.0, 165.0, 210.0]]);
+    // PDFs insert their pages after the page; other files open in their own tabs.
+    let p = at(&h, 150.0, 200.0);
+    h.state_mut().place_paths(&[pdf.clone(), text, pdf], Some(p));
+    h.run_steps(3);
+    let s = h.state();
+    assert_eq!(s.session.get(s.views[0].id).unwrap().info.pages.len(), 3);
+    assert_eq!(s.views.len(), 2, "the text file opened as a new document");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

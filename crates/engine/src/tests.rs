@@ -963,6 +963,8 @@ fn added_text_and_images_render_and_stay_editable() {
         let mut w = enc.write_header().unwrap();
         w.write_image_data(&[0u8; 600]).unwrap();
     }
+    assert_eq!(crate::image_natural_size("dot.png", &png), Ok((20.0, 10.0)));
+    assert!(crate::image_natural_size("junk.png", b"not an image").is_err());
     s.apply(id, Edit::AddImage { page: 0, rect: None, name: "dot.png".into(), bytes: Arc::new(png) }).unwrap();
     let d = s.get(id).unwrap();
     assert_eq!(d.added.len(), 2);
@@ -1936,4 +1938,41 @@ fn runaway_xfa_calculations_at_open_end_quickly_with_a_report() {
     s.apply(id, Edit::SetFieldValue { name: "qty".into(), value: FieldValue::Text("3".into()) }).unwrap();
     assert!(started.elapsed() < std::time::Duration::from_secs(2));
     assert!(s.take_js_output(id).errors.is_empty());
+}
+
+#[test]
+fn added_png_keeps_its_transparency() {
+    // A 20×20 RGBA image: an opaque red square in the middle, its border transparent but with
+    // green colour values (which must not show).
+    let mut px = Vec::new();
+    for y in 0..20 {
+        for x in 0..20 {
+            let inside = (5..15).contains(&x) && (5..15).contains(&y);
+            px.extend_from_slice(if inside { &[255, 0, 0, 255] } else { &[0, 255, 0, 0] });
+        }
+    }
+    let mut png = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut png, 20, 20);
+        enc.set_color(png::ColorType::Rgba);
+        enc.write_header().unwrap().write_image_data(&px).unwrap();
+    }
+    let (mut s, id) = session_with(1);
+    s.apply(id, Edit::AddImage { page: 0, rect: Some([50.0, 100.0, 150.0, 200.0]), name: "sq.png".into(), bytes: Arc::new(png) }).unwrap();
+    let doc = s.get(id).unwrap();
+    let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), Default::default());
+    let out = r.render(pdfcraft_render::RenderRequest { page: 0, scale: 1.0, ..Default::default() });
+    let at = |x: u32, y: u32| {
+        let i = ((y * out.width + x) * 4) as usize;
+        [out.rgba[i], out.rgba[i + 1], out.rgba[i + 2], out.rgba[i + 3]]
+    };
+    for (x, y) in [(52, 102), (60, 110), (147, 197), (100, 103), (53, 150)] {
+        assert_eq!(at(x, y), [255, 255, 255, 255], "transparent at ({x}, {y})");
+    }
+    assert_eq!(at(100, 150), [255, 0, 0, 255], "opaque in the middle");
+    // No green anywhere, at any zoom, including the edges between the two.
+    for scale in [0.3, 0.5, 2.0, 6.0] {
+        let out = r.render(pdfcraft_render::RenderRequest { page: 0, scale, ..Default::default() });
+        assert!(out.rgba.as_chunks::<4>().0.iter().all(|p| p[1] <= p[2]), "green shows at scale {scale}");
+    }
 }

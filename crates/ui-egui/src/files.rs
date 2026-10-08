@@ -284,6 +284,51 @@ impl PdfCraftApp {
         self.apply_edit(Edit::InsertPagesFrom { name: name.to_string(), bytes: Arc::new(bytes), pages: None, at });
     }
 
+    /// Place files into the active document, as a host window's "place" drop asks: a PDF's
+    /// pages go in after the page under screen position `at` (else after the organize selection
+    /// or the current page), several PDFs one after the other; an image lands on the page under
+    /// `at`, centred there (else in the middle of the current page). Other files, and every
+    /// file when no document is open, open in their own tabs as Open does.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn place_paths(&mut self, paths: &[String], at: Option<egui::Pos2>) {
+        let mut open = Vec::new();
+        // Where the next PDF's pages go.
+        let mut insert_at: Option<usize> = None;
+        for path in paths {
+            let Some((i, id)) = self.active_ids() else {
+                open.push(path.clone());
+                continue;
+            };
+            let name = std::path::Path::new(path).file_name().map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
+            let bytes = match std::fs::read(path) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    self.notify_fmt("Couldn't read {name}: {e}", &[("name", &name), ("e", &e.to_string())]);
+                    continue;
+                }
+            };
+            if bytes.get(..bytes.len().min(1024)).is_some_and(|head| head.windows(5).any(|w| w == b"%PDF-")) {
+                let view = &self.views[i];
+                let index = *insert_at.get_or_insert_with(|| match at.and_then(|p| view.page_at(p)) {
+                    Some((page, _)) => page + 1,
+                    None => view.target_pages().last().map_or(0, |p| p + 1),
+                });
+                let pages = |app: &Self| app.session.get(id).map_or(0, |d| d.info.pages.len());
+                let before = pages(self);
+                if self.apply_edit(Edit::InsertPagesFrom { name, bytes: Arc::new(bytes), pages: None, at: index }) {
+                    insert_at = Some(index + pages(self).saturating_sub(before));
+                }
+            } else if crate::create_ui::is_image(&bytes) {
+                self.add_image_at(name, bytes, at);
+            } else {
+                open.push(path.clone());
+            }
+        }
+        for path in open {
+            self.open_path(&path);
+        }
+    }
+
     /// Copy the selected pages (or the current page) into a new unsaved document tab.
     pub fn extract_selection(&mut self) {
         // What's typed in a form field is part of the document (#166).

@@ -157,9 +157,10 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, xf: &PageXform, p
     }
 }
 
-/// Where new digital IDs are saved: next to the recovery folder (`…/PdfCraft/Digital IDs`).
+/// Where new digital IDs are saved: next to the recovery folder (`…/PdfCraft/Digital IDs`), or
+/// in the host's data root.
 fn id_dir() -> Option<PathBuf> {
-    crate::recovery::RecoveryStore::default_dir().and_then(|d| d.parent().map(|p| p.join("Digital IDs")))
+    crate::hosted::user_dir("Digital IDs", || crate::recovery::RecoveryStore::default_dir().and_then(|d| d.parent().map(|p| p.join("Digital IDs"))))
 }
 
 /// A Keychain identity by its `keychain:` reference.

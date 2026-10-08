@@ -19,6 +19,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+use pdfcraft_embed::settings::{migrate_legacy_folders, settings_dir};
 use pdfcraft_ui_egui::PdfCraftApp;
 
 #[cfg(target_os = "macos")]
@@ -35,40 +36,6 @@ const APP_ID: &str = "ai.storyteller.pdfcraft";
 const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/pdfcraft-1024.png");
 #[cfg(not(target_os = "macos"))]
 const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/ai.storyteller.pdfcraft.png");
-
-/// The app was called PrintCraft before; settings saved then are under this key.
-const LEGACY_STORAGE_KEY: &str = "printcraft";
-
-/// The settings folder: `app.ron` and the `logs` folder (docs/development.md). eframe would
-/// otherwise derive it from the app id; keep it under "PdfCraft".
-fn settings_dir() -> Option<std::path::PathBuf> {
-    eframe::storage_dir("PdfCraft")
-}
-
-/// Move the settings and crash-recovery folders of the app's former name, PrintCraft, to the new
-/// name once, so an upgrade keeps recent files, preferences and unsaved work. Best effort: a
-/// folder is left alone when the new one already exists or the move fails.
-fn migrate_legacy_folders() {
-    let mut moves = vec![(eframe::storage_dir("PrintCraft"), settings_dir())];
-    // Recovery lives in the settings folder except on Windows, where it is under %LOCALAPPDATA%.
-    if cfg!(windows) {
-        let local = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
-        moves.push((local.as_ref().map(|d| d.join("PrintCraft")), local.map(|d| d.join("PdfCraft"))));
-    }
-    for (old, new) in moves {
-        let (Some(old), Some(new)) = (old, new) else { continue };
-        if !old.is_dir() || new.exists() {
-            continue;
-        }
-        if let Some(parent) = new.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        match std::fs::rename(&old, &new) {
-            Ok(()) => log::info!("moved {} to {}", old.display(), new.display()),
-            Err(e) => log::warn!("moving {} to {}: {e}", old.display(), new.display()),
-        }
-    }
-}
 
 fn main() -> eframe::Result {
     // First, so the panic hook and every start-up warning are recorded (`logging`).
@@ -151,9 +118,7 @@ fn main() -> eframe::Result {
         native,
         Box::new(move |cc| {
             let mut app = PdfCraftApp::new();
-            if let Some(json) = cc.storage.and_then(|s| s.get_string("pdfcraft").or_else(|| s.get_string(LEGACY_STORAGE_KEY))) {
-                app.restore(&json);
-            }
+            pdfcraft_embed::settings::restore(&mut app, cc.storage);
             app.integrated_titlebar = integrated;
             app.update_source = Some(std::sync::Arc::new(updates::latest_release));
             app.os_key_store_ids = cfg!(any(target_os = "macos", target_os = "windows"));

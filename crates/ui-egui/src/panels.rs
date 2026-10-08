@@ -798,10 +798,26 @@ fn pages(ui: &mut egui::Ui, t: &Tokens, info: &DocInfo, view: &mut crate::DocVie
         view.clear_page_selection(Some(view.current));
     }
     let w = (ui.available_width() - 40.0).min(150.0);
+    // In a host window, thumbnails drag out to another app (the selection, or the page grabbed).
+    let hosted = crate::hosted::is_hosted();
+    let area = ui.clip_rect();
+    let (mut dragging, mut stopped) = (false, false);
     for (i, p) in info.pages.iter().enumerate() {
         ui.vertical_centered(|ui| {
             let h = w * p.height / p.width.max(1.0);
-            let (rect, resp) = ui.allocate_exact_size(vec2(w + 16.0, h + 16.0), Sense::click());
+            let (rect, resp) = ui.allocate_exact_size(vec2(w + 16.0, h + 16.0), if hosted { Sense::click_and_drag() } else { Sense::click() });
+            if resp.drag_started() {
+                view.panel_drag = Some(if view.selected.contains(&i) { view.selected.iter().copied().collect() } else { vec![i] });
+            }
+            dragging |= resp.dragged();
+            if resp.drag_stopped() {
+                stopped = true;
+                let pages = view.panel_drag.take();
+                // Let go over the panel: nothing happens; elsewhere, the pages went to that app.
+                if !ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| area.contains(p)) {
+                    view.dropped_outside = pages;
+                }
+            }
             let info = crate::i18n::fmt(tl!("Page {label}"), &[("label", &p.label)]);
             let picked = view.selected.contains(&i);
             resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, picked, info.clone()));
@@ -838,6 +854,10 @@ fn pages(ui: &mut egui::Ui, t: &Tokens, info: &DocInfo, view: &mut crate::DocVie
             }
         });
         ui.add_space(4.0);
+    }
+    // Left over from a drag that ended while the panel wasn't drawn.
+    if !dragging && !stopped {
+        view.panel_drag = None;
     }
 }
 

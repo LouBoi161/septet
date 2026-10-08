@@ -120,7 +120,7 @@
 	Current page — type a page number or label (such as iv) and press Enter	Página actual: escribe un número o una etiqueta de página (por ejemplo, iv) y pulsa Intro
 	Welcome to PdfCraft	Te damos la bienvenida a PdfCraft
 	An open-source PDF workbench — local, private, and scriptable.	Un banco de trabajo PDF de código abierto: local, privado y automatizable.
-	Join the ArtCraft community	Únete a la comunidad de ArtCraft
+	Join the community	Únete a la comunidad
 	Get help, share feedback and follow development on Discord.	Recibe ayuda, comparte tu opinión y sigue el desarrollo en Discord.
 	Recommended tools	Herramientas recomendadas
 	Use now	Usar ahora
@@ -261,10 +261,10 @@
 	Split document…	Dividir documento…
 	Number pages…	Numerar páginas…
 	Keyboard shortcuts	Atajos de teclado
-	Join the ArtCraft Discord	Únete al Discord de ArtCraft
+	Join the community on Discord	Únete a la comunidad en Discord
 	PdfCraft web page	Página web de PdfCraft
 	PdfCraft on GitHub	PdfCraft en GitHub
-	ArtCraft website	Sitio web de ArtCraft
+	Original authors' website	Sitio web de los autores originales
 	Check for updates…	Buscar actualizaciones…
 	About PdfCraft	Acerca de PdfCraft
 	Export a PDF	Exportar un PDF
@@ -1322,6 +1322,7 @@
 	Version {v}	Versión {v}
 	A clean-room, open-source PDF application written in Rust. MIT OR Apache-2.0.	Una aplicación PDF de código abierto, de sala limpia, escrita en Rust. MIT OR Apache-2.0.
 	Part of	Parte de
+	Based on PdfCraft by the ArtCraft team (MIT OR Apache-2.0).	Basado en PdfCraft del equipo de ArtCraft (MIT OR Apache-2.0).
 	Summarize Options	Opciones de resumen
 	Choose a layout:	Elige una disposición:
 	Comments only	Solo comentarios

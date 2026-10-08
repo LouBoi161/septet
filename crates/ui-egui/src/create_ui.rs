@@ -43,7 +43,7 @@ pub(crate) fn image_import_body(ui: &mut egui::Ui, app: &mut PdfCraftApp) -> (bo
 /// File types Open accepts besides PDF (converted on open).
 pub const CONVERTIBLE: [&str; 12] = ["png", "jpg", "jpeg", "tif", "tiff", "gif", "bmp", "jp2", "j2k", "jpx", "txt", "text"];
 
-fn is_image(bytes: &[u8]) -> bool {
+pub(crate) fn is_image(bytes: &[u8]) -> bool {
     bytes.starts_with(&[0xFF, 0xD8])
         || bytes.starts_with(b"\x89PNG\r\n\x1a\n")
         || bytes.starts_with(b"II*\0")

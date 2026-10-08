@@ -1,5 +1,6 @@
 //! Community links: the Discord button is one click away everywhere; Help menu, About dialog and
-//! home screen open the ArtCraft and PdfCraft pages.
+//! home screen open the community and PdfCraft pages. No ArtCraft marks anywhere (this is a
+//! modified version: docs/brand/README.md).
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -31,10 +32,11 @@ fn home_screen_links() {
         ("Join our Discord", links::DISCORD),
         ("PdfCraft web page", "https://getartcraft.com/apps/pdfcraft"),
         ("PdfCraft on GitHub", "https://github.com/storytold/pdfcraft"),
-        ("ArtCraft website", "https://getartcraft.com"),
+        ("Original authors' website", "https://getartcraft.com"),
     ] {
         let mut h = harness(|_| {});
-        h.get_by_label("Join the ArtCraft community");
+        h.get_by_label("Join the community");
+        assert!(h.query_by_label("ArtCraft").is_none(), "no ArtCraft mark");
         h.get_by_label(label).click();
         h.run_steps(2);
         assert_eq!(h.state().last_opened_url.as_deref(), Some(url), "{label}");
@@ -42,14 +44,16 @@ fn home_screen_links() {
 }
 
 #[test]
-fn about_dialog_shows_the_brand_and_links() {
+fn about_dialog_shows_the_credit_and_links() {
     let pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF";
     // With a document open, so the home screen's own links are not on screen.
     let mut h = harness(move |app| {
         app.open_bytes("one.pdf", None, pdf.to_vec()).unwrap();
         app.dialog = Some(Dialog::About);
     });
-    assert!(h.query_all_by_label("ArtCraft").count() >= 2, "the mark and the wordmark (alt text)");
+    assert!(h.query_by_label("ArtCraft").is_none(), "no ArtCraft mark or wordmark (alt text)");
+    assert!(h.query_all_by_label("PdfCraft").count() >= 2, "the name and the app icon (alt text)");
+    assert!(h.query_by_label_contains("Based on PdfCraft by the ArtCraft team").is_some(), "the plain-text credit");
     h.get_by_label("Join our Discord").click();
     h.run_steps(2);
     assert_eq!(h.state().last_opened_url.as_deref(), Some(links::DISCORD));

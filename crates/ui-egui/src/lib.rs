@@ -58,6 +58,7 @@ mod files;
 pub mod fill_sign;
 pub mod forms_ui;
 mod home;
+pub mod hosted;
 mod icon_data;
 pub mod icons;
 mod pageboxes;
@@ -67,6 +68,8 @@ mod panels;
 mod pickers;
 pub mod prepare;
 mod print_ui;
+#[cfg(not(target_arch = "wasm32"))]
+mod send;
 pub use print_ui::{Handling as PrintHandling, PrintDraft, Which as PrintWhich};
 mod redact_ui;
 pub use redact_ui::{HiddenDraft, PagesDraft as RedactPagesDraft, RedactPrefs, SearchDraft as RedactSearchDraft};
@@ -938,6 +941,28 @@ impl PdfCraftApp {
         self.active.and_then(|i| self.views.get(i).map(|v| (i, v.id)))
     }
 
+    /// The app's view was hidden (`false`) or shown again (`true`) while the app keeps running,
+    /// as a tab of a host window. Nothing ticks while hidden, so hiding ends what only makes
+    /// sense on screen (middle-button scrolling, a Space-held Hand) and autosaves unsaved
+    /// changes now rather than a minute after the tab returns. Showing just redraws.
+    pub fn set_visible(&mut self, visible: bool) {
+        if visible {
+            if let Some(ctx) = &self.ctx {
+                ctx.request_repaint();
+            }
+            return;
+        }
+        for view in &mut self.views {
+            view.auto_scroll.cancel();
+        }
+        if let Some(previous) = self.space_hand.take()
+            && self.quick_tool == QuickTool::Hand
+        {
+            self.quick_tool = previous;
+        }
+        self.autosave_now();
+    }
+
     /// Enable the UI control channel on `ctx` (opt-in; see [`control`]). Returns a client that
     /// sends requests to this app; [`control::serve`] exposes it on loopback.
     pub fn attach_control(&mut self, ctx: &egui::Context) -> control::ControlClient {
@@ -1427,6 +1452,13 @@ impl eframe::App for PdfCraftApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.ctx = Some(ctx.clone());
         self.dialog_epoch();
+        // Pages let go over another app were the host's to take then (see `send`); a new press
+        // starts something else.
+        if ctx.input(|i| i.pointer.any_pressed()) {
+            for view in &mut self.views {
+                view.dropped_outside = None;
+            }
+        }
         // Notices raised outside `ui` (opened files, OS events, the control channel) translate too.
         let lang = i18n::Lang::from_pref(&self.language);
         i18n::set_current(lang);
@@ -1531,6 +1563,12 @@ impl eframe::App for PdfCraftApp {
         if title != self.window_title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.window_title = title;
+        }
+        // A drag out of the Pages panel lasts only while the panel is drawn.
+        if self.full_screen || self.right != Some(RightPanel::Pages) || self.mode == Mode::Read {
+            for view in &mut self.views {
+                view.panel_drag = None;
+            }
         }
         if self.full_screen && self.active.is_some() {
             // Full screen: the page, nothing else (Esc or ⌘L to leave).
