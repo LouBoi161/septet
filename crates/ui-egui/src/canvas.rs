@@ -89,6 +89,17 @@ fn drag_pos_id() -> egui::Id {
     egui::Id::new("canvas-drag-pos")
 }
 
+/// Forget art dragged off the canvas that another app took (`crate::outgoing`): the canvas
+/// doesn't wait for the press to end.
+pub(crate) fn forget_art_drag(ctx: &egui::Context) {
+    ctx.data_mut(|d| {
+        if matches!(d.get_temp::<Drag>(drag_id()), Some(Drag::Art)) {
+            d.remove::<Drag>(drag_id());
+            d.remove::<Pos2>(drag_pos_id());
+        }
+    });
+}
+
 /// The pen pressure (0..1) of the press in progress: the force of this frame's pen or touch
 /// input, else the last one seen since the press (`pressed`: a new press, whose mouse has none
 /// until a pen reports it). A mouse presses fully (1).

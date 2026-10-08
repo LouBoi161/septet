@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cmd;
+pub mod data_root;
 pub mod guard;
 pub mod inspect;
 mod tooling;

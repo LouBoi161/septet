@@ -233,7 +233,19 @@ pub fn mono(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(FONT_MONO.into()))
 }
 
+/// Install the UI's fonts ([`font_definitions`]). Not while [`crate::hosted`]: the host installed
+/// them, with every other app's, and the app only adds to them.
 pub fn install_fonts(ctx: &egui::Context) {
+    if crate::hosted::is_hosted() {
+        return;
+    }
+    ctx.set_fonts(font_definitions());
+}
+
+/// The fonts the UI is drawn with: Source Sans 3 (the `ui` and `ui-semibold` families, and first in
+/// the proportional one), JetBrains Mono (`mono`), egui's own fonts as fallbacks and the Japanese
+/// craft-fonts faces after them.
+pub fn font_definitions() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let add = |f: &mut FontDefinitions, name: &str, bytes: &'static [u8]| {
         f.font_data.insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
@@ -255,7 +267,7 @@ pub fn install_fonts(ctx: &egui::Context) {
     mono.extend(fallback);
     fonts.families.insert(FontFamily::Name(FONT_MONO.into()), mono);
     add_craft_fonts(&mut fonts);
-    ctx.set_fonts(fonts);
+    fonts
 }
 
 /// The egui name of a craft-fonts face.

@@ -127,8 +127,9 @@ pub fn apply_runtime(app: &mut VectorcraftApp, ctx: &egui::Context) {
         app.canvas.key = None;
         ctx.data_mut(|d| d.insert_temp(id, Some(want)));
     }
+    // A host's window (`hosted`) zooms every app it shows by its own setting.
     let z = app.session.prefs.ui_scaling.clamp(0.75, 2.0) as f32;
-    if (ctx.zoom_factor() - z).abs() > 1e-3 {
+    if !crate::hosted::is_hosted() && (ctx.zoom_factor() - z).abs() > 1e-3 {
         ctx.set_zoom_factor(z);
     }
 }

@@ -93,6 +93,23 @@ enum LayersDrag {
     Art,
 }
 
+/// The rows dragged in the panel, or for the selected-art square the selected objects
+/// (`selection`), for another app the drag goes to (`crate::outgoing`).
+pub(crate) fn dragged(ctx: &egui::Context, selection: &[NodeId]) -> Option<Vec<NodeId>> {
+    match &*egui::DragAndDrop::payload::<LayersDrag>(ctx)? {
+        LayersDrag::Rows(ids) => Some(ids.clone()),
+        LayersDrag::Art => Some(selection.to_vec()),
+    }
+}
+
+/// Forget a drag of the panel's rows that another app took (`crate::outgoing`): nothing moves
+/// when the button goes up.
+pub(crate) fn forget_drag(ctx: &egui::Context) {
+    if egui::DragAndDrop::has_payload_of_type::<LayersDrag>(ctx) {
+        egui::DragAndDrop::clear_payload(ctx);
+    }
+}
+
 /// A drag down the eye or lock column: every row it passes takes `value`.
 #[derive(Clone, Debug, Default)]
 struct ColumnDrag {

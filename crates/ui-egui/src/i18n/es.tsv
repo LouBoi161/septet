@@ -179,8 +179,8 @@
 	Artboard {number}	Mesa de trabajo {number}
 	Artboard:	Mesa de trabajo:
 	Artboards	Mesas de trabajo
-	ArtCraft Website	Sitio web de ArtCraft
-	ArtCraft website	Sitio web de ArtCraft
+	Project Website	Sitio web del proyecto
+	Project website	Sitio web del proyecto
 	Artwork Colors	Colores de la ilustración
 	As Multiple Assets	Como varios recursos
 	As Single Asset	Como un solo recurso
@@ -1214,7 +1214,7 @@
 	Join	Unir
 	Join Our Discord	Únete a nuestro Discord
 	Join our Discord	Únete a nuestro Discord
-	Join the ArtCraft community on Discord (discord.gg/artcraft)	Únete a la comunidad de ArtCraft en Discord (discord.gg/artcraft)
+	Join the community on Discord (discord.gg/artcraft)	Únete a la comunidad en Discord (discord.gg/artcraft)
 	Join the lines of each paragraph	Unir las líneas de cada párrafo
 	Join Tool	Herramienta Unir
 	Justification…	Justificación…
@@ -1744,7 +1744,7 @@
 	Paragraph Style Options	Opciones de estilo de párrafo
 	Paragraph Styles	Estilos de párrafo
 	Paragraph Symbol	Símbolo de párrafo
-	Part of ArtCraft. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft.	Parte de ArtCraft. MIT OR Apache-2.0. Fuentes: Source Sans 3, Inter, JetBrains Mono (OFL). Iconos: Lucide (ISC) + VectorCraft.
+	Based on VectorCraft by the ArtCraft team. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft.	Basado en VectorCraft del equipo de ArtCraft. MIT OR Apache-2.0. Fuentes: Source Sans 3, Inter, JetBrains Mono (OFL). Iconos: Lucide (ISC) + VectorCraft.
 	Password	Contraseña
 	Paste	Pegar
 	Paste in Back	Pegar detrás
@@ -2834,7 +2834,7 @@
 	Vector illustration — fast, open, scriptable.	Ilustración vectorial: rápida, abierta y programable.
 	VectorCraft didn't quit normally last time. These documents had unsaved changes:	VectorCraft no se cerró correctamente la última vez. Estos documentos tenían cambios sin guardar:
 	VectorCraft Help…	Ayuda de VectorCraft…
-	VectorCraft on getartcraft.com	VectorCraft en getartcraft.com
+	VectorCraft Website	Sitio web de VectorCraft
 	VectorCraft on GitHub	VectorCraft en GitHub
 	Vectors	Vectores
 	Version {version} — open-source vector illustration in pure Rust.	Versión {version}: ilustración vectorial de código abierto en Rust puro.
@@ -3589,3 +3589,7 @@ axis	Both	Ambos
 	Zoom	Zoom
 	Bring All to Front	Traer todo al frente
 	Settings	Ajustes
+@msg	VectorCraft can't write any of {_1}	VectorCraft no puede escribir ninguno de estos formatos: {_1}
+@msg	the art has no extent	la ilustración no ocupa ningún área
+@msg	the document was closed	el documento se cerró
+@msg	{_1} holds too many files named {stem}	{_1} contiene demasiados archivos llamados {stem}

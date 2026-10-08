@@ -1,14 +1,21 @@
 //! Windows only: embed the app icon and version info (VERSIONINFO) into `vectorcraft.exe`.
 //!
-//! On every other target this does nothing. A missing resource compiler is a warning, so a
-//! cross-compile from macOS or Linux still links, unless `VECTORCRAFT_REQUIRE_WINRES=1` turns it into
-//! an error (for release builds).
+//! On every other target this does nothing, nor with `HOSTED_BUILD` set (VectorCraft built into
+//! another app's executable, which carries its own). A missing resource compiler is a warning, so
+//! a cross-compile from macOS or Linux still links, unless `VECTORCRAFT_REQUIRE_WINRES=1` turns it
+//! into an error (for release builds).
 
 fn main() -> Result<(), String> {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../../assets/app-icon/vectorcraft.ico");
     println!("cargo:rerun-if-env-changed=VECTORCRAFT_REQUIRE_WINRES");
+    println!("cargo:rerun-if-env-changed=HOSTED_BUILD");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return Ok(());
+    }
+    // Built as part of another app (Septet's CI sets HOSTED_BUILD): that app's executable
+    // carries its own icon and version info, not VectorCraft's.
+    if std::env::var_os("HOSTED_BUILD").is_some() {
         return Ok(());
     }
     let mut res = winresource::WindowsResource::new();

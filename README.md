@@ -1,14 +1,10 @@
-<p align="center">
-  <a href="https://getartcraft.com/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/brand/artcraft-logo-white.svg">
-      <img alt="ArtCraft" src="docs/brand/artcraft-logo.svg" width="200">
-    </picture>
-  </a>
-</p>
-
-
 <h1 align="center">VectorCraft</h1>
+
+> [!NOTE]
+> This is a modified version of [VectorCraft](https://github.com/storytold/vectorcraft) by the
+> ArtCraft team, adapted to run as a tab of the Septet shell. It is not made, sponsored or endorsed
+> by the ArtCraft Team, and the ArtCraft marks were removed from it, as
+> [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt) requires.
 
 <p align="center">
   <b>Vector illustration; an open-source, clean-room reimplementation of Adobe Illustrator, rebuilt in pure Rust.</b>
@@ -16,7 +12,7 @@
 
 <p align="center">
   A fast, open-source, clean-room take on the Adobe Illustrator workflow. It runs natively on
-  macOS, Windows, Linux and FreeBSD, and in the browser via WebAssembly. Built by the ArtCraft team.
+  macOS, Windows, Linux and FreeBSD, and in the browser via WebAssembly. Originally built by the ArtCraft team.
 </p>
 
 <p align="center">
@@ -28,13 +24,8 @@
 </p>
 
 <p align="center">
-  <a href="https://discord.gg/artcraft"><img alt="Join the ArtCraft community on Discord" src="https://img.shields.io/badge/Join%20us%20on%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" height="40"></a>
-</p>
-
-<p align="center">
-  <a href="https://getartcraft.com/apps/vectorcraft"><b>VectorCraft on getartcraft.com</b></a> ·
-  <a href="https://getartcraft.com/">ArtCraft</a> ·
-  <a href="https://getartcraft.com/apps">All Crafting Apps</a>
+  Upstream: <a href="https://github.com/storytold/vectorcraft">VectorCraft on GitHub</a> ·
+  <a href="https://getartcraft.com/apps/vectorcraft">its page on getartcraft.com</a>
 </p>
 
 <br>
@@ -44,9 +35,6 @@
   <br><sub><b>Neon Drive</b>: a Pathfinder-cut sun, live Outer Glow on the type and grid, and clipping masks · <code>examples/neon-drive.vectorcraft</code></sub>
 </p>
 
-> [!NOTE]
-> **ArtCraft is a community of artists from all walks of life.** Digital, generative, music,
-> games &mdash; if you make things, you're one of us. **[Come say hi on Discord](https://discord.gg/artcraft).**
 
 <p align="center">
   <a href="#a-look-around">A look around</a> ·
@@ -221,7 +209,7 @@ signed and published. Every bundled asset is listed with its licence in [`ASSETS
 
 ## Downloads
 
-**New to VectorCraft?** Download it from the [VectorCraft page on getartcraft.com](https://getartcraft.com/apps/vectorcraft). That's the easiest way to install it.
+**New to VectorCraft?** This modified version ships inside Septet. The upstream app's official builds are on [its page on getartcraft.com](https://getartcraft.com/apps/vectorcraft).
 
 **Want a specific build or format?** On GitHub, the [latest release](https://github.com/storytold/vectorcraft/releases/latest) has every build listed below, and [all releases](https://github.com/storytold/vectorcraft/releases) has earlier versions and their notes. `<ver>` in the file names is the version number, and `SHA256SUMS.txt` lists a checksum for every file.
 
@@ -266,9 +254,9 @@ Installers and executables are code-signed.
 
 ## The Crafting Apps
 
-VectorCraft is one of the **Crafting Apps**: free, open-source creative tools from the
-[ArtCraft](https://getartcraft.com/) team, each written from scratch in Rust and each able to
-stand on its own.
+Upstream, VectorCraft is one of the **Crafting Apps**: free, open-source creative tools from the
+ArtCraft team (getartcraft.com), each written from scratch in Rust and each able to stand on its
+own.
 
 | | App | What it's for | Code | Learn more |
 |:-:|---|---|---|---|
@@ -280,29 +268,6 @@ stand on its own.
 | <img src="https://raw.githubusercontent.com/storytold/effectcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.effectcraft.png" alt="" width="32" height="32"> | **EffectCraft** | Motion graphics and visual effects | [GitHub](https://github.com/storytold/effectcraft) | [Website](https://getartcraft.com/apps/effectcraft) |
 | <img src="https://raw.githubusercontent.com/storytold/designcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.designcraft.png" alt="" width="32" height="32"> | **DesignCraft** | Page layout and publishing | [GitHub](https://github.com/storytold/designcraft) | [Website](https://getartcraft.com/apps/designcraft) |
 
-And [**ArtCraft**](https://getartcraft.com/) itself, our AI image and video studio for artists who want real control.
-
-<br>
-
-<p align="center">
-  <a href="https://discord.gg/artcraft"><img alt="Join the ArtCraft community on Discord" src="https://img.shields.io/badge/Join%20us%20on%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" height="40"></a>
-</p>
-
-<h3 align="center">Come make things with us</h3>
-
-<p align="center">
-  Our Discord is where artists of every kind hang out: people who paint, shoot, draw, cut film,
-  set type, and people still figuring out what they like to make. Share what you're working on,
-  ask for help, tell us what's broken, or tell us what you wish these tools could do.
-  Whatever your medium and however long you've been at it, you're welcome here.
-</p>
-
-<p align="center">
-  <a href="https://discord.gg/artcraft"><b>discord.gg/artcraft</b></a> ·
-  <a href="https://getartcraft.com/">getartcraft.com</a> ·
-  <a href="https://getartcraft.com/apps">The Crafting Apps</a> ·
-  <a href="https://getartcraft.com/apps/vectorcraft">VectorCraft</a>
-</p>
 
 ## Star history
 
@@ -321,14 +286,12 @@ Simplified Chinese and Arabic faces; SIL Open Font License 1.1).
 The app icon (an engraved dragon on VectorCraft red, `#e8573f`) is the owner's original artwork; its
 palette and files are in [`assets/app-icon/`](assets/app-icon/README.md).
 
-The ArtCraft name, wordmark and logos in [`docs/brand/`](docs/brand/) are trademarks of the
-ArtCraft Team and are not covered by this license. They may be used only unmodified, and only as
-part of this repository and VectorCraft, under [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt).
-Forks and modified versions must remove them.
+The ArtCraft name, wordmark and logos are trademarks of the ArtCraft Team and are not covered by
+this license. As [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt) requires of modified
+versions, they were removed from this one ([`docs/brand/`](docs/brand/README.md)).
 
 <sub>Adobe, Photoshop, Illustrator, Premiere Pro, Lightroom, Acrobat, After Effects and InDesign are trademarks or registered trademarks of Adobe Inc. in the United States and/or other countries. VectorCraft is an independent, open-source project and is not affiliated with, sponsored by or endorsed by Adobe Inc.; these names are used only to describe the workflows it is compatible with.</sub>
 
 <p align="center">
-  <a href="https://getartcraft.com/"><img alt="ArtCraft" src="docs/brand/artcraft-mark.svg" width="28"></a><br>
-  <sub>Made by the <a href="https://getartcraft.com/">ArtCraft</a> team and community.</sub>
+  <sub>Based on VectorCraft by the ArtCraft team and community.</sub>
 </p>

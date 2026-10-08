@@ -110,9 +110,11 @@ pub fn tool_icon(name: &str) -> &'static str {
     }
 }
 
+/// Icon `name` as an image source. Its URI names the app: egui's bytes loader keeps the first
+/// bytes given for a URI, and other apps sharing the window (`hosted`) have icons of their own.
 pub fn source(name: &str) -> ImageSource<'static> {
     let bytes = table().get(name).or_else(|| table().get("square-dashed")).copied().unwrap_or(&[]);
-    ImageSource::Bytes { uri: format!("bytes://icon/{name}.svg").into(), bytes: egui::load::Bytes::Static(bytes) }
+    ImageSource::Bytes { uri: format!("bytes://vectorcraft/icon/{name}.svg").into(), bytes: egui::load::Bytes::Static(bytes) }
 }
 
 /// Paint icon `name` into `rect` tinted with `tint`.

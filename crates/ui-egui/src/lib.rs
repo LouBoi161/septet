@@ -28,12 +28,14 @@ pub mod find_font;
 pub mod floating;
 pub mod font_menu;
 pub mod graphics;
+pub mod hosted;
 pub mod i18n;
 pub mod icon_data;
 pub mod icons;
 pub mod io;
 pub mod menus;
 pub mod native_menu;
+pub mod outgoing;
 pub mod palette;
 pub mod panels;
 pub mod place;
@@ -841,6 +843,18 @@ impl VectorcraftApp {
         if vectorcraft_text::FontDb::global().installed_fonts_changed() {
             // A failure shows in the status bar, as the menu item's does.
             let _ = self.run("text.rescanFonts", json!({}));
+        }
+    }
+
+    /// A host that shows the app as one of its tabs ([`hosted`]) hid it (`false`) or showed it
+    /// again (`true`): what the window losing or regaining the focus does. Keys released while
+    /// hidden are never seen, and fonts installed meanwhile are listed when it comes back.
+    pub fn set_visible(&mut self, visible: bool) {
+        if visible {
+            self.refresh_installed_fonts();
+        } else {
+            self.host_modifiers = egui::Modifiers::NONE;
+            self.paste_chord = Default::default();
         }
     }
 

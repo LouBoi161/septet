@@ -1862,7 +1862,29 @@ fn selected_image(app: &VectorcraftApp, keep: impl Fn(&vectorcraft_doc::ImageObj
     })
 }
 
+/// The menu bar: every menu with its items (while [`crate::hosted`], without the links to
+/// ArtCraft, [`crate::hosted::ARTCRAFT_LINKS`]).
 pub fn menu_tree() -> Vec<(&'static str, Vec<Item>)> {
+    let mut tree = all_menus();
+    if crate::hosted::is_hosted() {
+        for (_, items) in &mut tree {
+            keep_offered(items);
+        }
+    }
+    tree
+}
+
+/// `items` without the commands the UI doesn't offer ([`crate::hosted::offers`]).
+fn keep_offered(items: &mut Vec<Item>) {
+    items.retain(|i| !matches!(i, Item::Cmd(_, id, _) if !crate::hosted::offers(id)));
+    for i in items {
+        if let Item::Sub(_, sub) = i {
+            keep_offered(sub);
+        }
+    }
+}
+
+fn all_menus() -> Vec<(&'static str, Vec<Item>)> {
     let panel = |label: &'static str, id: &'static str| cp(label, "window.panel", json!({ "panel": id }));
     vec![
         (
@@ -2491,8 +2513,8 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<Item>)> {
             "Help",
             vec![
                 c("Join Our Discord", "help.discord"),
-                c("ArtCraft Website", "help.website"),
-                c("VectorCraft on getartcraft.com", "help.appPage"),
+                c("Project Website", "help.website"),
+                c("VectorCraft Website", "help.appPage"),
                 c("VectorCraft on GitHub", "help.github"),
                 Sep,
                 c("Search Commands…", "help.commandPalette"),

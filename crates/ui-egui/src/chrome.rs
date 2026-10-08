@@ -57,7 +57,8 @@ pub fn app_bar(app: &mut VectorcraftApp, ui: &mut Ui) {
             let gap = ui.spacing().item_spacing.x;
             let with_search = ws_w + 8.0 + gap + 200.0;
             let search_full = room >= with_search;
-            let discord = room >= with_search + 10.0 + gap + crate::community::discord_width(ui, false);
+            // Not while hosted: it invites to the ArtCraft team's community (`hosted::ARTCRAFT_LINKS`).
+            let discord = crate::hosted::offers("help.discord") && room >= with_search + 10.0 + gap + crate::community::discord_width(ui, false);
             let ws_w = if search_full { ws_w } else { ws_w.min(room - 8.0 - gap - 24.0).max(64.0) };
             let mut rui = ui.new_child(egui::UiBuilder::new().max_rect(right).layout(egui::Layout::right_to_left(egui::Align::Center)));
             let ui = &mut rui;

@@ -119,13 +119,21 @@ fn source<'a>(s: &'a mut Session, f: &Format, p: &Value, cmd: &str) -> Result<Co
 /// The selected objects (not on template layers) alone on one layer, with one artboard: their
 /// visual bounds.
 fn selection(s: &mut Session, cmd: &str) -> Result<(Document, vectorcraft_geom::Rect)> {
-    let ids = edit::selected_roots(s)?;
     let st = s.doc()?;
+    objects_document(st, &st.selection.objects, "Selection").ok_or_else(|| bad(cmd, "select something to export"))
+}
+
+/// Objects `ids` of `st`'s document as Export Selection writes the selection: alone on one layer
+/// in paint order (an object inside another listed one counts once, a compound path member as
+/// its compound; layers and objects on template layers are left out), with one artboard named
+/// `name`, their visual bounds → (that document, the bounds); `None` when they have none.
+pub fn objects_document(st: &DocState, ids: &[NodeId], name: &str) -> Option<(Document, vectorcraft_geom::Rect)> {
+    let ids = edit::roots_of(&st.doc, st.doc.paint_order(ids.iter().copied()));
     let is_template = |id| st.doc.node(id).is_some_and(|l| matches!(l.kind, NodeKind::Layer { template: true, .. }));
     // On a template layer or sublayer, at any depth.
     let on_template = |id| st.doc.ancestry(id).is_some_and(|a| a.into_iter().any(is_template));
     let ids: Vec<NodeId> = ids.into_iter().filter(|id| !on_template(*id)).collect();
-    isolated(&st.doc, &ids, "Selection").ok_or_else(|| bad(cmd, "select something to export"))
+    isolated(&st.doc, &ids, name)
 }
 
 /// Objects `ids` of `doc` alone on one layer (in that order, back to front), with one artboard

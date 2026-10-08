@@ -6,6 +6,12 @@ license.workspace = true
 publish = false
 default-run = "vectorcraft"
 
+# The app as a library (services, preferences, `Embedded`: the app in another app's window); the
+# `vectorcraft` binary is built on it.
+[lib]
+name = "vectorcraft_embed"
+path = "src/lib.rs"
+
 [lints]
 workspace = true
 

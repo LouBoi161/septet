@@ -98,11 +98,15 @@ pub fn stamp_save_dates(st: &mut DocState, at: i64) {
     d.metadata.modified = Some(at);
 }
 
-/// The Templates folder: the `templatesFolder` preference, else `Documents/VectorCraft Templates`
-/// in the user's home (none where there is no home folder, as on the web).
+/// The Templates folder: the `templatesFolder` preference, else `Templates` in the data root
+/// ([`crate::data_root`]) or `Documents/VectorCraft Templates` in the user's home (none where
+/// there is no home folder, as on the web).
 pub fn templates_folder(prefs: &Prefs) -> Option<String> {
     if !prefs.templates_folder.is_empty() {
         return Some(prefs.templates_folder.clone());
+    }
+    if let Some(root) = crate::data_root::data_root() {
+        return Some(root.join("Templates").to_string_lossy().to_string());
     }
     Some(std::path::Path::new(&home_folder()?).join("Documents").join("VectorCraft Templates").to_string_lossy().to_string())
 }

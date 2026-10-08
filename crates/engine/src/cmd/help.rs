@@ -1,5 +1,5 @@
-//! Help → community and project links (the ArtCraft Discord, website, this app's page and its
-//! GitHub repository). The commands return the URL; the frontend opens it.
+//! Help → community and project links (the community Discord, the project website, this app's
+//! page and its GitHub repository). The commands return the URL; the frontend opens it.
 
 use serde_json::{Value, json};
 
@@ -22,9 +22,9 @@ pub fn github_url() -> String {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        cmd!(query "help.discord", "Join Our Discord", ["Help"], None, "{} → {url} the ArtCraft community Discord", always, |_, _| url(DISCORD_URL.into())),
-        cmd!(query "help.website", "ArtCraft Website", ["Help"], None, "{} → {url}", always, |_, _| url(WEBSITE_URL.into())),
-        cmd!(query "help.appPage", "VectorCraft on getartcraft.com", ["Help"], None, "{} → {url} this app's page", always, |_, _| url(app_page_url())),
+        cmd!(query "help.discord", "Join Our Discord", ["Help"], None, "{} → {url} the community Discord", always, |_, _| url(DISCORD_URL.into())),
+        cmd!(query "help.website", "Project Website", ["Help"], None, "{} → {url}", always, |_, _| url(WEBSITE_URL.into())),
+        cmd!(query "help.appPage", "VectorCraft Website", ["Help"], None, "{} → {url} this app's page", always, |_, _| url(app_page_url())),
         cmd!(query "help.github", "VectorCraft on GitHub", ["Help"], None, "{} → {url} source code, issues and releases", always, |_, _| url(github_url())),
         cmd!(query "help.links", "Links", [], None, "{} → {discord, website, appPage, github}", always, |_, _| {
             Ok(json!({ "discord": DISCORD_URL, "website": WEBSITE_URL, "appPage": app_page_url(), "github": github_url() }))

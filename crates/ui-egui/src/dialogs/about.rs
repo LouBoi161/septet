@@ -62,9 +62,11 @@ fn about_tab(app: &mut VectorcraftApp, ui: &mut egui::Ui) {
     ui.add_space(12.0);
     crate::community::links(app, ui);
     ui.add_space(12.0);
+    // A modified version may only say, in plain text, what it is based on
+    // (`docs/brand/LICENSE-brand.txt`).
     ui.label(
         egui::RichText::new(tl!(
-            "Part of ArtCraft. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft."
+            "Based on VectorCraft by the ArtCraft team. MIT OR Apache-2.0. Fonts: Source Sans 3, Inter, JetBrains Mono (OFL). Icons: Lucide (ISC) + VectorCraft."
         ))
         .size(11.0),
     );

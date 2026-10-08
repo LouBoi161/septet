@@ -15,7 +15,7 @@
 # pincel, amostra, mesa de trabalho ...), following common desktop-software conventions (commands
 # in the infinitive, menus as nouns); no proprietary localisation resource, string table or product
 # UI was consulted or copied; add entries the same way. Product and technology names (VectorCraft,
-# ArtCraft, SVG, OpenType, CMYK, Lab ...) stay in Latin letters; the trailing "…" of dialog
+# SVG, OpenType, CMYK, Lab ...) stay in Latin letters; the trailing "…" of dialog
 # commands is kept.
 #
 # Coverage: every `tl!` literal and menu string of the shell (tested:
@@ -220,8 +220,8 @@
 	Arrange: Bring to Front	Organizar: Trazer para Frente
 	Arrowheads:	Pontas de Seta:
 	Art using a deleted global swatch keeps its colour.	A arte que usa uma amostra global excluída mantém sua cor.
-	ArtCraft Website	Site do ArtCraft
-	ArtCraft website	Site do ArtCraft
+	Project Website	Site do projeto
+	Project website	Site do projeto
 	Artboard Options	Opções de Mesa de Trabalho
 	Artboard Options: edit with the Artboard tool	Opções de Mesa de Trabalho: edite com a ferramenta Mesa de Trabalho
 	Artboard Options…	Opções de Mesa de Trabalho…
@@ -1116,7 +1116,7 @@
 	Join Our Discord	Junte-se ao nosso Discord
 	Join Tool	Ferramenta Unir
 	Join our Discord	Junte-se ao nosso Discord
-	Join the ArtCraft community on Discord (discord.gg/artcraft)	Junte-se à comunidade do ArtCraft no Discord (discord.gg/artcraft)
+	Join the community on Discord (discord.gg/artcraft)	Junte-se à comunidade no Discord (discord.gg/artcraft)
 	Join the lines of each paragraph	Junte as linhas de cada parágrafo
 	Justification…	Justificação…
 	Keep Formatting	Manter Formatação
@@ -2487,7 +2487,7 @@
 	VectorCraft Help…	Ajuda do VectorCraft…
 	VectorCraft didn't quit normally last time. These documents had unsaved changes:	O VectorCraft não fechou normalmente da última vez. Estes documentos tinham alterações não salvas:
 	VectorCraft on GitHub	VectorCraft no GitHub
-	VectorCraft on getartcraft.com	VectorCraft em getartcraft.com
+	VectorCraft Website	Site do VectorCraft
 	Vectors	Vetores
 	Version {version} — open-source vector illustration in pure Rust.	Versão {version} — ilustração vetorial de código aberto em Rust puro.
 	Version:	Versão:
