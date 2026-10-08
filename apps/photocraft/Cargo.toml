@@ -15,6 +15,12 @@ heif = ["photocraft-codecs/heif"]
 [lints]
 workspace = true
 
+# The desktop app as a library: the platform services main.rs wires in, and `Embedded`, the app
+# built for a tab inside a host app (the Septet shell, see src/embed.rs).
+[lib]
+name = "photocraft_embed"
+path = "src/lib.rs"
+
 [dependencies]
 photocraft-doc = { workspace = true }
 photocraft-color = { workspace = true }

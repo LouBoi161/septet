@@ -170,6 +170,10 @@ fn display_scale(pref: prefs::UiScale, native: Option<f32>, monitor_px: Option<e
 }
 
 fn sync_display_scale(app: &PhotocraftApp, ctx: &egui::Context) {
+    // Hosted (`crate::hosted`), the host app owns the UI zoom.
+    if crate::hosted::is_hosted() {
+        return;
+    }
     let native = ctx.native_pixels_per_point();
     // ViewportInfo uses egui points, including the current UI zoom. Converting back to
     // physical pixels avoids oscillating between 100% and 200% on successive frames.

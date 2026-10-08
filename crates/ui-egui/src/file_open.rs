@@ -150,6 +150,35 @@ impl PhotocraftApp {
         }
     }
 
+    /// Place files from disk into the active document the way dropping them on its canvas does:
+    /// each becomes a layer (Place Embedded) in Free Transform, one after another; brush and
+    /// gradient files go to their libraries. A position `at` (window points) over the tab strip
+    /// opens them there instead, like a drop there. Without an active document they open like
+    /// File › Open. For a host app (see [`crate::hosted`]) handing files over without an OS drop.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn place_paths(&mut self, ctx: &egui::Context, paths: &[std::path::PathBuf], at: Option<egui::Pos2>) {
+        if self.session.active().is_none() {
+            let paths: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+            self.open_paths(&paths);
+            return;
+        }
+        let files: Vec<egui::DroppedFileHandle> =
+            paths.iter().map(|p| std::sync::Arc::new(PathDrop(std::path::absolute(p).unwrap_or_else(|_| p.clone()))) as egui::DroppedFileHandle).collect();
+        if let DropTarget::Tabs(_) = self.drop_target(ctx, at) {
+            self.open_dropped(ctx, files, at);
+        } else {
+            for f in files {
+                let name = dropped_name(&f);
+                if !crate::preset_files_ui::is_preset_file(&name) {
+                    self.drop_places.push_back(f);
+                } else if let Err(e) = self.open_dropped_file(&f, &name, None) {
+                    self.open_failed(&name, &e);
+                }
+            }
+        }
+        ctx.request_repaint();
+    }
+
     /// Where a drop at `at` lands. Over a window or dialog it's neither the canvas nor the tabs.
     pub(crate) fn drop_target(&self, ctx: &egui::Context, at: Option<egui::Pos2>) -> DropTarget {
         let Some(p) = at.filter(|p| ctx.layer_id_at(*p).is_none_or(|l| l.order == egui::Order::Background)) else {
@@ -226,6 +255,23 @@ impl PhotocraftApp {
                 OsEvent::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             }
         }
+    }
+}
+
+/// A file on disk handed over as if it had been dropped on the window
+/// ([`PhotocraftApp::place_paths`]).
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+struct PathDrop(std::path::PathBuf);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl egui::DroppedFile for PathDrop {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        photocraft_format::read_file(&self.0).map_err(|e| e.to_string())
     }
 }
 

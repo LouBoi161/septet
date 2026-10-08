@@ -130,3 +130,51 @@ fn dropping_back_on_the_source_copies_nothing() {
     assert_eq!((docs[0].doc.layers.len(), docs[1].doc.layers.len()), (2, 1));
     assert_eq!(h.state().session.active_index(), Some(0));
 }
+
+/// A host app (`crate::hosted`) took the dragged layers elsewhere: abandoned before PhotoCraft
+/// sees the release, the drag neither moves nor copies anything.
+#[test]
+fn layers_a_host_takes_elsewhere_are_neither_moved_nor_copied() {
+    let (mut h, paint) = harness();
+    h.state_mut().ui.tool = Tool::Move;
+    h.run_steps(2);
+    let before = source_square(&h, paint);
+    let steps = h.state().session.documents()[0].history.entries().len();
+    let grab = ViewXform::active(h.state()).unwrap().to_screen(9.0, 11.0);
+    h.event(egui::Event::PointerMoved(grab));
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: grab, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.run_steps(1);
+    for k in 1..=4 {
+        h.event(egui::Event::PointerMoved(grab + vec2(10.0, 8.0) * k as f32));
+        h.run_steps(1);
+    }
+    let ctx = h.ctx.clone();
+    let out = super::dragged(h.state(), &ctx).expect("whole layers are dragged");
+    assert_eq!((out.layers.as_slice(), out.label.as_str()), ([paint].as_slice(), "paint"));
+    super::abandon(h.state_mut(), &ctx);
+    assert!(super::dragged(h.state(), &ctx).is_none());
+    let end = grab + vec2(40.0, 32.0);
+    h.event(egui::Event::PointerButton { pos: end, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+    assert_eq!(source_square(&h, paint), before, "the layer did not move");
+    assert_eq!(h.state().session.documents()[0].history.entries().len(), steps);
+    assert_eq!(h.state().session.documents()[1].doc.layers.len(), 1, "nothing was copied");
+
+    // A Layers panel drag reports the selection's layers, and ends without a reorder.
+    let row = h.get_by_role_and_label(Role::Button, "paint").rect().center();
+    h.event(egui::Event::PointerMoved(row));
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: row, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.run_steps(1);
+    for k in 1..=4 {
+        h.event(egui::Event::PointerMoved(row + vec2(0.0, 12.0) * k as f32));
+        h.run_steps(1);
+    }
+    let out = super::dragged(h.state(), &ctx).expect("a layer row is dragged");
+    assert_eq!(out.layers, [paint]);
+    super::abandon(h.state_mut(), &ctx);
+    h.event(egui::Event::PointerButton { pos: row + vec2(0.0, 48.0), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+    assert_eq!(h.state().session.documents()[0].history.entries().len(), steps, "no reorder");
+}

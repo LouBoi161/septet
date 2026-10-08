@@ -2,6 +2,9 @@
 //! autosaves and the GPU startup marker all live under the one directory [`config_dir`] returns.
 //!
 //! In order:
+//! 0. A host app's data root (`photocraft_ui_egui::hosted::data_root`, e.g. a portable host's
+//!    `<exe dir>/Data/Photocraft`), used like the portable data folder below: created, and if it
+//!    can't be written the app warns and goes on down this list.
 //! 1. `PHOTOCRAFT_CONFIG_DIR`, when set (tests, agents, custom setups).
 //! 2. **Portable mode** (#228): a marker file ([`PORTABLE_MARKERS`]) beside the executable puts
 //!    everything in `<exe dir>/PhotoCraftData`, so a portable copy on a USB stick leaves nothing in
@@ -28,6 +31,8 @@ pub enum Mode {
     Portable,
     /// The platform's per-user config directory.
     Platform,
+    /// A host app's data root (`photocraft_ui_egui::hosted::data_root`).
+    HostRoot,
 }
 
 /// The resolved data directory.
@@ -40,12 +45,14 @@ pub struct DataDir {
     pub warning: Option<String>,
 }
 
+static DIR: OnceLock<DataDir> = OnceLock::new();
+
 /// The data directory for this process, resolved once (the portable check probes the disk).
 pub fn current() -> &'static DataDir {
-    static DIR: OnceLock<DataDir> = OnceLock::new();
     DIR.get_or_init(|| {
         let exe = std::env::current_exe().ok();
-        let d = resolve(|k| std::env::var_os(k), exe.as_deref().and_then(Path::parent));
+        let root = photocraft_ui_egui::hosted::data_root();
+        let d = resolve_in(root.as_deref(), |k| std::env::var_os(k), exe.as_deref().and_then(Path::parent));
         if let Some(w) = &d.warning {
             log::warn!("{w}");
             eprintln!("photocraft: {w}");
@@ -58,6 +65,30 @@ pub fn current() -> &'static DataDir {
 /// The per-user settings directory (see the module docs).
 pub fn config_dir() -> Option<PathBuf> {
     current().dir.clone()
+}
+
+/// Whether [`current`] has been resolved already (a data root set afterwards no longer applies).
+pub fn resolved() -> bool {
+    DIR.get().is_some()
+}
+
+/// [`resolve`] with a host app's data root (`root`) first, kept like the portable data folder:
+/// created and checked writable, else a warning and the rest of the list.
+pub fn resolve_in(root: Option<&Path>, env: impl Fn(&str) -> Option<OsString>, exe_dir: Option<&Path>) -> DataDir {
+    let Some(root) = root else { return resolve(env, exe_dir) };
+    match ensure_writable(root) {
+        Ok(()) => DataDir { dir: Some(root.to_path_buf()), mode: Mode::HostRoot, warning: None },
+        Err(e) => {
+            let mut d = resolve(env, exe_dir);
+            let fallback = d.dir.as_ref().map_or_else(|| "nowhere (no user folder found)".to_string(), |p| p.display().to_string());
+            let warning = format!("the data folder {} isn't writable ({e}); settings are kept in {fallback} instead", root.display());
+            d.warning = Some(match d.warning {
+                Some(w) => format!("{warning}; {w}"),
+                None => warning,
+            });
+            d
+        }
+    }
 }
 
 /// Resolve the data directory from the environment (`env`) and the executable's folder.
@@ -179,6 +210,38 @@ mod tests {
             assert!(!root.join("home").exists() && !root.join("appdata").exists(), "nothing written to the user folder");
             let _ = std::fs::remove_dir_all(&root);
         }
+    }
+
+    #[test]
+    fn a_host_data_root_holds_everything_and_wins() {
+        let root = temp("host-root");
+        let exe = root.join("bin");
+        std::fs::create_dir_all(&exe).unwrap();
+        std::fs::write(exe.join("portable.txt"), b"").unwrap();
+        let data = root.join("Data").join("Photocraft");
+        let override_dir = root.join("override");
+        let env = env_of(&[("PHOTOCRAFT_CONFIG_DIR", &override_dir), ("HOME", &root.join("home"))]);
+        let d = resolve_in(Some(&data), &env, Some(&exe));
+        assert_eq!((d.mode, d.dir.as_deref(), d.warning.as_deref()), (Mode::HostRoot, Some(data.as_path()), None));
+        assert!(data.is_dir(), "created");
+        assert_eq!(std::fs::read_dir(&data).unwrap().count(), 0, "the write probe is removed");
+        assert!(!exe.join(PORTABLE_DATA_DIR).exists(), "the exe's portable folder isn't used");
+        // Without a root: as before.
+        assert_eq!(resolve_in(None, &env, Some(&exe)).mode, Mode::Override);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_unwritable_host_data_root_falls_back_with_a_warning() {
+        let root = temp("host-root-unwritable");
+        // A file where the data folder should go: it can't be created, on every platform.
+        let data = root.join("Data");
+        std::fs::write(&data, b"in the way").unwrap();
+        let d = resolve_in(Some(&data), fake_home(&root), None);
+        assert_eq!(d.mode, Mode::Platform);
+        assert_eq!(d.dir, platform_dir(&fake_home(&root)));
+        assert!(d.warning.as_deref().is_some_and(|w| w.contains("isn't writable")), "{:?}", d.warning);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

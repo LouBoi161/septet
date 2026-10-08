@@ -125,6 +125,12 @@ pub fn check_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
 }
 
+/// PhotoCraft came back to the front without the window's focus changing (a host app showed its
+/// tab again, see [`crate::hosted`]): read the displays again, as on a return to the front.
+pub fn came_to_front(app: &mut PhotocraftApp) {
+    app.monitors.again = true;
+}
+
 /// Read the displays at the next frame regardless of the interval (a user action that shows
 /// the result: opening Color Settings).
 pub fn read_now(app: &mut PhotocraftApp) {

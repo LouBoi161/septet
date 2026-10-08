@@ -379,14 +379,15 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         app.set_theme(ui.ctx(), next);
                     }
                     // The community Discord, one click away while the bar has room for it
-                    // (narrow windows drop it first; it is also Help › Discord).
-                    if ui.available_width() >= DISCORD_ROOM {
+                    // (narrow windows drop it first; it is also Help › Discord). Not in a host
+                    // app's build (`links::COMMUNITY_COMMANDS`).
+                    if crate::links::branded() && ui.available_width() >= DISCORD_ROOM {
                         let discord = egui::Button::image_and_text(
                             icons::image("message-square", 14.0, t.text_dim),
                             egui::RichText::new(tl!("Discord")).color(t.text_dim).size(12.0),
                         )
                         .frame(false);
-                        if ui.add(discord).on_hover_text(format!("Join the ArtCraft Discord ({})", crate::links::DISCORD)).clicked() {
+                        if ui.add(discord).on_hover_text(format!("{} ({})", tl!("Join us on Discord"), crate::links::DISCORD)).clicked() {
                             crate::links::open(app, ui.ctx(), crate::links::DISCORD);
                         }
                     }

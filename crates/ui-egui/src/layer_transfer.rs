@@ -41,17 +41,60 @@ fn clear(ctx: &egui::Context) {
     ctx.data_mut(|d| d.remove::<Transfer>(key()));
 }
 
-/// The layers `id` stands for: the selection when it is one of the selected layers, else itself.
-fn begin(app: &PhotocraftApp, ctx: &egui::Context, id: LayerId, grab: Option<[f64; 2]>) -> bool {
-    let Some(st) = app.session.active() else { return false };
+/// The layers `id` stands for (the selection when it is one of the selected layers, else itself)
+/// and what the ghost says for them.
+fn describe(st: &photocraft_engine::DocState, id: LayerId) -> (Vec<LayerId>, String) {
     let layers = if st.is_layer_selected(id) { st.selected_layers() } else { vec![id] };
     let label = match layers.as_slice() {
         [one] => st.doc.layer(*one).map_or_else(String::new, |l| l.name.clone()),
         many => crate::i18n::trn(crate::i18n::current(), many.len() as u64, "{n} layer", "{n} layers"),
     };
+    (layers, label)
+}
+
+fn begin(app: &PhotocraftApp, ctx: &egui::Context, id: LayerId, grab: Option<[f64; 2]>) -> bool {
+    let Some(st) = app.session.active() else { return false };
+    let (layers, label) = describe(st, id);
     let t = Transfer { source: st.doc.id, layers: layers.iter().map(|l| l.0).collect(), grab, label };
     ctx.data_mut(|d| d.insert_temp(key(), t));
     true
+}
+
+/// Layers dragged out of PhotoCraft into a host app (see [`crate::hosted`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Outgoing {
+    /// The document they belong to.
+    pub source: DocId,
+    /// Bottom to top.
+    pub layers: Vec<LayerId>,
+    /// What the ghost says: the layer's name, or "3 layers".
+    pub label: String,
+}
+
+/// The layers being dragged now, from the Layers panel or with the Move tool (whole layers, not a
+/// selection or a floating piece), whether or not they are over a document tab yet. Cheap: no
+/// rendering.
+pub fn dragged(app: &PhotocraftApp, ctx: &egui::Context) -> Option<Outgoing> {
+    if let Some(t) = get(ctx) {
+        return Some(Outgoing { source: t.source, layers: t.layers.into_iter().map(LayerId).collect(), label: t.label });
+    }
+    move_drag(app)?;
+    let st = app.session.active()?;
+    let (layers, label) = describe(st, st.active_layer?);
+    Some(Outgoing { source: st.doc.id, layers, label })
+}
+
+/// End a layer drag without acting on its release (a host app took the layers elsewhere): no
+/// copy into another document, no Layers panel reorder, and a Move drag moves nothing (an
+/// ⌥-drag's copy is taken back), as when it turns into a transfer over a tab.
+pub fn abandon(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    clear(ctx);
+    ctx.data_mut(|d| d.remove::<u64>(egui::Id::new("layer-drag")));
+    if move_drag(app).is_some() {
+        app.drag = None;
+        app.move_preview = None;
+        crate::move_mods::abandon(app);
+    }
 }
 
 /// A Layers panel row drag began on `layer`: it can be dropped on another document.

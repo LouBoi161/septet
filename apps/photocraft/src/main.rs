@@ -20,14 +20,11 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-mod app_dirs;
 mod app_icon;
 #[cfg(target_os = "macos")]
 mod apple_events;
 mod control_server;
-mod crash_guard;
 mod cursor;
-mod gpu_startup;
 #[cfg(target_os = "macos")]
 mod mac_menu;
 #[cfg(target_os = "macos")]
@@ -35,12 +32,13 @@ mod mac_window;
 // Pure logic is tested on every platform; only Linux runs the check.
 #[cfg(any(target_os = "linux", test))]
 mod linux_libs;
-mod monitor_profile;
-mod services;
-// Windows gets pen pressure from winit (WM_POINTER); the web runner has its own listener.
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
-mod tablet;
 mod ui_state;
+
+// Shared with the embeddable app (`photocraft_embed::Embedded`), so they live in the library.
+// Windows gets pen pressure from winit (WM_POINTER); the web runner has its own listener.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use photocraft_embed::tablet;
+use photocraft_embed::{app_dirs, crash_guard, gpu_startup, monitor_profile, services};
 
 use photocraft_engine::Session;
 use photocraft_ui_egui::PhotocraftApp;

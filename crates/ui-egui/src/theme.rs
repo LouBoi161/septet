@@ -336,7 +336,36 @@ pub fn install_fonts(ctx: &egui::Context) {
 }
 
 /// [`install_fonts`] with the CJK fallback fonts taken from `cjk` (tests swap the sources).
+/// Hosted ([`crate::hosted`]), the host has installed [`font_definitions`] already: only the
+/// lazy CJK fallbacks (added with `ctx.add_font`) are set up.
 pub fn install_fonts_with(ctx: &egui::Context, cjk: crate::cjk_fonts::Sources) {
+    if !crate::hosted::is_hosted() {
+        let mut fonts = ui_fonts();
+        let size = ui_font_size(ctx);
+        for (name, data) in &mut fonts.font_data {
+            size_ui_font(ctx, name, Arc::make_mut(data));
+        }
+        ctx.set_fonts(fonts);
+        ctx.add_plugin(UiFontSizePlugin { applied: size });
+    }
+    // Japanese / Chinese / Korean fallback fonts (craft-fonts' Japanese ones if built in, then
+    // the system's) are registered on demand (cjk_fonts.rs).
+    crate::cjk_fonts::install_with(ctx, cjk);
+}
+
+/// The fonts [`install_fonts`] sets at startup (the default UI font size), named families
+/// included: what a host app installs for PhotoCraft (see [`crate::hosted`]).
+pub fn font_definitions() -> FontDefinitions {
+    let mut fonts = ui_fonts();
+    let scale = font_scale(UiFontSize::default());
+    for data in fonts.font_data.values_mut() {
+        Arc::make_mut(data).tweak.scale *= scale;
+    }
+    fonts
+}
+
+/// Inter (UI) and JetBrains Mono (numbers) plus the named weights, before UI font sizing.
+fn ui_fonts() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let add = |fonts: &mut FontDefinitions, name: &str, bytes: &'static [u8]| {
         fonts.font_data.insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
@@ -354,15 +383,7 @@ pub fn install_fonts_with(ctx: &egui::Context, cjk: crate::cjk_fonts::Sources) {
         stack.extend(fallback.iter().cloned());
         fonts.families.insert(FontFamily::Name(fam.into()), stack);
     }
-    let size = ui_font_size(ctx);
-    for (name, data) in &mut fonts.font_data {
-        size_ui_font(ctx, name, Arc::make_mut(data));
-    }
-    ctx.set_fonts(fonts);
-    ctx.add_plugin(UiFontSizePlugin { applied: size });
-    // Japanese / Chinese / Korean fallback fonts (craft-fonts' Japanese ones if built in, then
-    // the system's) are registered on demand (cjk_fonts.rs).
-    crate::cjk_fonts::install_with(ctx, cjk);
+    fonts
 }
 
 fn ui_fonts_id() -> egui::Id {
@@ -561,6 +582,15 @@ mod tests {
         }
         assert_eq!(ctx.fonts(|f| f.definitions().clone()), definitions, "Small restores original font tweaks exactly");
         assert_eq!(ctx.zoom_factor(), 1.0);
+    }
+
+    #[test]
+    fn font_definitions_are_the_fonts_installed_at_startup() {
+        let ctx = egui::Context::default();
+        let no_cjk = crate::cjk_fonts::Sources { locale: || None, files: |_| Vec::new(), last_resort: Vec::new, embedded: crate::cjk_fonts::no_embedded };
+        install_fonts_with(&ctx, no_cjk);
+        ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+        assert_eq!(ctx.fonts(|f| f.definitions().clone()), font_definitions());
     }
 
     #[test]

@@ -7,16 +7,29 @@ use serde_json::{Value, json};
 use crate::PhotocraftApp;
 
 pub const DISCORD: &str = "https://discord.gg/artcraft";
-pub const ARTCRAFT_WEBSITE: &str = "https://getartcraft.com";
 pub const APP_PAGE: &str = "https://getartcraft.com/apps/photocraft";
 pub const GITHUB: &str = "https://github.com/storytold/photocraft";
 pub const ISSUES: &str = "https://github.com/storytold/photocraft/issues";
 
 /// Help-menu link commands: (id, url). Labels live in `menus::UI_COMMANDS`.
-pub const COMMANDS: &[(&str, &str)] =
-    &[("help.discord", DISCORD), ("help.website", APP_PAGE), ("help.artcraftWebsite", ARTCRAFT_WEBSITE), ("help.github", GITHUB), ("help.reportIssue", ISSUES)];
+pub const COMMANDS: &[(&str, &str)] = &[("help.discord", DISCORD), ("help.website", APP_PAGE), ("help.github", GITHUB), ("help.reportIssue", ISSUES)];
+
+/// The links to the original makers' community and site (their Discord, and PhotoCraft's page on
+/// their site). A host app's build ([`crate::hosted`]) is a modified version that may not present
+/// itself as theirs (`docs/brand/LICENSE-brand.txt`), so it shows none of them; GitHub and Report
+/// an Issue (the source repository) stay.
+pub const COMMUNITY_COMMANDS: [&str; 2] = ["help.discord", "help.website"];
+
+/// Whether the community links and promotions show (not in a host app's build, see
+/// [`COMMUNITY_COMMANDS`]).
+pub fn branded() -> bool {
+    !crate::hosted::is_hosted()
+}
 
 pub fn url_for(id: &str) -> Option<&'static str> {
+    if !branded() && COMMUNITY_COMMANDS.contains(&id) {
+        return None;
+    }
     COMMANDS.iter().find(|c| c.0 == id).map(|c| c.1)
 }
 
@@ -40,15 +53,16 @@ pub fn discord_button(app: &mut PhotocraftApp, ui: &mut egui::Ui, min_width: f32
     r
 }
 
-/// "PhotoCraft website · GitHub · ArtCraft" as links, centred. Clicks route through [`open`] (the
-/// platform browser service) rather than `ui.hyperlink_to`, which uses the unreliable `ctx.open_url`.
+/// "PhotoCraft website · GitHub" as links, centred (only GitHub in a host app's build, see
+/// [`COMMUNITY_COMMANDS`]). Clicks route through [`open`] (the platform browser service) rather
+/// than `ui.hyperlink_to`, which uses the unreliable `ctx.open_url`.
 pub fn link_row(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get(ui.ctx());
-    let links = [(tl!("PhotoCraft website"), APP_PAGE), (tl!("GitHub"), GITHUB), (tl!("ArtCraft"), ARTCRAFT_WEBSITE)];
+    let links: &[(&str, &str)] = if branded() { &[(tl!("PhotoCraft website"), APP_PAGE), (tl!("GitHub"), GITHUB)] } else { &[(tl!("GitHub"), GITHUB)] };
     let font = egui::FontId::proportional(12.5);
     let sep = "  ·  ";
     let width: f32 = links.iter().map(|(l, _)| ui.painter().layout_no_wrap((*l).into(), font.clone(), t.text).size().x).sum::<f32>()
-        + 2.0 * ui.painter().layout_no_wrap(sep.into(), font.clone(), t.text).size().x;
+        + links.len().saturating_sub(1) as f32 * ui.painter().layout_no_wrap(sep.into(), font.clone(), t.text).size().x;
     let mut clicked: Option<&str> = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -101,7 +115,7 @@ mod tests {
     fn help_menu_lists_links_then_separator_then_system_info_and_about() {
         let app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
         let help: Vec<String> = crate::menus::menu_items(&app).into_iter().filter(|i| i.path == ["Help"]).map(|i| i.id).collect();
-        assert_eq!(help, ["help.discord", "help.website", "help.artcraftWebsite", "help.github", "help.reportIssue", "---", "help.systemInfo", "help.about"]);
+        assert_eq!(help, ["help.discord", "help.website", "help.github", "help.reportIssue", "---", "help.systemInfo", "help.about"]);
         for (id, _) in COMMANDS {
             assert!(crate::menus::is_live(id) && crate::menus::is_enabled(&app, id), "{id}");
         }

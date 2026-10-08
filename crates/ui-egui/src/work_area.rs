@@ -63,9 +63,10 @@ fn fitted_id() -> egui::Id {
 }
 
 /// Once, as soon as the monitor is known: maximize a window that is bigger than its monitor
-/// (it ran under the taskbar and off-screen). Returns true when it asked to.
+/// (it ran under the taskbar and off-screen). Returns true when it asked to. Never while hosted
+/// (`crate::hosted`): the host app owns the window.
 pub fn fit_window(ctx: &egui::Context) -> bool {
-    if ctx.data(|d| d.get_temp::<bool>(fitted_id())).is_some() {
+    if crate::hosted::is_hosted() || ctx.data(|d| d.get_temp::<bool>(fitted_id())).is_some() {
         return false;
     }
     let (monitor, outer, maximized, fullscreen) = ctx.input(|i| {

@@ -543,6 +543,31 @@ fn files_dropped_off_the_canvas_open_as_documents() {
     assert_eq!(app.session.documents().len(), 2);
 }
 
+/// A host app (`crate::hosted`) placing files: into the active document, in Free Transform, over
+/// the canvas, off it or with no position; opened as documents when none is open.
+#[test]
+fn files_a_host_places_go_into_the_active_document() {
+    let dir = std::env::temp_dir().join(format!("photocraft-host-place-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let png = dir.join("photo.png");
+    std::fs::write(&png, png_bytes(20, 10)).unwrap();
+    let ctx = egui::Context::default();
+    for at in [Some(egui::pos2(400.0, 300.0)), Some(egui::pos2(750.0, 300.0)), None] {
+        let mut app = app_with_canvas();
+        let layers = layer_count(&app);
+        app.place_paths(&ctx, std::slice::from_ref(&png), at);
+        app.place_next_dropped(&ctx);
+        assert_eq!(app.session.documents().len(), 1, "{at:?}");
+        assert_eq!(layer_count(&app), layers + 1, "{at:?}");
+        assert_eq!(app.ui.transform.as_ref().and_then(|t| t.made), Some(crate::state::MadeLayer::Place), "{at:?}");
+        assert!(app.ui.recent_files.is_empty(), "placing isn't opening");
+    }
+    let (mut app, _) = app_with(None, None);
+    app.place_paths(&ctx, std::slice::from_ref(&png), Some(egui::pos2(400.0, 300.0)));
+    assert_eq!(doc_names(&app), ["photo.png"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn notices_are_capped_and_dismissable_state_round_trips() {
     let (mut app, _) = app_with(None, None);

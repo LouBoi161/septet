@@ -53,9 +53,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.theme.studioLight", "Studio Light Theme", &["Window", "Theme"], None),
     ("window.theme.classic", "Classic Theme", &["Window", "Theme"], None),
     ("edit.search", "Search…", &["Edit"], Some("Cmd+K")),
-    ("help.discord", "Join the ArtCraft Discord…", &["Help"], None),
+    ("help.discord", "Join us on Discord", &["Help"], None),
     ("help.website", "PhotoCraft Website", &["Help"], None),
-    ("help.artcraftWebsite", "ArtCraft Website", &["Help"], None),
     ("help.github", "PhotoCraft on GitHub", &["Help"], None),
     ("help.reportIssue", "Report an Issue…", &["Help"], None),
     ("help.systemInfo", "System Info…", &["Help"], None),
@@ -729,6 +728,11 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
         for (k, it) in recent.into_iter().enumerate() {
             items.insert(after + 1 + k, it);
         }
+    }
+    // A host app's build shows none of the original makers' community links (see
+    // `links::COMMUNITY_COMMANDS`).
+    if !crate::links::branded() {
+        items.retain(|i| !crate::links::COMMUNITY_COMMANDS.contains(&i.id.as_str()));
     }
     // Help: the link items, a separator, then System Info and About.
     if let Some(at) = items.iter().position(|i| i.id == "help.systemInfo" || i.id == "help.about") {
