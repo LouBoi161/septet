@@ -123,12 +123,15 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             });
             let cloud_tip = unsaved.as_deref().unwrap_or("Local library — no cloud account needed");
             for (id, icon, tip, cmd) in [
-                ("discord", Icon::Chat, "Join the ArtCraft community on Discord", "app.discord"),
+                ("discord", Icon::Chat, "Join the community on Discord", "app.discord"),
                 ("cloud", Icon::Cloud, cloud_tip, ""),
                 ("help", Icon::Help, "Keyboard shortcuts", "app.shortcuts"),
                 ("share", Icon::Share, "Export", "dialog.export"),
                 ("bell", Icon::Bell, "Activity", "panel.activity"),
             ] {
+                if !cmd.is_empty() && !crate::links::shown(cmd) {
+                    continue;
+                }
                 let r = Rect::from_center_size(pos2(x, full.center().y), vec2(28.0, 28.0));
                 let resp = ui.interact(r, egui::Id::new(("top", id)), Sense::click()).on_hover_text(tip);
                 register(ui.ctx(), format!("icon:{id}"), r);

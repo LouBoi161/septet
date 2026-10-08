@@ -61,18 +61,21 @@ impl CameraProfile {
     }
 }
 
-/// LightCraft's configuration folder (settings, GPU marker, camera profiles).
+/// LightCraft's configuration folder (settings, GPU marker, camera profiles, the SAM 3 model): the
+/// data root when a host set one ([`crate::paths::set_data_root`]), else the OS's per-user one.
 pub fn config_dir() -> Option<PathBuf> {
-    if cfg!(target_os = "macos") {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/LightCraft"))
-    } else if cfg!(windows) {
-        std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("LightCraft"))
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-            .map(|c| c.join("lightcraft"))
-    }
+    crate::paths::state_dir(|| {
+        if cfg!(target_os = "macos") {
+            std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/LightCraft"))
+        } else if cfg!(windows) {
+            std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("LightCraft"))
+        } else {
+            std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+                .map(|c| c.join("lightcraft"))
+        }
+    })
 }
 
 /// Where camera profiles are read from and written to.

@@ -4,12 +4,16 @@
 //! On every other target this does nothing. A missing resource compiler is a warning, so a
 //! cross-compile from macOS or Linux still links, unless `LIGHTCRAFT_REQUIRE_WINRES=1` turns it
 //! into an error (for release builds).
+//!
+//! Nor with `HOSTED_BUILD` set: a host application that builds this package as a library (its own
+//! executable, its own icon and version info) must not get LightCraft's resources linked in.
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../../assets/app-icon/lightcraft.ico");
     println!("cargo:rerun-if-env-changed=LIGHTCRAFT_REQUIRE_WINRES");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+    println!("cargo:rerun-if-env-changed=HOSTED_BUILD");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") || std::env::var_os("HOSTED_BUILD").is_some() {
         return;
     }
     let mut res = winresource::WindowsResource::new();

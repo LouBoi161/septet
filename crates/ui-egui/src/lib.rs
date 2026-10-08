@@ -10,6 +10,7 @@ pub mod control;
 pub mod credits;
 pub mod export_task;
 pub mod headless;
+pub mod hosted;
 pub mod i18n;
 pub mod icons;
 pub mod import;
@@ -580,7 +581,10 @@ impl LightcraftApp {
 
     fn logic_inner(&mut self, ctx: &egui::Context) {
         if !self.styled {
-            theme::install_fonts(ctx);
+            // hosted: the host installed one font set for every app, ours included
+            if !hosted::is_hosted() {
+                theme::install_fonts(ctx);
+            }
             theme::apply(ctx);
             // File → Add from Device lists cards scanned in the background: show hot-plugs
             let repaint = ctx.clone();
@@ -593,8 +597,11 @@ impl LightcraftApp {
             self.font_language = self.ui.language;
         } else if self.font_language != self.ui.language {
             // Shared Han characters take the active language's forms (Japanese faces for 日本語,
-            // the Simplified Chinese face for 简体中文): rebuild the fallback order.
-            theme::install_fonts(ctx);
+            // the Simplified Chinese face for 简体中文): rebuild the fallback order (not when hosted:
+            // the host's fonts stay as installed).
+            if !hosted::is_hosted() {
+                theme::install_fonts(ctx);
+            }
             self.font_language = self.ui.language;
         } else {
             self.fonts_ready = true;
@@ -625,13 +632,8 @@ impl LightcraftApp {
         self.slideshow_tick(ctx);
         // back from an external editor: pick up the files it saved
         let focused = ctx.input(|i| i.focused);
-        if focused && !self.ui.was_focused && !self.ui.external_edits.is_empty() {
-            let ids = self.ui.external_edits.clone();
-            if let Ok(r) = self.session.execute("photo.reload", &serde_json::json!({"ids": ids}))
-                && r["reloaded"].as_array().is_some_and(|a| !a.is_empty())
-            {
-                self.toast(ctx, "Updated the edits saved in the external editor");
-            }
+        if focused && !self.ui.was_focused {
+            self.reload_external_edits(ctx);
         }
         self.ui.was_focused = focused;
         // auto import: list the watched folder every few seconds (on a worker thread: it may be on
@@ -686,6 +688,21 @@ impl LightcraftApp {
             {
                 self.toast(ctx, e);
             }
+        }
+    }
+
+    /// Reload the copies opened in an external editor this session (Edit in External Editor), so
+    /// what the editor saved shows. Run when the window regains focus, and by a host when
+    /// LightCraft's tab is shown again.
+    pub fn reload_external_edits(&mut self, ctx: &egui::Context) {
+        if self.ui.external_edits.is_empty() {
+            return;
+        }
+        let ids = self.ui.external_edits.clone();
+        if let Ok(r) = self.session.execute("photo.reload", &serde_json::json!({"ids": ids}))
+            && r["reloaded"].as_array().is_some_and(|a| !a.is_empty())
+        {
+            self.toast(ctx, "Updated the edits saved in the external editor");
         }
     }
 

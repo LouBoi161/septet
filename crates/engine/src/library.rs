@@ -32,11 +32,15 @@ use crate::{EngineError, LibrarySource, Result, Selection, Session};
 /// Library directory name inside the user's Pictures folder.
 pub const DEFAULT_NAME: &str = "LightCraft Library";
 
-/// The default library location: `$LIGHTCRAFT_LIBRARY` if set, else `~/Pictures/LightCraft Library`
+/// The default library location: `$LIGHTCRAFT_LIBRARY` if set, else `<data root>/Library` when a
+/// host set a data root ([`crate::paths::set_data_root`]), else `~/Pictures/LightCraft Library`
 /// (`%USERPROFILE%\Pictures\LightCraft Library` on Windows).
 pub fn default_dir() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("LIGHTCRAFT_LIBRARY").filter(|p| !p.is_empty()) {
         return Some(PathBuf::from(p));
+    }
+    if let Some(root) = crate::paths::data_root() {
+        return Some(root.join("Library"));
     }
     let home = if cfg!(windows) { std::env::var_os("USERPROFILE") } else { std::env::var_os("HOME") }?;
     Some(PathBuf::from(home).join("Pictures").join(DEFAULT_NAME))

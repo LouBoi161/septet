@@ -22,14 +22,15 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-mod alloc_release;
 mod control_server;
 #[cfg(target_os = "macos")]
 mod native_menu;
 
-use lightcraft_engine::Session;
-use lightcraft_ui_egui::panels::library_problem::LibraryProblem;
-use lightcraft_ui_egui::{LightcraftApp, Services, UiState};
+use lightcraft_embed::alloc_release;
+use lightcraft_embed::prefs::{PrefsWriter, config_dir, load_prefs};
+use lightcraft_embed::services::services;
+use lightcraft_embed::session::{configure_segmenter, open_session};
+use lightcraft_ui_egui::LightcraftApp;
 
 /// Reverse-DNS app id: Wayland app id, `.desktop` file and hicolor icon name.
 const APP_ID: &str = "ai.storyteller.lightcraft";
@@ -108,288 +109,6 @@ fn gpu_crash_notice(what: &str) -> String {
     )
 }
 
-fn config_dir() -> Option<std::path::PathBuf> {
-    lightcraft_engine::camera_profiles::config_dir()
-}
-
-/// The saved UI state and app settings (`<config>/ui.json`), if any, and a warning for the user
-/// when the file exists but can't be used (issue #103): a damaged file is kept as
-/// `ui.json.corrupt-<unix time>` first, so the next save can't lose the library location in it;
-/// one that can't be read at all is not written this session (`keep_file`).
-fn load_prefs() -> (Option<UiState>, Option<String>, bool) {
-    if std::env::var_os("LIGHTCRAFT_NO_PREFS").is_some() {
-        return (None, None, false);
-    }
-    let Some(path) = config_dir().map(|d| d.join("ui.json")) else { return (None, None, false) };
-    load_prefs_at(&path)
-}
-
-fn load_prefs_at(path: &std::path::Path) -> (Option<UiState>, Option<String>, bool) {
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (None, None, false),
-        Err(e) => {
-            let msg = format!("The app settings ({}) couldn't be read: {e}. Defaults are used, and the file isn't overwritten.", path.display());
-            return (None, Some(msg), true);
-        }
-    };
-    match serde_json::from_slice::<UiState>(&bytes) {
-        Ok(ui) => (Some(ui.sanitized()), None, false),
-        Err(e) => {
-            let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-            let keep = path.with_file_name(format!("ui.json.corrupt-{secs}"));
-            let kept = std::fs::rename(path, &keep);
-            let what = match &kept {
-                Ok(()) => format!("it was kept as {}", keep.display()),
-                Err(r) => format!("it couldn't be set aside ({r})"),
-            };
-            let msg = format!(
-                "The app settings ({}) are damaged ({e}); {what}. Defaults are used — reopen your library with Settings → Open Library… if it isn't shown.",
-                path.display()
-            );
-            (None, Some(msg), kept.is_err())
-        }
-    }
-}
-
-/// Write `bytes` to `path` atomically: a temp file, fsynced, renamed over it (a crash or a full
-/// disk leaves the old file or the new one, never a truncated one).
-fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let tmp = path.with_extension("json.tmp");
-    let written = (|| {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()
-    })();
-    if let Err(e) = written {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
-    std::fs::rename(&tmp, path)?;
-    if let Some(dir) = path.parent()
-        && let Ok(d) = std::fs::File::open(dir)
-    {
-        let _ = d.sync_all();
-    }
-    Ok(())
-}
-
-/// Saves `ui.json` (app settings, incl. the library to open at launch): as soon as the library
-/// changes, every few seconds when anything else changed, and at exit.
-#[derive(Default)]
-struct PrefsWriter {
-    written: Vec<u8>,
-    library: String,
-    checked: f64,
-    /// The last write failed (reported once until a write works).
-    failing: bool,
-    /// `ui.json` couldn't be read at launch: never overwrite it this session.
-    keep_file: bool,
-}
-
-impl PrefsWriter {
-    fn save(&mut self, app: &LightcraftApp) -> Result<(), String> {
-        if self.keep_file || std::env::var_os("LIGHTCRAFT_NO_PREFS").is_some() {
-            return Ok(());
-        }
-        let Some(d) = config_dir() else { return Ok(()) };
-        let bytes = serde_json::to_vec_pretty(&app.ui).map_err(|e| e.to_string())?;
-        if bytes == self.written {
-            return Ok(());
-        }
-        std::fs::create_dir_all(&d)
-            .and_then(|()| write_atomic(&d.join("ui.json"), &bytes))
-            .map_err(|e| format!("saving the app settings failed: {e}"))?;
-        self.written = bytes;
-        self.library = app.ui.settings.library_path.clone();
-        Ok(())
-    }
-
-    fn tick(&mut self, app: &mut LightcraftApp, ctx: &egui::Context) {
-        let now = ctx.input(|i| i.time);
-        let moved = app.ui.settings.library_path != self.library;
-        if !moved && now - self.checked < 3.0 {
-            return;
-        }
-        self.checked = now;
-        match self.save(app) {
-            Ok(()) => self.failing = false,
-            Err(e) => {
-                eprintln!("lightcraft: {e}");
-                if !self.failing {
-                    app.notices.push(format!("{e}. LightCraft keeps trying."));
-                }
-                self.failing = true;
-                // don't retry every frame
-                self.library = app.ui.settings.library_path.clone();
-            }
-        }
-    }
-}
-
-fn services() -> Services {
-    Services {
-        pick_folder: Some(Box::new(|| {
-            rfd::FileDialog::new().set_title(lightcraft_ui_egui::i18n::tr("Open Library")).pick_folder().map(|p| p.to_string_lossy().to_string())
-        })),
-        open_with: Some(Box::new(|path: &str, app: &str| {
-            // spawned, never waited for: the editor runs alongside
-            let app = app.trim();
-            let mut c = if cfg!(target_os = "macos") {
-                let mut c = std::process::Command::new("open");
-                if !app.is_empty() {
-                    c.args(["-a", app]);
-                }
-                c
-            } else if app.is_empty() {
-                if cfg!(target_os = "windows") {
-                    let mut c = std::process::Command::new("cmd");
-                    c.args(["/C", "start", ""]);
-                    c
-                } else {
-                    std::process::Command::new("xdg-open")
-                }
-            } else {
-                std::process::Command::new(app)
-            };
-            c.arg(path).spawn().map(|_| ()).map_err(|e| e.to_string())
-        })),
-        open_url: Some(Box::new(|url: &str| {
-            if !url.starts_with("https://") {
-                return Err("only https links are opened".into());
-            }
-            let status = if cfg!(target_os = "macos") {
-                std::process::Command::new("open").arg(url).status()
-            } else if cfg!(target_os = "windows") {
-                std::process::Command::new("explorer").arg(url).status()
-            } else {
-                std::process::Command::new("xdg-open").arg(url).status()
-            };
-            status.map(|_| ()).map_err(|e| e.to_string())
-        })),
-        reveal: Some(Box::new(|path: &str| {
-            let status = if cfg!(target_os = "macos") {
-                std::process::Command::new("open").args(["-R", path]).status()
-            } else if cfg!(target_os = "windows") {
-                std::process::Command::new("explorer").arg(format!("/select,{path}")).status()
-            } else {
-                let dir = std::path::Path::new(path).parent().map(|d| d.to_string_lossy().to_string()).unwrap_or_else(|| ".".into());
-                std::process::Command::new("xdg-open").arg(dir).status()
-            };
-            status
-                .map_err(|e| e.to_string())
-                .and_then(|s| if s.success() || cfg!(target_os = "windows") { Ok(()) } else { Err(format!("reveal failed: {s}")) })
-        })),
-        pick_files: Some(Box::new(|| {
-            rfd::FileDialog::new()
-                .add_filter(
-                    lightcraft_ui_egui::i18n::tr("Photos"),
-                    &[
-                        "jpg", "jpeg", "png", "tif", "tiff", "webp", "dng", "cr2", "cr3", "nef", "nrw", "arw", "raf", "orf", "rw2", "rwl", "raw",
-                        "pef", "psd", "jxl", "gif", "bmp",
-                    ],
-                )
-                .pick_files()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect()
-        })),
-        pick_preset_files: Some(Box::new(|| {
-            rfd::FileDialog::new()
-                .set_title(lightcraft_ui_egui::i18n::tr("Import Presets"))
-                .add_filter(
-                    lightcraft_ui_egui::i18n::tr("Presets & Profiles"),
-                    &["lcpreset", "xmp", "lrtemplate", "zip", "dng", "lmp", "mplumpack", "cube"],
-                )
-                .pick_files()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect()
-        })),
-        pick_tracklog: Some(Box::new(|| {
-            rfd::FileDialog::new()
-                .set_title(lightcraft_ui_egui::i18n::tr("Auto-Tag from Tracklog"))
-                .add_filter(lightcraft_ui_egui::i18n::tr("GPS Track Log"), &["gpx"])
-                .pick_file()
-                .map(|p| vec![p.to_string_lossy().to_string()])
-                .unwrap_or_default()
-        })),
-        save_preset_file: Some(Box::new(|name: &str| {
-            rfd::FileDialog::new()
-                .set_title(lightcraft_ui_egui::i18n::tr("Export Presets"))
-                .add_filter(lightcraft_ui_egui::i18n::tr("LightCraft Preset"), &["lcpreset"])
-                .set_file_name(name)
-                .save_file()
-                .map(|p| p.to_string_lossy().to_string())
-        })),
-        pick_curve_preset_files: Some(Box::new(|| {
-            rfd::FileDialog::new()
-                .set_title(lightcraft_ui_egui::i18n::tr("Import Point Curve Presets"))
-                .add_filter(lightcraft_ui_egui::i18n::tr("Point Curve Presets"), &["lccurve", "json"])
-                .pick_files()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect()
-        })),
-        save_curve_preset_file: Some(Box::new(|name: &str| {
-            rfd::FileDialog::new()
-                .set_title(lightcraft_ui_egui::i18n::tr("Export Point Curve Presets"))
-                .add_filter(lightcraft_ui_egui::i18n::tr("Point Curve Presets"), &["lccurve"])
-                .set_file_name(name)
-                .save_file()
-                .map(|p| p.to_string_lossy().to_string())
-        })),
-        // atomic (temp file + sync + rename): a failed write never leaves a truncated file
-        write_shared: Some(std::sync::Arc::new(lightcraft_engine::export::write_file)),
-        write: Some(Box::new(lightcraft_engine::export::write_file)),
-        png: Some(Box::new(|img: &lightcraft_raster::Rgba8| {
-            lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(img), &lightcraft_codecs::EncodeMeta::default()).unwrap_or_default()
-        })),
-        // the library is a folder on disk: backed up with the user's other files
-        backup_library: None,
-        restore_library: None,
-    }
-}
-
-/// The persistent library session, or with `--memory` an in-memory one (demo photos).
-///
-/// If the library can't be opened the session is empty and in memory — never seeded with the
-/// demo photos, never written anywhere — and the problem is returned: the window then says so
-/// and offers Try Again / Choose Another Library… / Continue Without Saving / Quit (issue #100).
-fn open_session(in_memory: bool, dir: Option<std::path::PathBuf>, seed_demo: bool) -> (Session, Option<LibraryProblem>) {
-    if in_memory {
-        return (if seed_demo { Session::with_demo() } else { Session::new() }.with_fs().with_system_clock(), None);
-    }
-    let unopened = || Session::new().with_fs().with_system_clock();
-    let Some(dir) = dir else {
-        eprintln!("lightcraft: no library location (set --library or LIGHTCRAFT_LIBRARY)");
-        return (unopened(), Some(LibraryProblem::new("", "There is no home folder to keep the library in. Choose a folder for it.")));
-    };
-    let t0 = std::time::Instant::now();
-    let mut s = Session::new().with_fs().with_system_clock();
-    match s.open_library(&dir, seed_demo) {
-        Ok(r) => {
-            let (replayed, torn) = (r.replayed, r.torn_bytes);
-            eprintln!(
-                "lightcraft: library {}: {} photos, {replayed} log records replayed{} ({:.1} ms)",
-                dir.display(),
-                s.catalog.len(),
-                if torn > 0 { ", torn tail repaired" } else { "" },
-                t0.elapsed().as_secs_f64() * 1000.0
-            );
-            (s, None)
-        }
-        Err(e) => {
-            eprintln!("lightcraft: can't open library {}: {e}", dir.display());
-            (unopened(), Some(LibraryProblem::new(dir.to_string_lossy(), e.to_string())))
-        }
-    }
-}
-
 const HELP: &str = "\
 lightcraft — photo library + raw developer
 
@@ -440,7 +159,7 @@ fn install_log() {
 }
 
 fn main() -> eframe::Result {
-    lightcraft_engine::guard::install_hook(std::env::temp_dir().join("lightcraft-panics.log"));
+    lightcraft_engine::guard::install_hook(lightcraft_engine::paths::data_root().unwrap_or_else(std::env::temp_dir).join("lightcraft-panics.log"));
     install_log();
     alloc_release::install();
     let mut control_port: Option<u16> = std::env::var("LIGHTCRAFT_CONTROL_PORT").ok().and_then(|p| p.parse().ok());
@@ -472,14 +191,7 @@ fn main() -> eframe::Result {
     }
     let (prefs, prefs_warning, keep_prefs_file) = load_prefs();
     // --library, else the library last opened from Settings, else the default location
-    let library_dir = library_dir.or_else(|| {
-        prefs
-            .as_ref()
-            .map(|u| u.settings.library_path.clone())
-            .filter(|p| !p.is_empty() && std::env::var_os("LIGHTCRAFT_LIBRARY").is_none())
-            .map(Into::into)
-    });
-    let library_dir = library_dir.or_else(lightcraft_engine::library::default_dir);
+    let library_dir = library_dir.or_else(|| lightcraft_embed::session::library_dir(prefs.as_ref()));
     // GPU compute: off if the preference says so, or if the last launch died creating the device
     // (issue #136) — before anything can create it
     let gpu_crash = gpu_crash_check();
@@ -505,12 +217,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let (mut session, problem) = open_session(in_memory, library_dir, seed_demo && files.is_empty());
-            // AI masks: the SAM 3 checkpoint (facebook/sam3) in <config>/models/sam3, or LIGHTCRAFT_SAM3_DIR
-            // (never required: without it, AI masks offer to download it; see docs/ai-masks.md)
-            session.segmenter.dir =
-                std::env::var_os("LIGHTCRAFT_SAM3_DIR").map(std::path::PathBuf::from).or_else(|| config_dir().map(|d| d.join("models").join("sam3")));
-            // the user's own download locations, one base URL per line (LIGHTCRAFT_SAM3_MIRRORS too)
-            session.segmenter.mirrors_file = config_dir().map(|d| d.join("models").join("sam3-mirrors.txt"));
+            configure_segmenter(&mut session);
             let mut app = LightcraftApp::new(session, services());
             if let Some(ui) = prefs {
                 app.ui = ui;
@@ -519,12 +226,7 @@ fn main() -> eframe::Result {
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.notices.extend(prefs_warning);
             // what's on disk now: only changes are written
-            let writer = PrefsWriter {
-                written: serde_json::to_vec_pretty(&app.ui).unwrap_or_default(),
-                library: app.ui.settings.library_path.clone(),
-                keep_file: keep_prefs_file,
-                ..Default::default()
-            };
+            let writer = PrefsWriter::new(&app, keep_prefs_file);
             // after the snapshot above, so the writer saves the switched-off preference
             if let Some(notice) = gpu_crash {
                 app.ui.settings.gpu = false;
@@ -568,25 +270,6 @@ mod tests {
         d
     }
 
-    /// Issue #103: a damaged ui.json (which holds the library location) is kept aside and
-    /// reported, not silently replaced by the defaults.
-    #[test]
-    fn damaged_ui_json_is_kept_and_reported() {
-        let d = dir("damaged");
-        let path = d.join("ui.json");
-        std::fs::write(&path, br#"{"settings": {"library_path": "/Volumes/Photos/Lib"#).unwrap();
-        let (ui, warning, keep) = load_prefs_at(&path);
-        assert!(ui.is_none() && !keep);
-        let warning = warning.unwrap();
-        assert!(warning.contains("damaged") && warning.contains("ui.json.corrupt-"), "{warning}");
-        assert!(!path.exists());
-        let kept: Vec<_> = std::fs::read_dir(&d).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
-        assert!(kept.len() == 1 && kept[0].starts_with("ui.json.corrupt-"), "{kept:?}");
-        // a missing file is just "no settings yet"
-        assert_eq!(load_prefs_at(&path).1, None);
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
     /// Issue #136: a GPU init marker left by a crashed launch is reported once and removed.
     #[test]
     fn gpu_crash_marker_is_reported_once() {
@@ -614,24 +297,5 @@ mod tests {
             }
         }
         assert!(!b.is_empty());
-    }
-
-    #[test]
-    fn ui_json_is_written_atomically() {
-        let d = dir("atomic");
-        let path = d.join("ui.json");
-        std::fs::write(&path, b"old").unwrap();
-        write_atomic(&path, b"{\"new\": true}").unwrap();
-        assert_eq!(std::fs::read(&path).unwrap(), b"{\"new\": true}");
-        assert!(!d.join("ui.json.tmp").exists());
-        // a failed write leaves the old file
-        let missing = d.join("gone").join("ui.json");
-        assert!(write_atomic(&missing, b"x").is_err());
-        assert_eq!(std::fs::read(&path).unwrap(), b"{\"new\": true}");
-        let ui = UiState::default();
-        write_atomic(&path, &serde_json::to_vec_pretty(&ui).unwrap()).unwrap();
-        let (loaded, warning, _) = load_prefs_at(&path);
-        assert!(loaded.is_some() && warning.is_none());
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

@@ -29,6 +29,7 @@ pub mod media;
 pub mod memory;
 pub mod merge;
 pub mod originals;
+pub mod paths;
 pub mod preset_import;
 pub mod preset_luminar;
 pub mod presets;

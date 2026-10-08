@@ -17,15 +17,30 @@ pub const HELP: &str = "https://github.com/storytold/lightcraft/tree/main/docs";
 
 pub const LINKS: &[(&str, &str, &str)] = &[
     ("app.help", "LightCraft Help", HELP),
-    ("app.discord", "Join the ArtCraft Discord…", DISCORD),
+    ("app.discord", "Join the Community on Discord…", DISCORD),
     ("app.website", "LightCraft Website", APP_PAGE),
     ("app.github", "LightCraft on GitHub", GITHUB),
-    ("app.artcraft", "ArtCraft Website", WEBSITE),
+    ("app.artcraft", "More Creative Apps", WEBSITE),
     ("app.feedback", "Send Feedback…", FEEDBACK),
 ];
 
 /// Where feedback and bug reports go.
 pub const FEEDBACK: &str = "https://github.com/storytold/lightcraft/issues/new";
+
+/// The link commands that advertise ArtCraft — its community (Discord) and its website, this app's
+/// page there included. A build inside another application (hosted) is a derived work, which may
+/// not show the ArtCraft marks or suggest the ArtCraft team made it (`docs/brand/LICENSE-brand.txt`):
+/// there they are not offered. Help, GitHub, Send Feedback (the source repository) stay.
+pub const ARTCRAFT: &[&str] = &["app.discord", "app.website", "app.artcraft"];
+
+/// Whether link command `cmd` is offered: everything standalone; hosted, nothing in [`ARTCRAFT`].
+pub fn shown(cmd: &str) -> bool {
+    !(crate::hosted::is_hosted() && ARTCRAFT.contains(&cmd))
+}
+
+/// The About box's plain-text credit: this is a modified version of LightCraft, which may name its
+/// origin only so (`docs/brand/LICENSE-brand.txt`).
+pub const BASED_ON: &str = "Based on LightCraft by the ArtCraft team (MIT OR Apache-2.0).";
 
 /// The URL behind a link command id.
 pub fn url_of(cmd: &str) -> Option<&'static str> {

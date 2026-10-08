@@ -115,15 +115,18 @@ pub fn install_fonts(ctx: &egui::Context) {
 /// that language's forms. Without craft-fonts (`craft` empty) CJK text has no glyphs and shows as
 /// boxes.
 pub fn font_definitions(craft: &'static [lightcraft_engine::CraftFont]) -> FontDefinitions {
+    font_definitions_for(craft, crate::i18n::language())
+}
+
+/// [`font_definitions`] for `language`, whatever the UI language is now (a host installing the
+/// fonts before LightCraft runs builds them for the default language).
+pub fn font_definitions_for(craft: &'static [lightcraft_engine::CraftFont], language: crate::i18n::Locale) -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert("Inter".into(), Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/Inter-Regular.ttf"))));
     fonts.font_data.insert("Inter-SemiBold".into(), Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf"))));
     // Craft-fonts faces in preference order for a family drawn in `style`.
     let fallback = |style: &str| {
-        lightcraft_engine::fonts::cjk_fallback(craft, crate::i18n::language().script(), style)
-            .into_iter()
-            .map(craft_font_name)
-            .collect::<Vec<String>>()
+        lightcraft_engine::fonts::cjk_fallback(craft, language.script(), style).into_iter().map(craft_font_name).collect::<Vec<String>>()
     };
     let (regular, bold) = (fallback("Regular"), fallback("Bold"));
     for name in regular.iter().chain(bold.iter()) {

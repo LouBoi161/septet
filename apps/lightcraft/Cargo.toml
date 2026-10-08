@@ -6,6 +6,12 @@ license.workspace = true
 publish = false
 default-run = "lightcraft"
 
+# The app as a library (settings, services, library session) for main.rs, and `Embedded`: LightCraft
+# as a tab of a host application (Septet).
+[lib]
+name = "lightcraft_embed"
+path = "src/lib.rs"
+
 [lints]
 workspace = true
 
