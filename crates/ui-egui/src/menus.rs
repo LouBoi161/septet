@@ -119,9 +119,9 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     uic!("mode.import", "Import", [], None),
     uic!("mode.edit", "Edit", [], None),
     uic!("mode.export", "Export", ["File", "Export"], Some("Cmd+M")),
-    uic!("help.discord", "Join the ArtCraft Discord…", ["Help"], None),
-    uic!("help.website", "ArtCraft Website", ["Help"], None),
-    uic!("help.appPage", "FilmCraft on getartcraft.com", ["Help"], None),
+    uic!("help.discord", "Join the Community Discord…", ["Help"], None),
+    uic!("help.website", "getartcraft.com", ["Help"], None),
+    uic!("help.appPage", "FilmCraft Website", ["Help"], None),
     uic!("help.github", "FilmCraft on GitHub", ["Help"], None),
     uic!("help.reportIssue", "Report an Issue…", ["Help"], None),
     uic!("help.revealLogFiles", "Reveal Log Files…", ["Help"], None),
@@ -471,7 +471,7 @@ pub fn menu_items_for(session: &filmcraft_engine::Session) -> Vec<MenuItem> {
         });
     }
     for c in UI_COMMANDS.iter().chain(crate::panels::keyboard::COMMANDS) {
-        if c.menu.is_empty() {
+        if c.menu.is_empty() || !crate::links::offered(c.id) {
             continue;
         }
         out.push(MenuItem {
@@ -567,8 +567,12 @@ fn shifted_key(k: egui::Key) -> Option<egui::Key> {
 /// rebound and resolved alongside engine commands (the `shortcuts.` commands).
 pub fn external_commands() -> Vec<filmcraft_engine::shortcuts::CommandInfo> {
     use filmcraft_engine::shortcuts::CommandInfo;
-    let mut v: Vec<CommandInfo> =
-        UI_COMMANDS.iter().chain(crate::panels::keyboard::COMMANDS).map(|c| CommandInfo::new(c.id, c.label, c.menu, c.shortcut)).collect();
+    let mut v: Vec<CommandInfo> = UI_COMMANDS
+        .iter()
+        .chain(crate::panels::keyboard::COMMANDS)
+        .filter(|c| crate::links::offered(c.id))
+        .map(|c| CommandInfo::new(c.id, c.label, c.menu, c.shortcut))
+        .collect();
     for p in PanelKind::ALL {
         v.push(CommandInfo::new(&panel_command_id(p), p.title(), &["Window"], p.window_shortcut()));
     }

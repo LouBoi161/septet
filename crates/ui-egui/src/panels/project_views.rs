@@ -949,6 +949,12 @@ pub fn freeform_view(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, v: &
     });
 }
 
+/// Drop the card moves in progress in every Freeform view (their release happened elsewhere). The
+/// moves are the only `(u64, Vec2)` values the views keep.
+pub(crate) fn forget_freeform_drag(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.remove_by_type::<(u64, egui::Vec2)>());
+}
+
 fn cards_stack(cards: &[Card], item: u64) -> Option<u64> {
     cards.iter().find(|c| c.item == item).and_then(|c| c.stack)
 }

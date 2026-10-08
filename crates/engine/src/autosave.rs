@@ -470,10 +470,29 @@ impl Preferences {
     }
 }
 
-/// The per-user data directory (`FILMCRAFT_DATA_DIR` overrides):
+/// The data root set with [`set_data_root`] (a portable install).
+static DATA_ROOT: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
+
+/// Keep all per-user data (settings, workspaces, auto-save and crash recovery, shortcuts, presets,
+/// logs, the media cache, downloaded speech models) in `root` instead of the per-user folder of
+/// [`default_data_dir`], e.g. next to a portable install; None = that folder (the default).
+/// Process-wide: set it before the session starts.
+pub fn set_data_root(root: Option<PathBuf>) {
+    *DATA_ROOT.write().unwrap_or_else(std::sync::PoisonError::into_inner) = root;
+}
+
+/// The data root set with [`set_data_root`], if any.
+pub fn data_root() -> Option<PathBuf> {
+    DATA_ROOT.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+}
+
+/// The per-user data directory: the [`data_root`] when one is set, else `FILMCRAFT_DATA_DIR`, else
 /// macOS `~/Library/Application Support/FilmCraft`, Windows `%APPDATA%\FilmCraft`,
 /// elsewhere `$XDG_DATA_HOME/filmcraft` or `~/.local/share/filmcraft`.
 pub fn default_data_dir() -> Option<PathBuf> {
+    if let Some(root) = data_root() {
+        return Some(root);
+    }
     let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     if let Some(d) = env("FILMCRAFT_DATA_DIR") {
         return Some(d);

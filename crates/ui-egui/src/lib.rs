@@ -14,6 +14,7 @@ pub mod credits;
 pub mod dock;
 pub mod frames;
 pub mod header;
+pub mod hosted;
 pub mod i18n;
 pub mod icons;
 pub mod links;

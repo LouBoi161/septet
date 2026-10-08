@@ -41,6 +41,12 @@ fn output_device(h: &cpal::Host, name: &str) -> Option<cpal::Device> {
     h.default_output_device()
 }
 
+impl Default for CpalOut {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CpalOut {
     pub fn new() -> Self {
         let host = cpal::default_host();

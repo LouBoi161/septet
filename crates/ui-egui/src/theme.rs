@@ -257,9 +257,18 @@ pub fn font_families() -> Vec<FontFamily> {
     vec![FontFamily::Proportional, FontFamily::Monospace, FontFamily::Name("semibold".into()), FontFamily::Name("medium".into())]
 }
 
-/// Install fonts (Inter, Inter SemiBold, JetBrains Mono, then the Japanese craft-fonts when built with
-/// `CRAFT_FONTS_DIR`) and egui visuals.
+/// Install fonts ([`font_definitions`]) and egui visuals. Hosted ([`crate::hosted`]), the host
+/// installs the fonts for all its apps, so only the visuals are applied here.
 pub fn install(ctx: &egui::Context, t: &Tokens) {
+    if !crate::hosted::is_hosted() {
+        ctx.set_fonts(font_definitions());
+    }
+    apply_visuals(ctx, t);
+}
+
+/// The interface fonts: Inter, Inter Medium and SemiBold (the "medium" and "semibold" families),
+/// JetBrains Mono, then the Japanese craft-fonts when built with `CRAFT_FONTS_DIR`.
+pub fn font_definitions() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert("inter".into(), Arc::new(FontData::from_static(filmcraft_text::fonts::INTER_REGULAR)));
     fonts.font_data.insert("inter-medium".into(), Arc::new(FontData::from_static(filmcraft_text::fonts::INTER_MEDIUM)));
@@ -270,8 +279,7 @@ pub fn install(ctx: &egui::Context, t: &Tokens) {
     fonts.families.insert(FontFamily::Name("semibold".into()), vec!["inter-semibold".into(), "inter".into()]);
     fonts.families.insert(FontFamily::Name("medium".into()), vec!["inter-medium".into(), "inter".into()]);
     add_craft_fonts(&mut fonts);
-    ctx.set_fonts(fonts);
-    apply_visuals(ctx, t);
+    fonts
 }
 
 /// Name of the egui font for a craft-fonts entry.

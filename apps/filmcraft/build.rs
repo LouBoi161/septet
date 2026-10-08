@@ -4,12 +4,17 @@
 //! On every other target this does nothing (`winresource` is only a build-dependency on Windows
 //! hosts). A missing resource compiler is a warning, unless `FILMCRAFT_REQUIRE_WINRES=1` (for
 //! release builds) turns it into an error.
+//!
+//! An app that builds this package as a library to host FilmCraft sets `HOSTED_BUILD`: the
+//! resources would otherwise be linked into the host's executable too (on windows-gnu they are a
+//! static library every dependent links), giving it FilmCraft's icon and version info.
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../../assets/app-icon/filmcraft.ico");
     println!("cargo:rerun-if-env-changed=FILMCRAFT_REQUIRE_WINRES");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+    println!("cargo:rerun-if-env-changed=HOSTED_BUILD");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") || std::env::var_os("HOSTED_BUILD").is_some() {
         return;
     }
     windows::embed_resources();

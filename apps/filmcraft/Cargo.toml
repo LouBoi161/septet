@@ -7,6 +7,12 @@ license.workspace = true
 default-run = "filmcraft"
 build = "build.rs"
 
+# The desktop pieces the binary uses (audio, file dialogs, start-up), and FilmCraft as a tab inside a
+# host shell (`filmcraft_embed::Embedded`).
+[lib]
+name = "filmcraft_embed"
+path = "src/lib.rs"
+
 [lints]
 workspace = true
 

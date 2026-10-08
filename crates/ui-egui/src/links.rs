@@ -1,16 +1,18 @@
 //! Community and project links (Help menu, About dialog, header Discord button, Home screen).
 //!
-//! FilmCraft is part of the ArtCraft family: the community lives on the ArtCraft Discord, every
-//! app has a page on the ArtCraft website and a public GitHub repository.
+//! FilmCraft comes from the ArtCraft team, whose community Discord and website these link to, and
+//! has a public GitHub repository. This modified version doesn't present itself as an ArtCraft
+//! product (`docs/brand/LICENSE-brand.txt`): the labels don't use the ArtCraft name, and a build
+//! hosted in another app leaves the community and website links out.
 
 /// The app's short name, used in the website and repository URLs.
 pub const APP: &str = "filmcraft";
 
-/// The ArtCraft community Discord.
+/// The community Discord of FilmCraft's makers.
 pub const DISCORD: &str = "https://discord.gg/artcraft";
-/// The ArtCraft website.
+/// The website of FilmCraft's makers.
 pub const WEBSITE: &str = "https://getartcraft.com";
-/// FilmCraft's page on the ArtCraft website.
+/// FilmCraft's page on that website.
 pub const APP_PAGE: &str = "https://getartcraft.com/apps/filmcraft";
 /// FilmCraft's source repository.
 pub const GITHUB: &str = "https://github.com/storytold/filmcraft";
@@ -19,16 +21,26 @@ pub const ISSUES: &str = "https://github.com/storytold/filmcraft/issues";
 
 /// (command id, label, url) for every link, in menu order.
 pub const ALL: [(&str, &str, &str); 5] = [
-    ("help.discord", "Join the ArtCraft Discord…", DISCORD),
-    ("help.website", "ArtCraft Website", WEBSITE),
-    ("help.appPage", "FilmCraft on getartcraft.com", APP_PAGE),
+    ("help.discord", "Join the Community Discord…", DISCORD),
+    ("help.website", "getartcraft.com", WEBSITE),
+    ("help.appPage", "FilmCraft Website", APP_PAGE),
     ("help.github", "FilmCraft on GitHub", GITHUB),
     ("help.reportIssue", "Report an Issue…", ISSUES),
 ];
 
-/// The URL a `help.*` link command opens.
+/// The links to the makers' community and website (their Discord, their website, FilmCraft's page
+/// there). A build hosted in another app must not suggest they made or endorse it, and leaves them
+/// out (`docs/brand/LICENSE-brand.txt`); FilmCraft's repository and issue tracker stay.
+pub const UPSTREAM: [&str; 3] = ["help.discord", "help.website", "help.appPage"];
+
+/// Whether the link command `id` is offered: every link standalone; hosted, not the [`UPSTREAM`] ones.
+pub fn offered(id: &str) -> bool {
+    !(crate::hosted::is_hosted() && UPSTREAM.contains(&id))
+}
+
+/// The URL a `help.*` link command opens (one that is [`offered`]).
 pub fn url_for(command: &str) -> Option<&'static str> {
-    ALL.iter().find(|(id, _, _)| *id == command).map(|(_, _, u)| *u)
+    ALL.iter().find(|(id, _, _)| *id == command && offered(id)).map(|(_, _, u)| *u)
 }
 
 /// Open `url` in the system browser (a new tab on the web).

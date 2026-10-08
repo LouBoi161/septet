@@ -455,6 +455,20 @@ fn start_file_drag(app: &mut FilmcraftApp, ui: &egui::Ui, e: &Entry) {
     }
 }
 
+/// The items imported for a file drag in progress (the first is the one carried).
+pub(crate) fn drag_items(ctx: &egui::Context) -> Option<Vec<u64>> {
+    with_cache(ctx, |c| c.drag.as_ref().map(|d| d.0.clone()))
+}
+
+/// A file drag ended in another app: take the import back, as a drop on nothing does.
+pub(crate) fn cancel_drag(app: &mut FilmcraftApp, ctx: &egui::Context) {
+    let Some((items, hist, _)) = with_cache(ctx, |c| c.drag.take()) else { return };
+    let used_elsewhere = app.session.history.undo.len() > hist;
+    if !used_elsewhere && items.iter().all(|i| app.session.project.item(ItemId(*i)).is_some()) {
+        let _ = app.session.execute("edit.undo", json!({}));
+    }
+}
+
 /// After a file drag ends: keep the import when it landed on a panel that takes items.
 fn finish_drag(app: &mut FilmcraftApp, ui: &egui::Ui) {
     let Some((items, hist, _)) = with_cache(ui.ctx(), |c| c.drag.clone()) else { return };

@@ -21,17 +21,14 @@
 
 mod app_nap;
 mod args;
-mod audio;
-mod audio_in;
 mod control_server;
 #[cfg(target_os = "macos")]
 mod native_menu;
 mod window_raise;
 
 use args::{Cli, Launch};
-use chrono::TimeZone;
-use filmcraft_engine::Session;
-use filmcraft_engine::autosave::{AutosaveConfig, default_data_dir};
+use filmcraft_embed::{audio, desktop};
+use filmcraft_engine::autosave::default_data_dir;
 use filmcraft_ui_egui::FilmcraftApp;
 use serde_json::json;
 
@@ -89,7 +86,7 @@ fn main() -> eframe::Result {
     filmcraft_ui_egui::crash::install(data_dir.clone().or_else(default_data_dir).map(|d| d.join("Logs")));
     // OS hardware video decoders (VideoToolbox on macOS) in front of our own; Settings ▸ Playback ▸
     // Hardware decoding switches them off. Unsupported streams and failures use our decoders.
-    register_hardware_decoders();
+    desktop::register_hardware_decoders();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("FilmCraft")
@@ -111,42 +108,8 @@ fn main() -> eframe::Result {
         "FilmCraft",
         options,
         Box::new(move |cc| {
-            let mut session = Session::default();
-            if let Some(dir) = data_dir.clone().or_else(default_data_dir) {
-                let mut cfg = AutosaveConfig::new(dir);
-                cfg.local_offset = local_offset;
-                if let Err(e) = session.start_autosave(cfg) {
-                    eprintln!("filmcraft: auto-save and crash recovery unavailable: {e}");
-                }
-            }
-            // voice-over recording reads the microphone through cpal
-            session.voiceover.input = Some(Box::new(audio_in::CpalIn::new(&session.prefs.audio_hardware.device_class)));
-            let project = files.iter().find(|f| f.ends_with(".fcproj")).cloned();
-            if let Some(p) = project {
-                if let Err(e) = session.execute("file.open", json!({"path": p})) {
-                    eprintln!("filmcraft: {e}");
-                }
-            } else if !startup_flag && session.prefs.general.at_startup == "openMostRecent" {
-                // Settings ▸ General ▸ At Startup ▸ Open Most Recent
-                let recent = session.prefs.general.recent_projects.iter().find(|p| std::path::Path::new(p).exists()).cloned();
-                match recent {
-                    Some(p) => {
-                        if let Err(e) = session.execute("file.open", json!({"path": p})) {
-                            eprintln!("filmcraft: {e}");
-                        }
-                    }
-                    None => {
-                        let _ = session.execute("file.openDemoProject", json!({}));
-                    }
-                }
-            } else if !startup_flag && session.prefs.general.at_startup == "emptyProject" {
-            } else if demo {
-                let _ = session.execute("file.openDemoProject", json!({}));
-            }
-            let media: Vec<String> = files.iter().filter(|f| !f.ends_with(".fcproj")).cloned().collect();
-            if !media.is_empty() {
-                let _ = session.execute("file.import", json!({"paths": media}));
-            }
+            let mut session = desktop::session(data_dir.clone());
+            desktop::open_at_startup(&mut session, &files, demo, startup_flag);
             if recover == Some(true) && !session.recovery_candidates().is_empty() {
                 let id = session.recovery_candidates()[0].id.clone();
                 match session.execute("file.recover", json!({"id": id})) {
@@ -167,28 +130,11 @@ fn main() -> eframe::Result {
             // Keep device selection available even when the default device is unavailable.
             // Settings ▸ Audio Hardware is applied on the first frame (`apply_prefs`).
             app.audio = Some(Box::new(audio::CpalOut::new()));
-            app.hooks.pick_files = Some(Box::new(|exts: &[&str]| {
-                rfd::FileDialog::new().add_filter("Media", exts).pick_files().unwrap_or_default().into_iter().map(|p| p.to_string_lossy().to_string()).collect()
-            }));
-            // Link Media ▸ Locate…, Attach Proxies, Reconnect Full Resolution: one path, not imported.
-            app.hooks.pick_file_for_relink =
-                Some(Box::new(|exts: &[&str], _hint| rfd::FileDialog::new().add_filter("Media", exts).pick_file().map(|p| p.to_string_lossy().to_string())));
-            app.hooks.pick_save = Some(Box::new(|name: &str| {
-                rfd::FileDialog::new().add_filter("FilmCraft Project", &["fcproj"]).set_file_name(name).save_file().map(|p| p.to_string_lossy().to_string())
-            }));
-            app.hooks.pick_save_as = Some(Box::new(|filter: &str, exts: &[&str], name: &str| {
-                rfd::FileDialog::new().add_filter(filter, exts).set_file_name(name).save_file().map(|p| p.to_string_lossy().to_string())
-            }));
-            app.hooks.pick_folder = Some(Box::new(|| rfd::FileDialog::new().pick_folder().map(|p| p.to_string_lossy().to_string())));
-            app.hooks.open_path = Some(Box::new(open_path));
+            desktop::install_file_dialogs(&mut app);
+            app.hooks.open_path = Some(Box::new(desktop::open_path));
             app.hooks.raise_without_focus = Some(Box::new(|| {
                 window_raise::raise_without_focus();
             }));
-            app.hooks.pick_open_file = Some(Box::new(|filter: &str, exts: &[&str]| {
-                rfd::FileDialog::new().add_filter(filter, exts).pick_file().map(|p| p.to_string_lossy().to_string())
-            }));
-            app.hooks.pick_open_project =
-                Some(Box::new(|| rfd::FileDialog::new().add_filter("FilmCraft Project", &["fcproj"]).pick_file().map(|p| p.to_string_lossy().to_string())));
             #[cfg(target_os = "macos")]
             {
                 let (rx, update) = native_menu::install(&app, cc.egui_ctx.clone());
@@ -214,47 +160,6 @@ fn main() -> eframe::Result {
     started
 }
 
-/// Open a file in its default application, or reveal it in the file manager (Edit Original,
-/// Reveal Log Files).
-fn open_path(path: &str, reveal: bool) -> Result<(), String> {
-    let mut cmd = if cfg!(target_os = "macos") {
-        let mut c = std::process::Command::new("open");
-        if reveal {
-            c.arg("-R");
-        }
-        c.arg(path);
-        c
-    } else if cfg!(target_os = "windows") {
-        let mut c = std::process::Command::new("explorer");
-        if reveal {
-            c.arg(format!("/select,{path}"));
-        } else {
-            c.arg(path);
-        }
-        c
-    } else {
-        let mut c = std::process::Command::new("xdg-open");
-        let p = std::path::Path::new(path);
-        c.arg(if reveal { p.parent().unwrap_or(p) } else { p });
-        c
-    };
-    cmd.spawn().map(|_| ()).map_err(|e| format!("can't open {path}: {e}"))
-}
-
-/// Put the OS hardware video decoders in front of our own. Registered in a statement of its own:
-/// a log macro does not evaluate its arguments while no logger takes its level, which left the
-/// hardware decoders out of every run.
-fn register_hardware_decoders() -> filmcraft_platform::Availability {
-    let hardware = filmcraft_platform::register();
-    log::info!("hardware decoding: {hardware:?}");
-    hardware
-}
-
-/// Local UTC offset at a unix time (auto-save file names and recovery times use local time).
-fn local_offset(unix: i64) -> i32 {
-    chrono::Local.timestamp_opt(unix, 0).single().map(|d| d.offset().local_minus_utc()).unwrap_or(0)
-}
-
 /// Driven by an agent (`--control`): don't activate the app on launch, so the user's keyboard
 /// focus stays where it is (macOS; winit activates ignoring other apps by default).
 fn agent_event_loop(agent: bool) -> Option<eframe::EventLoopBuilderHook> {
@@ -267,16 +172,4 @@ fn agent_event_loop(agent: bool) -> Option<eframe::EventLoopBuilderHook> {
     }
     let _ = agent;
     None
-}
-
-#[cfg(test)]
-mod tests {
-    /// Start-up registers the hardware decoders whether or not anything is logged (no logger is
-    /// installed here, as in a normal run).
-    #[test]
-    fn startup_registers_the_hardware_decoders_without_a_logger() {
-        assert!(!log::log_enabled!(log::Level::Info));
-        let hardware = super::register_hardware_decoders();
-        assert_eq!(filmcraft_platform::registered(), cfg!(any(target_os = "macos", target_os = "windows")), "{hardware:?}");
-    }
 }

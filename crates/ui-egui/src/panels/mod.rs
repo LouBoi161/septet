@@ -129,7 +129,28 @@ pub fn start_drag_effect(ui: &egui::Ui, id: &str) {
 struct DragPayloadBox(DragPayload);
 
 fn payload(ui: &egui::Ui) -> Option<DragPayload> {
-    ui.ctx().data(|d| d.get_temp::<Option<DragPayloadBox>>(payload_id())).flatten().map(|b| b.0)
+    payload_in(ui.ctx())
+}
+fn payload_in(ctx: &egui::Context) -> Option<DragPayload> {
+    ctx.data(|d| d.get_temp::<Option<DragPayloadBox>>(payload_id())).flatten().map(|b| b.0)
+}
+/// [`dragged_project_item`] outside a panel (a host asking what is dragged out of the app).
+pub(crate) fn dragged_item(ctx: &egui::Context) -> Option<ItemId> {
+    match payload_in(ctx) {
+        Some(DragPayload::Item(i)) => Some(i),
+        _ => None,
+    }
+}
+/// Forget the drag in progress as a drop on nothing does, without the release (it happened in
+/// another app): no panel acts on it later, an import the Media Browser made for it is taken back
+/// and freeform cards go back to their places.
+pub(crate) fn cancel_drag(app: &mut FilmcraftApp, ctx: &egui::Context) {
+    ctx.data_mut(|d| {
+        d.insert_temp::<Option<DragPayloadBox>>(payload_id(), None);
+        d.remove::<u64>(egui::Id::new("drag-release-frame"));
+    });
+    project_views::forget_freeform_drag(ctx);
+    media_browser::cancel_drag(app, ctx);
 }
 pub fn dragged_project_item(ui: &egui::Ui) -> Option<ItemId> {
     match payload(ui) {
