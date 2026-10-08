@@ -32,10 +32,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
 
 
 def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")  # Windows defaults to the ANSI code page
     args = ["cargo", "metadata", "--format-version", "1", "--locked"]
     if "--target" in sys.argv:
         args += ["--filter-platform", sys.argv[sys.argv.index("--target") + 1]]
-    meta = json.loads(subprocess.run(args, check=True, capture_output=True, text=True).stdout)
+    meta = json.loads(subprocess.run(args, check=True, capture_output=True, text=True, encoding="utf-8").stdout)
     packages = {p["id"]: p for p in meta["packages"]}
     nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
     root = next(p["id"] for p in meta["packages"] if p["name"] == "septet")
