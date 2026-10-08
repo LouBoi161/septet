@@ -524,7 +524,7 @@ meanwhile. Footage, solids, proxies and the project settings are hashed by value
 states are kept, so a long drag doesn't hold on to every intermediate state. The disk cache's
 content key now also covers proxies and Use Proxy.
 
-Since (M13.30–M13.31): the Tools bar and About dialog carry the ArtCraft mark. The
+Since (M13.30–M13.31): the Tools bar and About dialog carry the app icon. The
 Home screen is laid out like After Effects' and covers the whole workspace. A left rail holds New
 Project / Open Project, the Home, Templates and Learn pages and, at its foot, the community
 links. The Home page has a "Welcome to EffectCraft" heading, quick-start tiles (New Composition,

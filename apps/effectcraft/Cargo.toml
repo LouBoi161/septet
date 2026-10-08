@@ -9,6 +9,11 @@ default-run = "effectcraft"
 [lints]
 workspace = true
 
+# The app as a library for embedding hosts (Septet shows it as a tab: `effectcraft_embed::Embedded`).
+[lib]
+name = "effectcraft_embed"
+path = "src/lib.rs"
+
 [dependencies]
 effectcraft-engine = { workspace = true }
 effectcraft-host = { workspace = true }

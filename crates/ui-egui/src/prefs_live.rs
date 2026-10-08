@@ -27,6 +27,14 @@ fn dropped_files(app: &mut EffectcraftApp, ctx: &egui::Context) {
     if paths.is_empty() {
         return;
     }
+    let pointer = ctx.input(|i| i.pointer.hover_pos());
+    drop_files(app, ctx, paths, pointer);
+}
+
+/// Files dropped at screen position `at` (or placed there by an embedding host): a project opens,
+/// the rest are imported in the background as dropped files are, and become layers centred at
+/// `at` when it is over the Composition viewer.
+pub fn drop_files(app: &mut EffectcraftApp, ctx: &egui::Context, paths: Vec<String>, at: Option<egui::Pos2>) {
     let (proj, rest): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| {
         let l = p.to_ascii_lowercase();
         l.ends_with(".ecproj") || l.ends_with(".ecprojx")
@@ -38,8 +46,7 @@ fn dropped_files(app: &mut EffectcraftApp, ctx: &egui::Context) {
     }
     if !rest.is_empty() {
         let viewer = app.auto.find("viewer.area").map(|e| Rect::from_min_size(egui::pos2(e.rect[0], e.rect[1]), egui::vec2(e.rect[2], e.rect[3])));
-        let at =
-            ctx.input(|i| i.pointer.hover_pos()).filter(|p| viewer.is_some_and(|v| v.contains(*p))).and_then(|p| crate::panels::viewer::screen_to_comp(ctx, p));
+        let at = at.filter(|p| viewer.is_some_and(|v| v.contains(*p))).and_then(|p| crate::panels::viewer::screen_to_comp(ctx, p));
         let params =
             json!({"paths": rest, "drag": true, "importAs": app.session.prefs.drag_import_as(), "addToComp": at.is_some(), "position": at, "background": true});
         if let Err(e) = crate::menus::invoke(app, ctx, "file.import", params) {

@@ -265,6 +265,15 @@ pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: V
             None => Err("select a Render Queue item first".into()),
         };
     }
+    // A sibling app's page (not its GitHub page) opens the app itself when an embedding
+    // host has it in a tab.
+    if id == "help.sibling"
+        && params.get("kind").and_then(Value::as_str) != Some("github")
+        && let Some(slug) = params.get("app").and_then(Value::as_str)
+        && app.open_sibling(slug)
+    {
+        return Ok(Value::Null);
+    }
     let now = ctx.input(|i| i.time);
     // Closing a modified project asks to save it first; the command runs once answered.
     if crate::panels::unsaved::guard(app, id, &params) {
@@ -1282,6 +1291,7 @@ pub(crate) fn entry_enabled(app: &EffectcraftApp, e: &MenuEntry) -> bool {
 pub fn menu_items(app: &EffectcraftApp) -> Vec<MenuItem> {
     effectcraft_engine::menus::entries()
         .into_iter()
+        .filter(|(_, e)| !crate::hosted::hides_command(&e.command))
         .map(|(path, e)| MenuItem {
             id: e.command.clone(),
             label: entry_label(app, e),
@@ -1616,6 +1626,8 @@ fn menu_nodes(app: &mut EffectcraftApp, ui: &mut egui::Ui, nodes: &[MenuNode], c
                     crate::widgets::menu_scroll(ui, |ui| menu_nodes(app, ui, children, clicked));
                 });
             }
+            // (a hosted build leaves out the Discord and website entries, `hosted::hides_command`)
+            MenuNode::Item(e) if crate::hosted::hides_command(&e.command) => {}
             MenuNode::Item(e) => {
                 if menu_entry(app, ui, e) {
                     *clicked = Some((e.command.clone(), e.params.clone()));

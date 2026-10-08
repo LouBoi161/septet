@@ -1218,10 +1218,10 @@ Help
   Enable Logging | help.enableLogging
   Reveal Logging File | help.revealLogFile
   ---
-  Join the ArtCraft Discord... | help.discord
+  Join the Community on Discord... | help.discord
   Provide Feedback... | help.reportIssue
   ---
-  ArtCraft Website | help.website
+  Website | help.website
   EffectCraft Home Page | help.appPage
   EffectCraft on GitHub | help.github
   Open Demo Project | file.openDemoProject

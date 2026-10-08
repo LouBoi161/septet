@@ -271,8 +271,19 @@ static INTER_MEDIUM: &[u8] = include_bytes!("../../../assets/fonts/Inter-Medium.
 static INTER_SEMIBOLD: &[u8] = include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf");
 static JETBRAINS_MONO: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
 
-/// Install fonts (Inter, Inter Medium/SemiBold, JetBrains Mono) and egui visuals.
+/// Install fonts (Inter, Inter Medium/SemiBold, JetBrains Mono) and egui visuals. Hosted in
+/// another app's window ([`crate::hosted`]) the host installs the fonts ([`font_definitions`]);
+/// only the visuals apply.
 pub fn install(ctx: &egui::Context, t: &Tokens) {
+    if !crate::hosted::is_hosted() {
+        ctx.set_fonts(font_definitions());
+    }
+    apply_visuals(ctx, t);
+}
+
+/// The fonts [`install`] sets: Inter (with the named families `medium` and `semibold`) and
+/// JetBrains Mono first, the system's Japanese fallback last.
+pub fn font_definitions() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert("inter".into(), Arc::new(FontData::from_static(INTER_REGULAR)));
     fonts.font_data.insert("inter-medium".into(), Arc::new(FontData::from_static(INTER_MEDIUM)));
@@ -300,8 +311,7 @@ pub fn install(ctx: &egui::Context, t: &Tokens) {
             }
         }
     }
-    ctx.set_fonts(fonts);
-    apply_visuals(ctx, t);
+    fonts
 }
 
 pub fn apply_visuals(ctx: &egui::Context, t: &Tokens) {

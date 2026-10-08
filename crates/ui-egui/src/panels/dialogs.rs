@@ -250,7 +250,8 @@ fn about(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
     }
 }
 
-/// The About tab: logo, version, blurb and community links.
+/// The About tab: app icon, version, blurb and community links (a hosted build keeps only the
+/// source code link).
 fn about_main(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, cmd: &mut Option<&'static str>) {
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 96.0), Sense::hover());
     let p = ui.painter();
@@ -265,15 +266,21 @@ fn about_main(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, cmd: &mut
         t.text_dim,
     );
     ui.add_space(12.0);
-    ui.label("A clean-room, open-source compositor for motion graphics and visual effects: native on macOS, Windows and Linux, and in the browser. Part of the ArtCraft family of creative apps.");
+    ui.label("A clean-room, open-source compositor for motion graphics and visual effects: native on macOS, Windows and Linux, and in the browser.");
+    // A modified version: no ArtCraft branding, only the plain-text origin (docs/brand/LICENSE-brand.txt).
+    ui.add_space(6.0);
+    ui.label(egui::RichText::new("Based on EffectCraft by the ArtCraft team (MIT OR Apache-2.0).").color(t.text_dim));
     ui.add_space(14.0);
     let links: [(Icon, &str, &str, &'static str); 4] = [
-        (Icon::Chat, "Join the ArtCraft Discord", effectcraft_engine::links::DISCORD, "help.discord"),
-        (Icon::Globe, "ArtCraft website", effectcraft_engine::links::WEBSITE, "help.website"),
+        (Icon::Chat, "Join the community on Discord", effectcraft_engine::links::DISCORD, "help.discord"),
+        (Icon::Globe, "Website", effectcraft_engine::links::WEBSITE, "help.website"),
         (Icon::Sparkle, "EffectCraft home page", effectcraft_engine::links::APP_PAGE, "help.appPage"),
         (Icon::Code, "Source code on GitHub", effectcraft_engine::links::GITHUB, "help.github"),
     ];
     for (icon, label, url, c) in links {
+        if crate::hosted::hides_command(c) {
+            continue;
+        }
         let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
         let p = ui.painter();
         let discord = c == "help.discord";

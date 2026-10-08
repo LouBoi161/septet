@@ -97,8 +97,13 @@ pub fn session() -> Session {
 
 /// The platform config directory for EffectCraft (`EFFECTCRAFT_CONFIG_DIR` overrides):
 /// `~/Library/Application Support/EffectCraft` (macOS), `%APPDATA%\EffectCraft` (Windows),
-/// `$XDG_CONFIG_HOME/effectcraft` or `~/.config/effectcraft` (Linux and others).
+/// `$XDG_CONFIG_HOME/effectcraft` or `~/.config/effectcraft` (Linux and others). A portable data
+/// root (`effectcraft_engine::config::set_data_root`) is the config directory itself.
 pub fn config_dir() -> Option<std::path::PathBuf> {
+    effectcraft_engine::config::user_folder(&[], platform_config_dir)
+}
+
+fn platform_config_dir() -> Option<std::path::PathBuf> {
     use std::path::PathBuf;
     if let Some(d) = std::env::var_os("EFFECTCRAFT_CONFIG_DIR") {
         return Some(PathBuf::from(d));

@@ -1,6 +1,6 @@
 //! The Home screen, laid out like After Effects' (shown over the whole workspace at launch, from
 //! the Tools bar's Home button and by the Learn workspace). A left rail holds New Project / Open
-//! Project, the Home / Templates / Learn pages and, at its foot, the ArtCraft community links.
+//! Project, the Home / Templates / Learn pages and, at its foot, the community links.
 //! The Home page welcomes you with quick-start tiles (New Composition, the demo project, Import,
 //! New from Template) over the recent projects (File ▸ Open Recent, from Settings): a filterable
 //! table with thumbnails and Name / Opened / Size / Kind columns. Templates is the New from
@@ -269,20 +269,28 @@ fn rail_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, rail:
         }
         y += 38.0;
     }
-    // Community links at the foot (below the pages when the window is short).
-    let links = [
-        (Icon::Chat, "Join the ArtCraft Discord", "help.discord"),
-        (Icon::Globe, "getartcraft.com", "help.website"),
+    // Community links at the foot (below the pages when the window is short). A hosted build
+    // keeps only EffectCraft's GitHub, without the Community heading.
+    let hosted = crate::hosted::is_hosted();
+    let links: Vec<(Icon, &str, &str)> = [
+        (Icon::Chat, "Join the community on Discord", "help.discord"),
+        (Icon::Globe, "Website", "help.website"),
         (Icon::Globe, "EffectCraft home page", "help.appPage"),
         (Icon::Code, "EffectCraft on GitHub", "help.github"),
-    ];
+    ]
+    .into_iter()
+    .filter(|(_, _, cmd)| !crate::hosted::hides_command(cmd))
+    .collect();
     let sib = effectcraft_engine::links::SIBLINGS;
     let sib_rows = sib.len().div_ceil(2) as f32;
-    let foot_h = 22.0 + links.len() as f32 * 30.0 + 22.0 + sib_rows * 26.0;
+    let heading = if hosted { 0.0 } else { 22.0 };
+    let foot_h = heading + links.len() as f32 * 30.0 + 22.0 + sib_rows * 26.0;
     let mut cy = (rail.max.y - 16.0 - foot_h).max(y + 16.0);
     p.line_segment([pos2(x0, cy - 10.0), pos2(x0 + w, cy - 10.0)], Stroke::new(1.0, t.separator));
-    p.text(pos2(x0, cy + 6.0), Align2::LEFT_CENTER, "Community", Tokens::semibold(12.0), t.text_dim);
-    cy += 22.0;
+    if !hosted {
+        p.text(pos2(x0, cy + 6.0), Align2::LEFT_CENTER, "Community", Tokens::semibold(12.0), t.text_dim);
+    }
+    cy += heading;
     for (icon, label, cmd) in links {
         let r = Rect::from_min_size(pos2(x0, cy), vec2(w, 26.0));
         let resp = ui.interact(r, egui::Id::new(("home-link", cmd)), Sense::click());
@@ -301,7 +309,7 @@ fn rail_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, rail:
         }
         cy += 30.0;
     }
-    p.text(pos2(x0, cy + 8.0), Align2::LEFT_CENTER, "More ArtCraft apps", Tokens::ui(11.0), t.text_faint);
+    p.text(pos2(x0, cy + 8.0), Align2::LEFT_CENTER, "More apps", Tokens::ui(11.0), t.text_faint);
     cy += 20.0;
     let sw = (w - 6.0) / 2.0;
     for (i, (name, slug)) in sib.iter().enumerate() {
@@ -310,7 +318,8 @@ fn rail_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, rail:
         p.rect_filled(r, 11.0, if resp.hovered() { t.hover } else { t.field_bg });
         p.text(r.center(), Align2::CENTER_CENTER, *name, Tokens::ui(11.0), t.text);
         app.auto.add(&format!("home.sibling.{slug}"), r, name);
-        if resp.clicked() {
+        // Hosted with the sibling app in a tab: switch to it rather than open its web page.
+        if resp.clicked() && !app.open_sibling(slug) {
             let _ = app.session.execute("help.sibling", json!({"app": slug}));
         }
     }

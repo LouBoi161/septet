@@ -2,13 +2,15 @@
 //!
 //! On every other target this does nothing. A missing resource compiler is a warning, so a
 //! cross-compile from macOS or Linux still links, unless `EFFECTCRAFT_REQUIRE_WINRES=1` turns it
-//! into an error (for release builds).
+//! into an error (for release builds). Built as a dependency of an embedding host (its CI sets
+//! `HOSTED_BUILD`), nothing is embedded: the resources would land in the host's executable.
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../../assets/app-icon/effectcraft.ico");
     println!("cargo:rerun-if-env-changed=EFFECTCRAFT_REQUIRE_WINRES");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+    println!("cargo:rerun-if-env-changed=HOSTED_BUILD");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") || std::env::var_os("HOSTED_BUILD").is_some() {
         return;
     }
     let mut res = winresource::WindowsResource::new();

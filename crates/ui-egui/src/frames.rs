@@ -657,6 +657,19 @@ impl Frames {
         self.request_with(src, key, comp, t, opts, true);
     }
 
+    /// Drop the queued prefetch frames (not the viewer's frame, nor those rendering): nothing
+    /// renders ahead while the app isn't shown; the viewer asks again for what it needs.
+    pub fn cancel_prefetch(&self) {
+        let Ok(mut q) = self.queue.lock() else { return };
+        let dropped: Vec<FrameKey> = q.jobs.iter().filter(|j| !j.urgent).map(|j| j.key).collect();
+        q.jobs.retain(|j| j.urgent);
+        if let Ok(mut inf) = self.inflight.lock() {
+            for k in &dropped {
+                inf.remove(k);
+            }
+        }
+    }
+
     /// An urgent (viewer) frame is queued or rendering.
     pub fn urgent_pending(&self) -> bool {
         self.queue.lock().map(|q| q.urgent_running > 0 || q.jobs.iter().any(|j| j.urgent)).unwrap_or(false)

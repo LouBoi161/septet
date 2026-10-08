@@ -9,7 +9,42 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError, RwLock};
+
+/// The portable data root ([`set_data_root`]).
+static DATA_ROOT: RwLock<Option<PathBuf>> = RwLock::new(None);
+
+/// Keep everything EffectCraft stores per user (settings, shortcuts, crash recovery, plug-ins,
+/// templates, scripts, models, logs, presets, caches) under `root` instead of the platform's
+/// folders: a portable install, where an embedding host keeps its data next to its executable.
+/// `root` is created when missing. `None` (the default) uses the platform's folders.
+pub fn set_data_root(root: Option<PathBuf>) {
+    if let Some(r) = &root
+        && let Err(e) = std::fs::create_dir_all(r)
+    {
+        log::warn!("data folder {}: {e}", r.display());
+    }
+    *DATA_ROOT.write().unwrap_or_else(PoisonError::into_inner) = root;
+}
+
+/// The portable data root, when one is set ([`set_data_root`]).
+pub fn data_root() -> Option<PathBuf> {
+    DATA_ROOT.read().unwrap_or_else(PoisonError::into_inner).clone()
+}
+
+/// Where per-user data of one kind lives: `sub` (path components) under the data root when one
+/// is set, else what `platform` says (the platform's folder for it). Every per-user folder
+/// lookup goes through here.
+pub fn user_folder(sub: &[&str], platform: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
+    folder_in(data_root(), sub, platform)
+}
+
+fn folder_in(root: Option<PathBuf>, sub: &[&str], platform: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
+    match root {
+        Some(root) => Some(sub.iter().fold(root, |p, s| p.join(s))),
+        None => platform(),
+    }
+}
 
 /// Named text blobs (`prefs.json`, `shortcuts.json`, `session.lock`).
 pub trait ConfigStore: Send + Sync {
@@ -164,4 +199,21 @@ pub fn atomic_write_with(path: &Path, data: &[u8], write: impl FnOnce(&Path, &[u
         return Err(e);
     }
     std::fs::rename(&tmp, path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A portable data root holds every per-user folder; without one the platform's is used.
+    #[test]
+    fn user_folders_follow_the_data_root() {
+        let platform = || Some(PathBuf::from("/home/u/.config/effectcraft"));
+        assert_eq!(folder_in(None, &["Presets"], platform), platform());
+        assert_eq!(folder_in(Some(PathBuf::from("/app/Data/Effectcraft")), &[], platform), Some(PathBuf::from("/app/Data/Effectcraft")));
+        assert_eq!(
+            folder_in(Some(PathBuf::from("/app/Data/Effectcraft")), &["Cache", "Disk Cache"], || None),
+            Some(PathBuf::from("/app/Data/Effectcraft").join("Cache").join("Disk Cache"))
+        );
+    }
 }

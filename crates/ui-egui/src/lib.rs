@@ -17,12 +17,14 @@ pub mod dock_ui;
 pub mod frames;
 pub mod gpu_failure;
 pub mod header;
+pub mod hosted;
 pub mod i18n;
 pub mod icons;
 pub mod menus;
 pub mod native_menu;
 pub mod panels;
 pub mod prefs_live;
+pub mod send;
 pub mod state;
 pub mod theme;
 pub mod widgets;
@@ -111,6 +113,13 @@ pub struct Hooks {
     /// Application actions the OS performs (`app.hide`, `app.hideOthers`, `app.showAll` on
     /// macOS). Returns false when the host doesn't handle the id.
     pub app_action: Option<Box<dyn Fn(&str) -> bool>>,
+    /// A local file or folder about to open in another application (Edit Original, Reveal in
+    /// Finder, Execute File…). Returns true when the host opened it itself; otherwise the system
+    /// opens it as usual.
+    pub open_externally: Option<Box<dyn FnMut(&std::path::Path) -> bool>>,
+    /// Opens a sibling app by its lowercase name (`photocraft`…) where an embedding host has it in
+    /// a tab: the Home screen's More apps open it instead of its web page.
+    pub open_app: Option<Box<dyn FnMut(&str)>>,
 }
 
 #[derive(Default)]
@@ -1353,7 +1362,11 @@ impl EffectcraftApp {
                     self.ui.timeline.pps = None;
                 }
                 effectcraft_engine::Event::Toast { message, .. } => self.toast = Some((message, ctx.input(|i| i.time))),
-                effectcraft_engine::Event::OpenUrl(url) => ctx.open_url(egui::OpenUrl::new_tab(url)),
+                effectcraft_engine::Event::OpenUrl(url) => {
+                    if !self.opened_externally(&url) {
+                        ctx.open_url(egui::OpenUrl::new_tab(url));
+                    }
+                }
                 // Frames are keyed by content: an edit keeps those of comps it doesn't touch.
                 effectcraft_engine::Event::ProjectChanged { .. } => {}
                 effectcraft_engine::Event::Frontend { command, params } => {
@@ -1364,6 +1377,24 @@ impl EffectcraftApp {
                 effectcraft_engine::Event::PurgeCaches => self.frames.clear(),
             }
         }
+    }
+
+    /// Open the sibling app `slug` (`photocraft`…) through [`Hooks::open_app`]; false
+    /// without the hook or for a name that is no sibling app.
+    pub fn open_sibling(&mut self, slug: &str) -> bool {
+        let slug = slug.to_ascii_lowercase();
+        let Some(open) = self.hooks.open_app.as_mut() else { return false };
+        if !effectcraft_engine::links::SIBLINGS.iter().any(|(_, s)| *s == slug) {
+            return false;
+        }
+        open(&slug);
+        true
+    }
+
+    /// Offer a `file://` URL to [`Hooks::open_externally`]: true when the host opened it.
+    fn opened_externally(&mut self, url: &str) -> bool {
+        let Some(open) = self.hooks.open_externally.as_mut() else { return false };
+        file_url_path(url).is_some_and(|path| open(&path))
     }
 
     fn frame(&mut self, ui: &mut egui::Ui) {
@@ -1608,11 +1639,25 @@ pub(crate) fn tick_playback(app: &mut EffectcraftApp, ctx: &egui::Context, scale
     app.advance_playback(ctx, scale);
 }
 
+/// The local path of a `file://` URL as the engine writes them: the path as it is (File ▸
+/// Execute File escapes spaces as `%20`). `None` for other URLs.
+fn file_url_path(url: &str) -> Option<std::path::PathBuf> {
+    let raw = url.strip_prefix("file://").filter(|p| !p.is_empty())?;
+    let path = std::path::PathBuf::from(raw);
+    if path.exists() || !raw.contains("%20") {
+        return Some(path);
+    }
+    Some(std::path::PathBuf::from(raw.replace("%20", " ")))
+}
+
 /// Maximize a first window that doesn't fit the screen, which fits it to the space beside the
 /// taskbar or dock. The 1680 × 1020 window on a smaller screen is only shrunk to the monitor's
 /// size, so with its title bar it ran under the taskbar and cut menus off at the bottom of the
-/// screen (#269).
+/// screen (#269). Hosted in another app's window ([`hosted`]) the host sizes the window.
 fn fit_window(ctx: &egui::Context) {
+    if hosted::is_hosted() {
+        return;
+    }
     let (monitor, window) = ctx.input(|i| (i.viewport().monitor_size, i.viewport().outer_rect.or(i.viewport().inner_rect)));
     if let (Some(monitor), Some(window)) = (monitor, window)
         && overflows_screen(window.size(), monitor)
@@ -1638,6 +1683,47 @@ mod fit_window_tests {
         assert!(overflows_screen(vec2(1366.0, 799.0), vec2(1366.0, 768.0)));
         assert!(overflows_screen(vec2(1680.0, 1051.0), vec2(1920.0, 1080.0)));
         assert!(!overflows_screen(vec2(1680.0, 1051.0), vec2(2560.0, 1440.0)));
+    }
+}
+
+#[cfg(test)]
+mod sibling_tests {
+    use super::*;
+
+    /// Hosted, the Home screen's sibling apps (and `help.sibling` for an app's page) open the
+    /// app through the host; GitHub pages and other names stay links.
+    #[test]
+    fn sibling_apps_open_through_the_host() {
+        let mut app = EffectcraftApp::new(Session::default());
+        let ctx = egui::Context::default();
+        assert!(!app.open_sibling("photocraft"), "standalone: the web page");
+        let opened = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        let seen = opened.clone();
+        app.hooks.open_app = Some(Box::new(move |name: &str| seen.borrow_mut().push(name.to_string())));
+        assert!(app.open_sibling("PhotoCraft"));
+        assert!(!app.open_sibling("discord"));
+        menus::invoke(&mut app, &ctx, "help.sibling", json!({"app": "filmcraft"})).unwrap();
+        menus::invoke(&mut app, &ctx, "help.sibling", json!({"app": "filmcraft", "kind": "github"})).unwrap();
+        assert_eq!(*opened.borrow(), ["photocraft", "filmcraft"]);
+        let events = app.session.drain_events();
+        assert!(events.iter().any(|e| matches!(e, effectcraft_engine::Event::OpenUrl(u) if u.ends_with("storytold/filmcraft"))));
+        assert!(!events.iter().any(|e| matches!(e, effectcraft_engine::Event::OpenUrl(u) if u.contains("/apps/"))));
+    }
+}
+
+#[cfg(test)]
+mod file_url_tests {
+    use super::file_url_path;
+    use std::path::PathBuf;
+
+    /// The engine's `file://` URLs (Edit Original, Reveal in Finder, Execute File) give back the
+    /// path a host opens itself; other links stay with the browser.
+    #[test]
+    fn file_urls_give_the_engines_paths() {
+        assert_eq!(file_url_path("file:///footage/a b.mov"), Some(PathBuf::from("/footage/a b.mov")));
+        assert_eq!(file_url_path("file:///no/such/My%20Script.jsx"), Some(PathBuf::from("/no/such/My Script.jsx")));
+        assert_eq!(file_url_path("https://discord.gg/artcraft"), None);
+        assert_eq!(file_url_path("file://"), None);
     }
 }
 

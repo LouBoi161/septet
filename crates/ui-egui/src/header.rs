@@ -7,8 +7,7 @@ use serde_json::json;
 use crate::icons::{self, Icon};
 use crate::state::Tool;
 use crate::theme::Tokens;
-use crate::widgets;
-use crate::{Dialog, EffectcraftApp};
+use crate::{Dialog, EffectcraftApp, hosted, widgets};
 use effectcraft_color::BlendMode;
 use effectcraft_engine::commands::shape_tool::{PaintKind, ToolPaint};
 use effectcraft_engine::project::{LayerId, LayerSource};
@@ -22,7 +21,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let cy = rect.center().y;
     let mut x = rect.min.x + if app.integrated_titlebar && !app.ui.show_menu_bar { 80.0 } else { 10.0 };
 
-    // Brand mark.
+    // The app icon: About EffectCraft.
     let brand = Rect::from_min_size(pos2(x, cy - 12.0), vec2(24.0, 24.0));
     paint_logo(&p, brand);
     let bresp = ui.interact(brand, egui::Id::new("brand"), Sense::click());
@@ -147,22 +146,28 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let label = p.text(pos2(snap.max.x + 4.0, cy), Align2::LEFT_CENTER, "Snapping", Tokens::ui(12.0), t.text_dim);
     snapping_options(app, ui, Rect::from_min_size(pos2(label.max.x + 2.0, cy - 9.0), vec2(18.0, 18.0)));
 
-    // Right side: community buttons, workspaces.
+    // Right side: community buttons, workspaces (a hosted build has no Discord or website
+    // buttons, see `hosted::hides_command`).
     let mut rx = rect.max.x - 10.0;
-    let discord = Rect::from_min_max(pos2(rx - 104.0, cy - 13.0), pos2(rx, cy + 13.0));
-    let dresp = ui.interact(discord, egui::Id::new("hdr-discord"), Sense::click());
-    let dc = Color32::from_rgb(0x58, 0x65, 0xf2);
-    p.rect_filled(discord, 13.0, if dresp.hovered() { dc.gamma_multiply(1.2) } else { dc });
-    icons::paint(&p, Rect::from_center_size(pos2(discord.min.x + 16.0, cy), vec2(14.0, 14.0)), Icon::Chat, Color32::WHITE);
-    p.text(pos2(discord.min.x + 28.0, cy), Align2::LEFT_CENTER, "Discord", Tokens::semibold(12.0), Color32::WHITE);
-    app.auto.add("header.discord", discord, "Join the ArtCraft Discord");
-    if dresp.on_hover_text("Join the ArtCraft community on Discord").clicked() {
-        let _ = app.session.execute("help.discord", json!({}));
+    if !hosted::hides_command("help.discord") {
+        let discord = Rect::from_min_max(pos2(rx - 104.0, cy - 13.0), pos2(rx, cy + 13.0));
+        let dresp = ui.interact(discord, egui::Id::new("hdr-discord"), Sense::click());
+        let dc = Color32::from_rgb(0x58, 0x65, 0xf2);
+        p.rect_filled(discord, 13.0, if dresp.hovered() { dc.gamma_multiply(1.2) } else { dc });
+        icons::paint(&p, Rect::from_center_size(pos2(discord.min.x + 16.0, cy), vec2(14.0, 14.0)), Icon::Chat, Color32::WHITE);
+        p.text(pos2(discord.min.x + 28.0, cy), Align2::LEFT_CENTER, "Discord", Tokens::semibold(12.0), Color32::WHITE);
+        app.auto.add("header.discord", discord, "Join the community on Discord");
+        if dresp.on_hover_text("Join the community on Discord").clicked() {
+            let _ = app.session.execute("help.discord", json!({}));
+        }
+        rx = discord.min.x - 6.0;
     }
-    rx = discord.min.x - 6.0;
     for (id, icon, tip, cmd) in
-        [("hdr-github", Icon::Code, "EffectCraft on GitHub", "help.github"), ("hdr-web", Icon::Globe, "EffectCraft on getartcraft.com", "help.appPage")]
+        [("hdr-github", Icon::Code, "EffectCraft on GitHub", "help.github"), ("hdr-web", Icon::Globe, "EffectCraft home page", "help.appPage")]
     {
+        if hosted::hides_command(cmd) {
+            continue;
+        }
         let r = Rect::from_min_max(pos2(rx - 26.0, cy - 13.0), pos2(rx, cy + 13.0));
         if widgets::icon_button(ui, r, icon, false, &t, egui::Id::new(id)).on_hover_text(tip).clicked() {
             let _ = app.session.execute(cmd, json!({}));
@@ -546,20 +551,20 @@ pub fn color_popup(ui: &mut egui::Ui, id: egui::Id, pos: egui::Pos2, c: &mut [f3
     changed
 }
 
-/// The ArtCraft mark as supplied in `docs/brand` (the README's and getartcraft.com's logo; used
-/// unmodified, see `docs/brand/LICENSE-brand.txt`).
-static ARTCRAFT_MARK: &[u8] = include_bytes!("../../../docs/brand/artcraft-mark.png");
+/// EffectCraft's own app icon (`assets/app-icon`, MIT OR Apache-2.0). This modified version
+/// carries no ArtCraft marks (`docs/brand/README.md`).
+static APP_ICON: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.effectcraft.png");
 
-/// The ArtCraft mark in `r` (decoded once into a mipmapped texture, so it stays crisp from the
-/// 24 px Tools bar to the About dialog). Nothing is drawn if it can't be decoded.
+/// EffectCraft's app icon in `r` (decoded once into a mipmapped texture, so it stays crisp from
+/// the 24 px Tools bar to the About dialog). Nothing is drawn if it can't be decoded.
 pub fn paint_logo(p: &egui::Painter, r: Rect) {
     let ctx = p.ctx();
-    let id = egui::Id::new("artcraft-mark");
+    let id = egui::Id::new("effectcraft-app-icon");
     let tex = ctx.data(|d| d.get_temp::<Option<egui::TextureHandle>>(id)).unwrap_or_else(|| {
-        let tex = image::load_from_memory_with_format(ARTCRAFT_MARK, image::ImageFormat::Png).ok().map(|img| {
+        let tex = image::load_from_memory_with_format(APP_ICON, image::ImageFormat::Png).ok().map(|img| {
             let img = img.to_rgba8();
             let ci = egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw());
-            ctx.load_texture("artcraft-mark", ci, egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear)))
+            ctx.load_texture("effectcraft-app-icon", ci, egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear)))
         });
         ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
         tex

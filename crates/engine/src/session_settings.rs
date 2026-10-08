@@ -8,6 +8,13 @@ use crate::prefs::{PREFS_FILE, Prefs};
 use crate::shortcuts::{Keymaps, SHORTCUTS_FILE, ShortcutTable, UiCommand};
 use crate::{EngineError, Result, Session};
 
+/// The default Disk Cache folder: `Cache/Disk Cache` in the portable data root, else the
+/// platform's cache folder. The Media Cache and Conformed Audio folders sit next to it.
+fn default_disk_cache() -> std::path::PathBuf {
+    crate::config::user_folder(&["Cache", "Disk Cache"], || Some(effectcraft_render::disk_cache::default_folder()))
+        .unwrap_or_else(effectcraft_render::disk_cache::default_folder)
+}
+
 impl Session {
     /// Load settings, shortcut and ease presets from the config store and apply them.
     pub fn load_settings(&mut self) {
@@ -58,7 +65,7 @@ impl Session {
         if self.config.is_none() || cfg!(target_arch = "wasm32") {
             return None;
         }
-        let base = effectcraft_render::disk_cache::default_folder();
+        let base = default_disk_cache();
         Some(base.parent().map(|p| p.join(name)).unwrap_or_else(|| base.join(name)))
     }
 
@@ -104,10 +111,10 @@ impl Session {
     /// and attach it to the layer cache. Without a folder setting the platform cache folder is
     /// used, but only by frontends with a settings store (headless sessions stay off disk).
     pub fn configure_disk_cache(&mut self) {
-        use effectcraft_render::disk_cache::{DiskCache, default_folder, footage_salt};
+        use effectcraft_render::disk_cache::{DiskCache, footage_salt};
         let d = &self.prefs.disk;
         let folder = if d.disk_cache_folder.trim().is_empty() {
-            (self.config.is_some() && !cfg!(target_arch = "wasm32")).then(default_folder)
+            (self.config.is_some() && !cfg!(target_arch = "wasm32")).then(default_disk_cache)
         } else {
             Some(std::path::PathBuf::from(d.disk_cache_folder.trim()))
         };
