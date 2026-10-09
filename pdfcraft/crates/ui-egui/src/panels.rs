@@ -514,12 +514,24 @@ pub fn right_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         if info.layers.is_empty() {
                             empty(ui, &t, "layers", "This document has no layers.");
                         }
+                        // A row click selects the layer (the eye shows or hides it); Delete or the
+                        // right-click menu deletes it.
+                        let sel_id = egui::Id::new(("pdf-layer-selected", id));
+                        let focus_id = sel_id.with("focus");
+                        let selected: Option<(u32, u16)> = ui.data(|d| d.get_temp(sel_id));
+                        let top = ui.cursor().min;
+                        let mut clicked = false;
                         for (li, l) in info.layers.iter().enumerate() {
                             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
-                            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, l.visible, &l.name));
-                            if resp.hovered() {
+                            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected == Some(l.id), &l.name));
+                            if selected == Some(l.id) {
+                                ui.painter().rect_filled(rect, CornerRadius::same(6), t.selected);
+                            } else if resp.hovered() {
                                 ui.painter().rect_filled(rect, CornerRadius::same(6), t.hover);
                             }
+                            let eye_rect = Rect::from_min_size(rect.min, vec2(28.0, rect.height()));
+                            let eye = ui.interact(eye_rect, egui::Id::new(("pdf-layer-eye", id, li)), Sense::click());
+                            eye.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, l.visible, &l.name));
                             icons::paint(
                                 ui,
                                 Rect::from_min_size(rect.min + vec2(4.0, 7.0), vec2(18.0, 18.0)),
@@ -529,9 +541,37 @@ pub fn right_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                             );
                             let fg = if l.visible { t.text } else { t.text_faint };
                             ui.painter().text(rect.left_center() + vec2(32.0, 0.0), Align2::LEFT_CENTER, &l.name, theme::regular(13.0), fg);
-                            if resp.on_hover_text(if l.visible { tl!("Hide layer") } else { tl!("Show layer") }).clicked() {
+                            if eye.on_hover_text(if l.visible { tl!("Hide layer") } else { tl!("Show layer") }).clicked() {
                                 toggle_layer = Some((li, !l.visible));
                             }
+                            if resp.clicked() || resp.secondary_clicked() {
+                                ui.data_mut(|d| d.insert_temp(sel_id, l.id));
+                                clicked = true;
+                            }
+                            resp.context_menu(|ui| {
+                                if ui.button(if l.visible { tl!("Hide layer") } else { tl!("Show layer") }).clicked() {
+                                    toggle_layer = Some((li, !l.visible));
+                                    ui.close();
+                                }
+                                if ui.add_enabled(bm_editable, egui::Button::new(tl!("Delete Layer"))).clicked() {
+                                    panel_edit = Some(pdfcraft_engine::Edit::DeleteLayer { layer: l.id, name: l.name.clone() });
+                                    ui.close();
+                                }
+                            });
+                        }
+                        // Delete / Backspace: the selected layer, while a row was clicked last.
+                        let list = Rect::from_min_max(top, egui::pos2(ui.max_rect().right(), ui.cursor().min.y));
+                        let outside = ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !list.contains(p)));
+                        let focus = clicked || (!outside && ui.data(|d| d.get_temp(focus_id)).unwrap_or(false));
+                        ui.data_mut(|d| d.insert_temp(focus_id, focus));
+                        if focus
+                            && !modal
+                            && bm_editable
+                            && !ui.ctx().egui_wants_keyboard_input()
+                            && let Some(l) = info.layers.iter().find(|l| Some(l.id) == selected)
+                            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete) || i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace))
+                        {
+                            panel_edit = Some(pdfcraft_engine::Edit::DeleteLayer { layer: l.id, name: l.name.clone() });
                         }
                     }
                     RightPanel::Signatures => {

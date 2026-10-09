@@ -404,6 +404,29 @@ fn hidden_information_is_counted_and_removed() {
 }
 
 #[test]
+fn deleting_a_layer_removes_its_content_and_entry() {
+    let mut doc = hidden_fixture();
+    // The off layer, "Secret layer" (13 0 R), holds the "(Layer)" text.
+    let n = crate::sanitize::delete_layers(&mut doc, &[ObjRef::new(13, 0)]).unwrap();
+    assert_eq!(n, 1, "one marked-content block");
+    let c = content(&doc, 0);
+    assert!(!c.contains("(Layer)") && c.contains("(Visible)"), "{c}");
+    assert!(doc.full_save_required());
+    let doc = reopen(&doc);
+    let cat = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    let oc = doc.resolve(cat.get(b"OCProperties").unwrap()).as_dict().cloned().unwrap();
+    // The layers a list names (object numbers change on the full save).
+    let names = |o: Option<&Object>| -> Vec<String> {
+        let a = o.and_then(|o| doc.resolve(o).as_array().cloned()).unwrap_or_default();
+        a.iter().filter_map(|g| doc.resolve(g).as_dict().and_then(|d| d.get(b"Name").and_then(|n| n.as_string().map(|s| s.to_text())))).collect()
+    };
+    assert_eq!(names(oc.get(b"OCGs")), ["Shown layer"], "only the shown layer is left");
+    let d = doc.resolve(oc.get(b"D").unwrap()).as_dict().cloned().unwrap();
+    assert_eq!(names(d.get(b"Order")), ["Shown layer"]);
+    assert!(names(d.get(b"OFF")).is_empty());
+}
+
+#[test]
 fn overlay_text_takes_its_font_size_colour_alignment_and_repeats() {
     let mut doc = one_page(b"BT /F1 12 Tf 20 250 Td (Secret salary figures) Tj ET", "", Vec::new());
     let look = pdfcraft_annot::OverlayLook { font: pdfcraft_annot::OverlayFont::Courier, size: 8.0, color: [0.0, 0.0, 1.0], align: 0, repeat: true };

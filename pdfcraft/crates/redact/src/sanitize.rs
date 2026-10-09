@@ -135,9 +135,8 @@ fn hidden_layers(doc: &Document) -> Vec<ObjRef> {
     }
 }
 
-/// Glyphs of hidden text, or content of hidden layers, on every page (`write` = remove them).
-fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Result<usize, RedactError> {
-    let off = if layers { hidden_layers(doc) } else { Vec::new() };
+/// Glyphs of hidden text, or content of the layers `off`, on every page (`write` = remove them).
+fn content_pass(doc: &mut Document, text: bool, off: &[ObjRef], write: bool) -> Result<usize, RedactError> {
     if !text && off.is_empty() {
         return Ok(0);
     }
@@ -159,7 +158,7 @@ fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Re
             let c = page.crop(doc);
             scope.hidden_text = Some([c[0].min(c[2]), c[1].min(c[3]), c[0].max(c[2]), c[1].max(c[3])]);
         }
-        scope.hidden_layers = off.clone();
+        scope.hidden_layers = off.to_vec();
         let out = process(doc, &mut scope, &data, &resources, Matrix::IDENTITY);
         let blocks = scope.layer_blocks;
         total += out.residue + blocks + report.glyphs;
@@ -216,10 +215,10 @@ pub fn scan(doc: &Document) -> Vec<(Hidden, usize)> {
                 Hidden::Attachments => sub(doc, &names, b"EmbeddedFiles").map_or(0, |t| name_tree_len(doc, &t, 0)) + count_sub(b"FileAttachment"),
                 Hidden::Comments => annots.iter().filter(|a| is_comment(a.name(b"Subtype").unwrap_or(b""))).count(),
                 Hidden::FormFields => pdfcraft_forms::fields(doc).len(),
-                Hidden::HiddenText => content_pass(&mut doc2, true, false, false).unwrap_or(0),
+                Hidden::HiddenText => content_pass(&mut doc2, true, &[], false).unwrap_or(0),
                 Hidden::HiddenLayers => {
-                    let off = hidden_layers(doc).len();
-                    if off == 0 { 0 } else { off + content_pass(&mut doc2, false, true, false).unwrap_or(0) }
+                    let off = hidden_layers(doc);
+                    if off.is_empty() { 0 } else { off.len() + content_pass(&mut doc2, false, &off, false).unwrap_or(0) }
                 }
                 Hidden::Bookmarks => sub(doc, &cat, b"Outlines").map_or(0, |o| outline_len(doc, o.get(b"First"), 0)),
                 Hidden::LinksActionsScripts => {
@@ -246,7 +245,8 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
     // Content first (it needs the layers and the form still in place).
     let (text, layers) = (which.contains(&Hidden::HiddenText), which.contains(&Hidden::HiddenLayers));
     if (text && count(Hidden::HiddenText) > 0) || (layers && count(Hidden::HiddenLayers) > 0) {
-        content_pass(doc, text, layers, true)?;
+        let off = if layers { hidden_layers(doc) } else { Vec::new() };
+        content_pass(doc, text, &off, true)?;
     }
     if which.contains(&Hidden::FormFields) && count(Hidden::FormFields) > 0 {
         // Fields without appearances get one first, so their values stay visible.
@@ -352,21 +352,7 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
             }
             Hidden::HiddenLayers if !off.is_empty() => {
                 // The off layers leave the configuration (their content is gone already).
-                if let Some(mut oc) = sub(doc, &cat, b"OCProperties") {
-                    let keep = |o: &Object| !o.as_ref().is_some_and(|r| off.contains(&r));
-                    if let Some(Object::Array(a)) = oc.get(b"OCGs").map(|g| (*doc.resolve(g)).clone()) {
-                        oc.set(b"OCGs".to_vec(), Object::Array(a.into_iter().filter(keep).collect()));
-                    }
-                    if let Some(mut d) = sub(doc, &oc, b"D") {
-                        for k in [&b"ON"[..], b"OFF", b"Order", b"Locked"] {
-                            if let Some(Object::Array(a)) = d.get(k).map(|g| (*doc.resolve(g)).clone()) {
-                                d.set(k.to_vec(), Object::Array(a.into_iter().filter(keep).collect()));
-                            }
-                        }
-                        oc.set(b"D".to_vec(), Object::Dict(d));
-                    }
-                    cat.set(b"OCProperties".to_vec(), Object::Dict(oc));
-                }
+                forget_layers(doc, &mut cat, &off);
             }
             _ => {}
         }
@@ -384,6 +370,91 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
     }
     doc.require_full_save();
     Ok(done)
+}
+
+/// Take `gone` out of the catalog's optional content properties: the list of groups and every
+/// configuration's on/off, order (nested), locked and radio-button lists.
+fn forget_layers(doc: &Document, cat: &mut Dict, gone: &[ObjRef]) {
+    let Some(mut oc) = sub(doc, cat, b"OCProperties") else { return };
+    fn filter(doc: &Document, a: Vec<Object>, gone: &[ObjRef], depth: usize) -> Vec<Object> {
+        a.into_iter()
+            .filter(|o| !o.as_ref().is_some_and(|r| gone.contains(&r)))
+            .filter_map(|o| match (*doc.resolve(&o)).clone() {
+                // Nested order arrays and radio-button groups: drop the layers inside too.
+                Object::Array(inner) if depth < 32 => {
+                    let inner = filter(doc, inner, gone, depth + 1);
+                    // An array left with only its label (or nothing) goes.
+                    let empty = inner.iter().all(|o| matches!(o, Object::String(_)));
+                    (!empty).then_some(Object::Array(inner))
+                }
+                _ => Some(o),
+            })
+            .collect()
+    }
+    let config = |d: &mut Dict| {
+        for k in [&b"ON"[..], b"OFF", b"Order", b"Locked", b"RBGroups"] {
+            if let Some(Object::Array(a)) = d.get(k).map(|g| (*doc.resolve(g)).clone()) {
+                d.set(k.to_vec(), Object::Array(filter(doc, a, gone, 0)));
+            }
+        }
+    };
+    if let Some(Object::Array(a)) = oc.get(b"OCGs").map(|g| (*doc.resolve(g)).clone()) {
+        oc.set(b"OCGs".to_vec(), Object::Array(filter(doc, a, gone, 32)));
+    }
+    if let Some(mut d) = sub(doc, &oc, b"D") {
+        config(&mut d);
+        oc.set(b"D".to_vec(), Object::Dict(d));
+    }
+    if let Some(Object::Array(configs)) = oc.get(b"Configs").map(|g| (*doc.resolve(g)).clone()) {
+        let configs = configs
+            .into_iter()
+            .map(|c| match doc.resolve(&c).as_dict().cloned() {
+                Some(mut d) => {
+                    config(&mut d);
+                    Object::Dict(d)
+                }
+                None => c,
+            })
+            .collect();
+        oc.set(b"Configs".to_vec(), Object::Array(configs));
+    }
+    cat.set(b"OCProperties".to_vec(), Object::Dict(oc));
+}
+
+/// Delete layers (Layers panel ▸ Delete Layer): their content leaves every page, comments shown
+/// only in them go, and the layers leave the document's list. Returns how many
+/// content blocks were removed.
+pub fn delete_layers(doc: &mut Document, layers: &[ObjRef]) -> Result<usize, RedactError> {
+    let (root, _) = catalog(doc).ok_or(RedactError::NothingToApply)?;
+    if layers.is_empty() {
+        return Err(RedactError::NothingToApply);
+    }
+    let removed = content_pass(doc, false, layers, true)?;
+    // Comments that belong to one of the layers (form fields stay: the form still lists them).
+    let in_layer = |doc: &Document, a: &Object| -> bool {
+        doc.resolve(a).as_dict().is_some_and(|d| {
+            d.name(b"Subtype") != Some(b"Widget") && d.get(b"OC").and_then(Object::as_ref).is_some_and(|r| layers.contains(&r))
+        })
+    };
+    for p in pdfcraft_model::pages(doc) {
+        let list = annots_of(doc, &p.dict);
+        if !list.iter().any(|a| in_layer(doc, a)) {
+            continue;
+        }
+        let kept: Vec<Object> = list.into_iter().filter(|a| !in_layer(doc, a)).collect();
+        doc.update_dict(p.obj, |d| {
+            if kept.is_empty() {
+                d.remove(b"Annots");
+            } else {
+                d.set(b"Annots".to_vec(), Object::Array(kept));
+            }
+        })?;
+    }
+    let mut cat = doc.get(root).as_dict().cloned().unwrap_or_default();
+    forget_layers(doc, &mut cat, layers);
+    doc.set(root, Object::Dict(cat));
+    doc.require_full_save();
+    Ok(removed)
 }
 
 /// Sanitize Document: remove every category of hidden information.

@@ -284,6 +284,14 @@ impl Autotest {
         let more: Vec<(String, serde_json::Value)> =
             std::env::var("SEPTET_AUTOTEST_CMDS").ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
         let mut steps = vec![Step::Wait(2.0), Step::Open(kind), Step::Wait(6.0)];
+        // A file to open instead of making a document (`SEPTET_AUTOTEST_PDF`: Pdfcraft's layers).
+        let setup = match std::env::var_os("SEPTET_AUTOTEST_PDF") {
+            Some(pdf) if kind == AppKind::Pdfcraft => {
+                steps.extend([Step::OpenFile(PathBuf::from(pdf)), Step::Wait(4.0)]);
+                Vec::new()
+            }
+            _ => setup,
+        };
         let more = more.iter().map(|(c, p)| (Box::leak(c.clone().into_boxed_str()) as &str, p.clone()));
         for (c, p) in setup.into_iter().chain(more) {
             steps.extend([run(c, p), Step::ToolWait(30.0)]);

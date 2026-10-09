@@ -1059,6 +1059,12 @@ pub enum Edit {
     },
     /// Sanitize Document: every category, then a full rewrite on save.
     Sanitize,
+    /// Delete a layer (optional content group, by object number and generation): its content
+    /// on every page and the layer itself.
+    DeleteLayer {
+        layer: (u32, u16),
+        name: String,
+    },
     /// Flatten comments and/or form fields on every page into page content.
     Flatten {
         comments: bool,
@@ -1162,6 +1168,7 @@ impl Edit {
             Edit::RemoveLinks { .. } => "Remove all links".into(),
             Edit::AddLinks { links, .. } => plural("Create link", links.len()),
             Edit::Sanitize => "Sanitize document".into(),
+            Edit::DeleteLayer { name, .. } => format!("Delete layer “{name}”"),
             Edit::Flatten { comments: true, fields: false } => "Flatten comments".into(),
             Edit::Flatten { comments: false, fields: true } => "Flatten form fields".into(),
             Edit::Flatten { .. } => "Flatten".into(),
@@ -1291,6 +1298,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         | Edit::RemoveLinks { .. }
         | Edit::AddLinks { .. }
         | Edit::Sanitize
+        | Edit::DeleteLayer { .. }
         | Edit::SetFieldProps { .. }
         | Edit::DeleteField { .. }
         | Edit::DuplicateField { .. }
@@ -1648,6 +1656,9 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         }
         Edit::Sanitize => {
             pdfcraft_redact::sanitize::sanitize(doc)?;
+        }
+        Edit::DeleteLayer { layer, .. } => {
+            pdfcraft_redact::sanitize::delete_layers(doc, &[pdfcraft_cos::ObjRef { num: layer.0, generation: layer.1 }])?;
         }
         Edit::Flatten { comments, fields } => {
             let n = pdfcraft_model::pages(doc).len();
