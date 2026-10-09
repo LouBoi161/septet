@@ -1,12 +1,20 @@
-The first release of Septet: Photocraft, Vectorcraft, Lightcraft, Designcraft, Pdfcraft, Filmcraft and
-Effectcraft in one workspace.
+Septet 0.2.0 brings Claude into the apps.
 
-- Tabs that can be different apps; pull a tab out for a window of its own, drop it on another
-  window's tabs to move it back.
-- Drag layers, art, photos, pages and footage from one app onto another app's tab and drop them in.
-- Copy and paste between the apps, *Send to*, and edit round trips (Lightcraft → Photocraft,
-  Designcraft *Edit Original*).
-- Home screen with all apps and recent files; windows, tabs and panel layouts are restored.
+- **Claude chat panel** (speech bubble at the top right, or Ctrl+Shift+K): Claude works in all seven
+  apps with you. It runs their commands, looks at the result and can undo. It also makes SVGs, layouts,
+  PDFs and motion graphics from code and places them in an app. You choose the model and effort, and
+  you can add your own skills, plugins and MCP servers. It needs
+  [Claude Code](https://code.claude.com/docs/en/setup), installed and signed in with your own Claude
+  subscription; Septet starts it and never sees your sign-in. Septet asks you first before Claude saves
+  or exports outside its working folder, changes settings, prints or signs.
+- **Deleting layers** with the Delete key or the right-click menu now works in Vectorcraft, Photocraft,
+  Designcraft, Pdfcraft (new: deletes a PDF layer and its content) and Filmcraft (track headers and
+  Essential Graphics layers). In Filmcraft, Delete in the Timeline no longer deletes the item still
+  selected in the Project panel.
+- **One Septet at a time**: starting Septet again, or opening a file from the file manager, hands the
+  files to the Septet that is already running.
+- Filmcraft on Windows and Linux: three default shortcuts no longer share a key (Ctrl+9, Ctrl+Shift+M,
+  Ctrl+T).
 
 **Downloads:** Windows installer and portable zip, Linux AppImage and tar.gz, macOS for Apple Silicon
 and Intel. The builds are unsigned — see the README for the one-time "run anyway" step on Windows and
