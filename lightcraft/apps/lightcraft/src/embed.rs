@@ -3,16 +3,21 @@
 //! window of its own (panic hook, logger, command line, control server, native menu bar, GPU crash
 //! sentinel, window options).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::mpsc::{Receiver, channel};
 
 use lightcraft_engine::catalog::{MediaKind, PhotoId, Source};
 use lightcraft_engine::export::{ExportFormat, ExportOptions};
+use lightcraft_engine::pipeline::{MaskView, Overlay};
 use lightcraft_ui_egui::{LightcraftApp, Services};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::prefs::PrefsWriter;
+
+/// A picture for the host's agent, made on a worker thread ([`Embedded::agent_render`]).
+pub type AgentRender = Box<dyn FnOnce() -> Result<egui::ColorImage, String> + Send>;
 
 /// The host's hook for files LightCraft opens in another application: true when the host
 /// handled the file (nothing is launched then).
@@ -236,6 +241,211 @@ impl Embedded {
             eprintln!("lightcraft: {e}");
         }
     }
+}
+
+impl Embedded {
+    /// The commands the host's agent may run: the engine's and the UI's, as the command palette
+    /// lists them, with their parameters and whether they can run now.
+    pub fn agent_commands(&mut self, _ctx: &egui::Context) -> Vec<Value> {
+        let all = lightcraft_ui_egui::control::all_commands(&self.app);
+        all.as_array().into_iter().flatten().map(agent_command).collect()
+    }
+
+    /// Run a command for the host's agent as its menu item does (undoable like it). A command
+    /// that would open a dialog or a file picker instead (it needs parameters), or hand a file to
+    /// another program, fails and leaves nothing open: the agent can't answer it and the user
+    /// didn't ask for it. The reply is always there at once.
+    pub fn agent_execute(&mut self, ctx: &egui::Context, command: &str, params: Value) -> Receiver<Value> {
+        let (tx, rx) = channel();
+        let params = if params.is_null() { json!({}) } else { params };
+        let had_dialog = self.app.ui.dialog.is_some();
+        let asked = Rc::new(Cell::new(None::<&'static str>));
+        let ask = |what: &'static str| {
+            let a = asked.clone();
+            move || a.set(Some(what))
+        };
+        let sv = &mut self.app.services;
+        let (files, presets, tracklog, curves, save, save_curves, folder, reveal, open_with) = (
+            ask("pick files"),
+            ask("pick preset files"),
+            ask("pick a track log"),
+            ask("pick curve presets"),
+            ask("choose where to save"),
+            ask("choose where to save"),
+            ask("pick a folder"),
+            ask("show a file in the file manager"),
+            ask("open a file in another program"),
+        );
+        let saved = (
+            sv.pick_files.replace(Box::new(move || {
+                files();
+                Vec::new()
+            })),
+            sv.pick_preset_files.replace(Box::new(move || {
+                presets();
+                Vec::new()
+            })),
+            sv.pick_tracklog.replace(Box::new(move || {
+                tracklog();
+                Vec::new()
+            })),
+            sv.pick_curve_preset_files.replace(Box::new(move || {
+                curves();
+                Vec::new()
+            })),
+            sv.save_preset_file.replace(Box::new(move |_| {
+                save();
+                None
+            })),
+            sv.save_curve_preset_file.replace(Box::new(move |_| {
+                save_curves();
+                None
+            })),
+            sv.pick_folder.replace(Box::new(move || {
+                folder();
+                None
+            })),
+            sv.reveal.replace(Box::new(move |_| {
+                reveal();
+                Err("not for the agent".into())
+            })),
+            sv.open_with.replace(Box::new(move |_, _| {
+                open_with();
+                Err("not for the agent".into())
+            })),
+        );
+        let app = &mut self.app;
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.run(command, params)))
+            .unwrap_or_else(|_| Err("internal error (please report this bug); the library is unchanged".into()));
+        let sv = &mut self.app.services;
+        (
+            sv.pick_files,
+            sv.pick_preset_files,
+            sv.pick_tracklog,
+            sv.pick_curve_preset_files,
+            sv.save_preset_file,
+            sv.save_curve_preset_file,
+            sv.pick_folder,
+            sv.reveal,
+            sv.open_with,
+        ) = saved;
+        let opened = !had_dialog && self.app.ui.dialog.is_some();
+        if opened {
+            self.app.ui.dialog = None;
+        }
+        let reply = match (r, opened, asked.get()) {
+            (_, true, _) => {
+                json!({ "ok": false, "error": format!("`{command}` opened a dialog, which waits for the user, so it was closed again: run the command with the parameters it lists instead.") })
+            }
+            (_, false, Some(what)) => {
+                json!({ "ok": false, "error": format!("`{command}` asks the user to {what}: pass the path(s) it lists instead.") })
+            }
+            (Ok(v), false, None) => json!({ "ok": true, "result": v }),
+            (Err(e), false, None) => json!({ "ok": false, "error": e }),
+        };
+        ctx.request_repaint();
+        // The receiver is ours until we return.
+        let _ = tx.send(reply);
+        rx
+    }
+
+    /// The library's state for the host's agent: `document` (the library, its counts and the
+    /// current view), `photos` (a page of the photos in view, or matching `params.filter`),
+    /// `photo` (one by `id`, else the active one), `develop` (its develop settings and masks),
+    /// `controls` (every slider with its range, `params.section`), `selection`, `albums` and
+    /// `history` (the photo's develop history).
+    pub fn agent_inspect(&mut self, _ctx: &egui::Context, what: &str, p: &Value) -> Result<Value, String> {
+        let session = &mut self.app.session;
+        let mut query = |id: &str, params: Value| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| session.execute(id, &params).map_err(|e| e.to_string())))
+                .unwrap_or_else(|_| Err("internal error (please report this bug)".into()))
+        };
+        let get = |k: &str| p.get(k).filter(|v| !v.is_null()).cloned();
+        let photo = json!({ "id": get("id") });
+        match what {
+            "document" | "library" | "selection" => {
+                let mut v = query("library.state", json!({}))?;
+                v["stats"] = query("catalog.stats", json!({}))?;
+                Ok(v)
+            }
+            "photos" | "find" => {
+                let mut q = json!({ "limit": p.get("limit").and_then(Value::as_u64).unwrap_or(50) });
+                for k in ["filter", "sort", "offset"] {
+                    if let Some(v) = get(k) {
+                        q[k] = v;
+                    }
+                }
+                query("catalog.query", q)
+            }
+            "photo" | "object" => query("photo.inspect", photo),
+            "develop" | "masks" | "mask" => query("develop.get", photo),
+            "controls" => query("develop.controls", json!({ "section": get("section") })),
+            "albums" => query("albums.list", json!({})),
+            "history" => query("history.list", photo),
+            _ => Err(format!("Lightcraft has no view “{what}”: use document, photos, photo, develop, controls, selection, albums or history.")),
+        }
+    }
+
+    /// A picture for the host's agent: `photo` (alias `document`, `selection`: the photo `id`, else
+    /// the active one, developed and cropped), `before` (the same unedited) or `mask` (the photo's mask `mask`
+    /// (its id, else the first), white on black; `view: "color"` tints it over the photo), fitted
+    /// into `max_side` pixels. The render runs on a worker thread.
+    pub fn agent_render(&mut self, _ctx: &egui::Context, t: &Value) -> Result<(String, AgentRender), String> {
+        let s = &mut self.app.session;
+        let id = match t.get("id").and_then(Value::as_u64) {
+            Some(id) => PhotoId(id),
+            None => s.active().ok_or("no photo is active: give the photo's `id` (from app_inspect `photos`)")?,
+        };
+        let name = s.catalog.photo(id).ok_or("the library has no photo with that id")?.file_name.clone();
+        let side = t.get("max_side").and_then(Value::as_u64).unwrap_or(1024).clamp(16, 4096) as usize;
+        let target = t.get("target").and_then(Value::as_str).unwrap_or("photo");
+        let (caption, overlay) = match target {
+            "photo" | "document" | "selection" | "before" => {
+                (format!("{}“{name}” (id {})", if target == "before" { "Unedited " } else { "" }, id.0), None)
+            }
+            "mask" => {
+                let masks = s.develop_of(id).map(|d| d.masks.clone()).unwrap_or_default();
+                let mask = match t.get("mask").and_then(Value::as_u64) {
+                    Some(m) => masks.iter().find(|x| u64::from(x.id) == m).ok_or("the photo has no mask with that id (see app_inspect `develop`)")?,
+                    None => masks.first().ok_or("the photo has no masks")?,
+                };
+                let id16 = u16::try_from(mask.id).map_err(|_| "that mask can't be shown")?;
+                let view = if t.get("view").and_then(Value::as_str) == Some("color") { MaskView::Color } else { MaskView::WhiteOnBlack };
+                (
+                    format!("Mask “{}” (id {}) of “{name}”", mask.name, mask.id),
+                    Some(Overlay::Mask { id: id16, view, color: [230, 30, 40], opacity: 60 }),
+                )
+            }
+            other => return Err(format!("Lightcraft can't render “{other}”: use photo, before or mask (with `id`, `mask`).")),
+        };
+        let mut job = s.render_job(id, side, side, target == "before", true).ok_or("the photo can't be rendered")?;
+        if let Some(o) = overlay {
+            job = job.with_overlay(o);
+        }
+        let job: AgentRender = Box::new(move || {
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| job.run())).map_err(|_| "internal error while rendering".to_string())?;
+            let img = r.rendered?.image;
+            let px: Vec<u8> = img.data.iter().flatten().copied().collect();
+            Ok(egui::ColorImage::from_rgba_unmultiplied([img.width, img.height], &px))
+        });
+        Ok((caption, job))
+    }
+}
+
+/// A registry entry from `control::all_commands` in the shape the host's agent reads.
+fn agent_command(c: &Value) -> Value {
+    let text = |k: &str| c.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty() && *s != "{}");
+    let mut out = json!({ "id": c["id"], "label": c["label"], "enabled": c["enabled"].as_bool().unwrap_or(true) });
+    let menu: Vec<&str> = c["menu"].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|m| !m.is_empty()).collect();
+    if !menu.is_empty() {
+        out["menu"] = json!(menu.join(" › "));
+    }
+    for key in ["params", "shortcut", "disabled_reason"] {
+        if let Some(s) = text(key) {
+            out[key] = json!(s);
+        }
+    }
+    out
 }
 
 impl eframe::App for Embedded {

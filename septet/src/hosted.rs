@@ -131,7 +131,7 @@ macro_rules! hosted {
 
 hosted!(photocraft_embed::Embedded, agent);
 hosted!(vectorcraft_embed::Embedded, agent);
-hosted!(lightcraft_embed::Embedded);
+hosted!(lightcraft_embed::Embedded, agent);
 hosted!(designcraft_embed::Embedded, agent);
 hosted!(pdfcraft_embed::Embedded);
 hosted!(filmcraft_embed::Embedded, agent);

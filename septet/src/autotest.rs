@@ -296,6 +296,18 @@ impl Autotest {
                 1,
                 vec![run("file.import", json!({}))],
             ),
+            AppKind::Lightcraft => (
+                run("library.select", json!({"ids": [1], "active": 1})),
+                "develop",
+                vec![
+                    run("develop.set", json!({"control": "light.exposure", "value": 1.0})),
+                    run("develop.treatment", json!({"bw": true})),
+                    run("mask.add", json!({"kind": "radial", "center": [0.5, 0.5], "rx": 0.3, "ry": 0.25})),
+                ],
+                "mask",
+                3,
+                vec![run("library.import", json!({}))],
+            ),
             _ => (Step::Report, "", vec![], "object", 1, vec![]),
         };
         let mut steps = vec![Step::Wait(2.0), new, Step::ToolWait(40.0), call("app_commands", json!({})), call("app_commands", json!({"filter": filter}))];
@@ -750,7 +762,9 @@ impl Autotest {
                     at.note(format!("rate limit: {limit:?}"));
                 }
                 Step::Tool(name, mut args) => {
-                    if let Some(id) = &at.last_id {
+                    // No id yet: leave it out.
+                    let none = serde_json::Value::Null;
+                    if let Some(id) = at.last_id.as_ref().or(Some(&none)) {
                         fn put(v: &mut serde_json::Value, id: &serde_json::Value) {
                             match v {
                                 serde_json::Value::String(s) if s == "$id" => *v = id.clone(),

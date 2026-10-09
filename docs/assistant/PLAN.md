@@ -419,6 +419,15 @@ Speichern und Exportieren bleiben sonst Sache des Users.
    `ticksPerSecond`), `clip`, `selection`, `history`. Renders: Sequenz-Frame (auf Schwarz, wie der Program Monitor),
    Clip allein (`render_clip`, Septet schneidet zu), Auswahl (erster ausgewählter Clip), Projekt-Item; der
    `PoolProvider` ist `Send`, gerendert wird auf dem Worker. Prompt: Clips per `timeline.place` statt nur OTIO.
+   **Lightcraft** fertig: 373 Befehle über `app.run` (wie Vectorcraft), Dialog-Schutz (`ui.dialog`), Datei-Dialoge
+   und „in anderem Programm öffnen“ abgefangen. Ansichten `document` (Bibliothek + Statistik), `photos` (Filter,
+   Seite), `photo`, `develop`/`mask`, `controls` (Regler-IDs wie `light.exposure`), `albums`, `history`. Renders über
+   `Session::render_job` (auf dem Worker): entwickeltes Foto, `before` (unbearbeitet), `mask` (weiß auf schwarz oder
+   `view: color`). Test im Portable-Modus (eigene Demo-Bibliothek, nicht die des Users).
+   **Hinweis Testumgebung (2026-10-09 ~12:40):** NVIDIA-Treiber und -Bibliotheken passen nicht mehr zusammen
+   (Kernelmodul 615.71.09, Bibliotheken 615.78.08 nach einem Update) → neue Prozesse bekommen keine GPU, Septet stürzt
+   auf `:99` in wgpu ab („Invalid surface“). Bis zum Neustart mit Software-GL testen: `WGPU_BACKEND=gl
+   LIBGL_ALWAYS_SOFTWARE=1 __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json`.
    Beobachtet, offen: Ein per Befehl angelegtes Dokument war im Chat-Test nicht ganz eingepasst (Zoom zu groß, links
    abgeschnitten); vermutlich eine Embedding-Frage von Vectorcrafts `canvas::fit`, nicht der Werkzeuge.
 3. **Photocraft, Designcraft, Effectcraft, Filmcraft**, dann **Lightcraft**, zuletzt **Pdfcraft** (Sonderweg).
