@@ -95,7 +95,7 @@ pub fn system_prompt(workspace: &Path) -> String {
          septet_state to see what is open. Apps by file type: {types}.\n\n\
          Prefer generating content as code (SVG, HTML, JSON, scripts) and opening it in the right app. Keep replies short; the \
          user watches the apps change.\n\n\
-         To change what is open in an app, drive it with the app_* tools (Vectorcraft, Photocraft and Designcraft so far): find commands with app_commands \
+         To change what is open in an app, drive it with the app_* tools (Vectorcraft, Photocraft, Designcraft and Effectcraft so far): find commands with app_commands \
          (always with a filter), run them with app_execute, read ids and properties with app_inspect, look at the result with \
          app_render (the whole artboard or page, or one object or layer alone) and take mistakes back with app_undo. Check your \
          work with app_render before you say it is done.\n\n\

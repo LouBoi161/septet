@@ -272,6 +272,19 @@ impl Autotest {
                 2,
                 vec![run("file.place", json!({}))],
             ),
+            AppKind::Effectcraft => (
+                run("comp.new", json!({"name": "Main", "width": 640, "height": 360, "duration": 4, "background": "#202830"})),
+                "solid",
+                vec![
+                    run("layer.newSolid", json!({"name": "Orange", "color": "#e8a33d", "width": 220, "height": 150})),
+                    run("prop.set", json!({"layer": "$id", "path": "transform/position", "value": [220, 150]})),
+                    run("layer.newSolid", json!({"name": "Blue", "color": "#2f6fd6", "width": 160, "height": 120})),
+                    run("prop.set", json!({"layer": "$id", "path": "transform/position", "value": [420, 230]})),
+                ],
+                "layer",
+                2,
+                vec![run("file.quitNonsense", json!({}))],
+            ),
             _ => (Step::Report, "", vec![], "object", 1, vec![]),
         };
         let mut steps = vec![Step::Wait(2.0), new, Step::ToolWait(40.0), call("app_commands", json!({})), call("app_commands", json!({"filter": filter}))];
@@ -727,11 +740,14 @@ impl Autotest {
                 }
                 Step::Tool(name, mut args) => {
                     if let Some(id) = &at.last_id {
-                        for v in args.as_object_mut().into_iter().flat_map(|o| o.values_mut()) {
-                            if v == "$id" {
-                                *v = id.clone();
+                        fn put(v: &mut serde_json::Value, id: &serde_json::Value) {
+                            match v {
+                                serde_json::Value::String(s) if s == "$id" => *v = id.clone(),
+                                serde_json::Value::Object(o) => o.values_mut().for_each(|v| put(v, id)),
+                                _ => {}
                             }
                         }
+                        put(&mut args, id);
                     }
                     at.note(format!("tool {name} {args}"));
                     let (reply, rx) = std::sync::mpsc::channel();

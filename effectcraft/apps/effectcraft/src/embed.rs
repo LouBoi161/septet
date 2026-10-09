@@ -3,14 +3,21 @@
 //! does for a plain launch and forwards the host's frames to it.
 
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Receiver;
 
+use effectcraft_engine::project::LayerId;
+use effectcraft_engine::time::Tick;
+use effectcraft_ui_egui::ControlRequest;
 use effectcraft_ui_egui::gpu_failure::GpuFailureBridge;
 use effectcraft_ui_egui::panels::DragPayload;
 use effectcraft_ui_egui::send::{self, Outgoing};
 use effectcraft_ui_egui::{Dialog, EffectcraftApp, hosted, menus, panels, prefs_live, theme};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::desktop;
+
+/// A picture for the host's agent, made on a worker thread ([`Embedded::agent_render`]).
+pub type AgentRender = Box<dyn FnOnce() -> Result<egui::ColorImage, String> + Send>;
 
 /// Files to open or place. They run in the app's next frame, which has its context (the
 /// Composition viewer's mapping, dialogs).
@@ -206,6 +213,146 @@ fn is_project(path: &str) -> bool {
 
 fn strings(paths: &[PathBuf]) -> Vec<String> {
     paths.iter().map(|p| p.to_string_lossy().into_owned()).collect()
+}
+
+impl Embedded {
+    /// The engine's commands for the host's agent, with their parameters as text and as JSON
+    /// Schema, and whether they can run now.
+    pub fn agent_commands(&mut self, _ctx: &egui::Context) -> Vec<Value> {
+        let session = &self.app.session;
+        effectcraft_engine::command_specs()
+            .iter()
+            .map(|c| {
+                let mut v = json!({ "id": c.id, "label": c.label, "enabled": true });
+                if !c.menu.is_empty() {
+                    v["menu"] = json!(c.menu.join(" › "));
+                }
+                if let Some(sc) = c.shortcut {
+                    v["shortcut"] = json!(sc);
+                }
+                if !matches!(c.params.trim(), "" | "{}") {
+                    v["params"] = json!(c.params);
+                    v["schema"] = effectcraft_engine::commands::params_schema(c);
+                }
+                if let Err(reason) = (c.enabled)(session) {
+                    v["enabled"] = json!(false);
+                    v["disabled_reason"] = json!(reason);
+                }
+                v
+            })
+            .collect()
+    }
+
+    /// Run an engine command for the host's agent as the control channel's `engine.execute` does:
+    /// checked against its parameters, never a dialog, undoable like the menu item. A command that
+    /// runs as a background job (renders, analysis) replies when the job ends, on a later frame.
+    pub fn agent_execute(&mut self, ctx: &egui::Context, command: &str, params: Value) -> Receiver<Value> {
+        let params = if params.is_null() { json!({}) } else { params };
+        let (req, rx) = ControlRequest::new("engine.execute", json!({ "command": command, "params": params }));
+        if effectcraft_engine::find_command(command).is_none() {
+            let _ = req.reply.send(json!({ "ok": false, "error": format!("Effectcraft has no command `{command}`; app_commands lists them.") }));
+            return rx;
+        }
+        let reply = req.reply.clone();
+        let app = &mut self.app;
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.control_now(ctx, req))).is_err() {
+            let _ = reply.send(json!({ "ok": false, "error": "internal error (please report this bug); the project is unchanged" }));
+        }
+        ctx.request_repaint();
+        rx
+    }
+
+    /// The project's state for the host's agent: `document` (its items and the active comp),
+    /// `comp` (a composition and its layers, by `id` or the active one), `layer` (a layer's
+    /// property tree by `id`, `depth` levels), `property` (`layer`, `path`, `time`), `selection`
+    /// (the editor's state: selected layers and keyframes, current time) and `history`.
+    pub fn agent_inspect(&mut self, _ctx: &egui::Context, what: &str, p: &Value) -> Result<Value, String> {
+        let session = &mut self.app.session;
+        let mut query = |id: &str, params: Value| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| session.execute(id, params).map_err(|e| e.to_string())))
+                .unwrap_or_else(|_| Err("internal error (please report this bug)".into()))
+        };
+        let get = |k: &str| p.get(k).filter(|v| !v.is_null()).cloned();
+        match what {
+            "document" | "project" | "documents" => {
+                let mut v = query("project.summary", json!({}))?;
+                v["activeComp"] = json!(self.app.session.active_comp_id().map(|c| c.0));
+                v["time"] = json!(self.app.session.time().seconds());
+                Ok(v)
+            }
+            "comp" | "composition" => query("comp.info", json!({ "comp": get("id").or_else(|| get("comp")) })),
+            "layer" | "object" => {
+                let layer = get("id").or_else(|| get("layer")).ok_or("give the layer's `id` (from `comp`)")?;
+                query(
+                    "layer.tree",
+                    json!({ "layer": layer, "comp": get("comp"), "depth": p.get("depth").and_then(Value::as_u64).unwrap_or(2), "time": get("time") }),
+                )
+            }
+            "property" | "prop" => {
+                query("prop.get", json!({ "layer": get("layer").or_else(|| get("id")), "path": get("path"), "prop": get("prop"), "time": get("time") }))
+            }
+            "selection" | "state" => query("editor.state", json!({})),
+            "history" => query("edit.history.list", json!({})),
+            _ => Err(format!("Effectcraft has no view “{what}”: use document, comp, layer, property, selection or history.")),
+        }
+    }
+
+    /// A picture for the host's agent: `frame` (alias `document`, `comp`: the composition `comp`,
+    /// else the active one, at `time` seconds, else the current time, over its background), `layer`
+    /// (one by `id`: number, `#n` or name, alone on transparency) or `selection` (the selected
+    /// layers alone), fitted into `max_side` pixels (never enlarged). The project is shared with
+    /// the job, which renders on the CPU.
+    pub fn agent_render(&mut self, _ctx: &egui::Context, t: &Value) -> Result<(String, AgentRender), String> {
+        let s = &self.app.session;
+        let comp = s.resolve_comp(t.get("comp")).map_err(|e| e.to_string())?;
+        let c = s.project.comp(comp).ok_or("no composition is open: open a project with septet_open, or make one with app_execute `comp.new`")?;
+        let name = s.project.item(comp).map(|i| i.name.clone()).unwrap_or_default();
+        let time = t.get("time").and_then(Value::as_f64).map(Tick::from_seconds_f64).unwrap_or_else(|| s.time());
+        let max_side = t.get("max_side").and_then(Value::as_u64).unwrap_or(1024).clamp(16, 4096) as u32;
+        let at = format!("at {:.2} s", time.seconds());
+        let (caption, only, background) = match t.get("target").and_then(Value::as_str).unwrap_or("frame") {
+            "frame" | "document" | "comp" | "composition" => (format!("Composition “{name}” {at}, {} × {} px", c.width, c.height), vec![], true),
+            target @ ("layer" | "object" | "selection") => {
+                let ids = if target == "selection" {
+                    s.state.selected_layers.clone()
+                } else {
+                    vec![layer_ref(c, t.get("id").ok_or("give the layer's `id` (from app_inspect `comp`)")?)?]
+                };
+                let caption = match &ids[..] {
+                    [] => return Err("no layer is selected".into()),
+                    [id] => {
+                        let l = c.layers.iter().find(|l| l.id == *id).ok_or("no layer has that id")?;
+                        format!("Layer “{}” (id {}, {}) {at}", l.name, id.0, l.source.type_name())
+                    }
+                    ids => format!("{} selected layers {at}", ids.len()),
+                };
+                (caption, ids, false)
+            }
+            other => return Err(format!("Effectcraft can't render “{other}”: use frame (with `comp`, `time`), layer (with `id`) or selection.")),
+        };
+        // Layers render on the whole frame, which the host crops to them: big enough that the crop
+        // still fills `max_side`.
+        let side = if only.is_empty() { max_side } else { max_side.max(2048) };
+        let frame = s.frame_job(comp, time, side, background, &only).map_err(|e| e.to_string())?;
+        let job: AgentRender = Box::new(move || {
+            let (w, h, px) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(frame)).map_err(|_| "internal error while rendering".to_string())?;
+            Ok(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &px))
+        });
+        Ok((caption, job))
+    }
+}
+
+/// The layer `v` names in `c`: its id, `#n` (its index from the top, as in the Timeline) or its name.
+fn layer_ref(c: &effectcraft_engine::project::Comp, v: &Value) -> Result<LayerId, String> {
+    let found = match v {
+        Value::Number(n) => n.as_u64().map(LayerId).filter(|id| c.layers.iter().any(|l| l.id == *id)),
+        Value::String(s) => match s.strip_prefix('#').and_then(|n| n.parse::<usize>().ok()) {
+            Some(n) => n.checked_sub(1).and_then(|i| c.layers.get(i)).map(|l| l.id),
+            None => c.layers.iter().find(|l| l.name == *s).map(|l| l.id),
+        },
+        _ => None,
+    };
+    found.ok_or_else(|| format!("the composition has no layer {v}"))
 }
 
 impl eframe::App for Embedded {

@@ -1231,48 +1231,63 @@ impl EffectcraftApp {
     }
 
     fn drain_control(&mut self, ctx: &egui::Context) {
-        let Some(rx) = self.control_rx.take() else { return };
         let now = ctx.input(|i| i.time);
         let mut reqs: Vec<(ControlRequest, f64)> = std::mem::take(&mut self.deferred);
-        while let Ok(req) = rx.try_recv() {
-            reqs.push((req, now + 3.0));
+        // A host that drives the app in-process ([`Self::control_now`]) has no channel, but its
+        // deferred requests and job waits still need the frames.
+        if let Some(rx) = self.control_rx.take() {
+            while let Ok(req) = rx.try_recv() {
+                reqs.push((req, now + 3.0));
+            }
+            self.control_rx = Some(rx);
         }
         for (req, deadline) in reqs {
-            let reply = req.reply.clone();
-            match control::handle(self, ctx, &req) {
-                control::Outcome::Done(v) => {
-                    let _ = reply.send(v);
-                }
-                control::Outcome::Retry(msg) => {
-                    if now < deadline {
-                        self.deferred.push((req, deadline));
-                        ctx.request_repaint();
-                    } else {
-                        let _ = reply.send(json!({"ok": false, "error": msg}));
-                    }
-                }
-                control::Outcome::AfterInput => self.input_waiters.push(reply),
-                control::Outcome::AwaitJobs(w) => {
-                    self.job_waiters.push((w, reply));
+            self.handle_control(ctx, req, now, deadline);
+        }
+        self.finish_job_waiters(ctx);
+    }
+
+    /// Handle one control request now, as the control channel does between frames, for a host
+    /// that drives the app in-process. The reply goes out at once, or from a later frame when the
+    /// request waits for the UI (retried for up to 3 s), queued input or background jobs.
+    pub fn control_now(&mut self, ctx: &egui::Context, req: ControlRequest) {
+        let now = ctx.input(|i| i.time);
+        self.handle_control(ctx, req, now, now + 3.0);
+    }
+
+    fn handle_control(&mut self, ctx: &egui::Context, req: ControlRequest, now: f64, deadline: f64) {
+        let reply = req.reply.clone();
+        match control::handle(self, ctx, &req) {
+            control::Outcome::Done(v) => {
+                let _ = reply.send(v);
+            }
+            control::Outcome::Retry(msg) => {
+                if now < deadline {
+                    self.deferred.push((req, deadline));
                     ctx.request_repaint();
-                }
-                control::Outcome::Screenshot { path, crop } => {
-                    // A covered or minimized window presents no frames (macOS skips its redraws), so
-                    // a screenshot would never arrive and nothing would tick its timeout.
-                    if ctx.input(|i| i.viewport().occluded == Some(true) || i.viewport().minimized == Some(true)) {
-                        let _ = reply.send(json!({"ok": false, "error": "window is covered or minimized: call ui.focus first (render.frame renders comp pixels without the window)"}));
-                        continue;
-                    }
-                    let token = self.next_token;
-                    self.next_token += 1;
-                    let settle = now + 0.35;
-                    self.queued_screenshots.push((token, settle, 0));
-                    self.pending_screenshots.push((token, path, crop, reply, settle + SCREENSHOT_TIMEOUT_S));
+                } else {
+                    let _ = reply.send(json!({"ok": false, "error": msg}));
                 }
             }
+            control::Outcome::AfterInput => self.input_waiters.push(reply),
+            control::Outcome::AwaitJobs(w) => {
+                self.job_waiters.push((w, reply));
+                ctx.request_repaint();
+            }
+            control::Outcome::Screenshot { path, crop } => {
+                // A covered or minimized window presents no frames (macOS skips its redraws), so
+                // a screenshot would never arrive and nothing would tick its timeout.
+                if ctx.input(|i| i.viewport().occluded == Some(true) || i.viewport().minimized == Some(true)) {
+                    let _ = reply.send(json!({"ok": false, "error": "window is covered or minimized: call ui.focus first (render.frame renders comp pixels without the window)"}));
+                    return;
+                }
+                let token = self.next_token;
+                self.next_token += 1;
+                let settle = now + 0.35;
+                self.queued_screenshots.push((token, settle, 0));
+                self.pending_screenshots.push((token, path, crop, reply, settle + SCREENSHOT_TIMEOUT_S));
+            }
         }
-        self.control_rx = Some(rx);
-        self.finish_job_waiters(ctx);
     }
 
     /// Reply to the control requests whose offloaded jobs ended.

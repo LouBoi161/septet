@@ -403,6 +403,15 @@ Speichern und Exportieren bleiben sonst Sache des Users.
    Objekt/Auswahl freigestellt (`objects_image`, auch für das Rausziehen), Ebene = Seite nur mit deren Items. Dokument
    und Satz-Cache sind `Arc`s, der Job rendert auf dem Worker. Claude kann jetzt Designcraft-Dokumente selbst anlegen
    (System-Prompt angepasst).
+   **Effectcraft** fertig: 665 Engine-Befehle mit Text-Parametern und JSON-Schema (Septet lässt die Schemas weg, wenn
+   mehr als 12 Befehle gelistet werden), über das neue `EffectcraftApp::control_now`. `drain_control` lief bisher nur
+   mit TCP-Kanal; jetzt arbeitet es aufgeschobene Anfragen (`Retry`, Job-Wartende) auch ohne ab (Standalone mit
+   `--control` geprüft). Ansichten `document`, `comp`, `layer` (Eigenschaftsbaum), `property`, `selection`, `history`.
+   Renders über neues `Session::frame_job` (wie `thumbnail_job`, CPU, eigener Thread): Komposition über ihrem
+   Hintergrund; Ebene(n) allein, indem in einer Kopie des Projekts die anderen Ebenen ausgeschaltet werden (Mattes,
+   Kameras, Lichter bleiben; nie der Solo-Schalter). Septet schneidet transparente Ränder von Teil-Renders ab.
+   Gefunden und behoben: Effectcrafts `path` ist ein Eigenschaftspfad (`transform/position`); Septets Pfadregel nimmt
+   `path` jetzt nur als Datei, wenn er danach aussieht (absolut, `./`, `../`, `~`, Endung) oder der Befehl speichert.
    Beobachtet, offen: Ein per Befehl angelegtes Dokument war im Chat-Test nicht ganz eingepasst (Zoom zu groß, links
    abgeschnitten); vermutlich eine Embedding-Frage von Vectorcrafts `canvas::fit`, nicht der Werkzeuge.
 3. **Photocraft, Designcraft, Effectcraft, Filmcraft**, dann **Lightcraft**, zuletzt **Pdfcraft** (Sonderweg).

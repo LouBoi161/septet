@@ -135,7 +135,7 @@ hosted!(lightcraft_embed::Embedded);
 hosted!(designcraft_embed::Embedded, agent);
 hosted!(pdfcraft_embed::Embedded);
 hosted!(filmcraft_embed::Embedded);
-hosted!(effectcraft_embed::Embedded);
+hosted!(effectcraft_embed::Embedded, agent);
 
 /// Portable mode: keep `kind`'s settings and data under `root` (call before `create`).
 pub fn set_data_root(kind: AppKind, root: Option<PathBuf>) {

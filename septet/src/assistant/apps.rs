@@ -22,6 +22,8 @@ const MAX_SIDE: u64 = 1568;
 const MAX_TEXT: usize = 40_000;
 /// Without a filter, longer command lists are summed up instead of listed.
 const MAX_UNFILTERED: usize = 150;
+/// Longer command lists leave out the commands' JSON Schemas (their `params` text stays).
+const MAX_SCHEMAS: usize = 12;
 /// How long a command may take to answer when it waits for the app's frames.
 const DEFERRED_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long an app may take to start.
@@ -214,7 +216,7 @@ pub fn call(shell: &mut Shell, ctx: &Context, call: ToolCall, approved: bool) {
             let mut params = args.get("params").filter(|p| p.is_object()).cloned().unwrap_or_else(|| json!({}));
             let workspace = shell.assistant.conversation.as_ref().map(|c| c.workspace.clone());
             if !undo {
-                let outside = match resolve_paths(&mut params, workspace.as_deref(), &shell.recent) {
+                let outside = match resolve_paths(&mut params, workspace.as_deref(), &shell.recent, writes_files(command)) {
                     Ok(outside) => outside,
                     Err(e) => return reply(&call.reply, Err(e)),
                 };
@@ -360,13 +362,21 @@ fn commands(app: &str, list: Vec<Value>, filter: &str, enabled_only: bool) -> St
             o.remove("enabled");
         }
     }
+    // JSON Schemas (Effectcraft) are worth their length for a few commands only.
+    if found.len() > MAX_SCHEMAS {
+        for c in &mut found {
+            if let Some(o) = c.as_object_mut() {
+                o.remove("schema");
+            }
+        }
+    }
     let lines: Vec<String> = found.iter().map(Value::to_string).collect();
     cut(format!("{} of {} {app} commands:\n{}", found.len(), list.len(), lines.join("\n")))
 }
 
 /// Make the path parameters absolute (relative ones are in the workspace) → the ones outside the
 /// workspace that the user did not open in Septet.
-fn resolve_paths(params: &mut Value, workspace: Option<&Path>, recent: &crate::recent::Recent) -> Result<Vec<PathBuf>, String> {
+fn resolve_paths(params: &mut Value, workspace: Option<&Path>, recent: &crate::recent::Recent, writes: bool) -> Result<Vec<PathBuf>, String> {
     let mut outside = Vec::new();
     let root = workspace.and_then(|w| w.canonicalize().ok());
     let Some(map) = params.as_object_mut() else { return Ok(outside) };
@@ -379,7 +389,7 @@ fn resolve_paths(params: &mut Value, workspace: Option<&Path>, recent: &crate::r
             v => vec![v],
         };
         for item in items {
-            let Some(p) = item.as_str() else { continue };
+            let Some(p) = item.as_str().filter(|p| writes || looks_like_file(p)) else { continue };
             let path = if Path::new(p).is_absolute() { PathBuf::from(p) } else { workspace.ok_or("Relative paths need a conversation's workspace.")?.join(p) };
             let real = real_path(&path);
             let inside = root.as_ref().is_some_and(|r| real.starts_with(r));
@@ -391,6 +401,16 @@ fn resolve_paths(params: &mut Value, workspace: Option<&Path>, recent: &crate::r
         }
     }
     Ok(outside)
+}
+
+/// Whether a `path` parameter names a file rather than something inside the document (Effectcraft's
+/// property paths such as `transform/position` or `effects/#1/blurriness`): absolute, relative
+/// to here or home, or ending in an extension.
+fn looks_like_file(p: &str) -> bool {
+    let name = p.rsplit(['/', '\\']).next().unwrap_or(p);
+    let extension =
+        name.rsplit_once('.').is_some_and(|(stem, ext)| !stem.is_empty() && (1..=5).contains(&ext.len()) && ext.chars().all(|c| c.is_ascii_alphanumeric()));
+    Path::new(p).is_absolute() || p.starts_with("./") || p.starts_with("../") || p.starts_with('~') || extension
 }
 
 /// `path` with links and `..` resolved as far as it exists (the file itself may not yet).
@@ -411,10 +431,16 @@ fn real_path(path: &Path) -> PathBuf {
     }
 }
 
+/// Commands that write files: saving and exporting.
+fn writes_files(command: &str) -> bool {
+    let id = command.to_lowercase();
+    id.contains("save") || id.contains("export")
+}
+
 /// What the user must agree to before `command` runs, if anything.
 fn needs_approval(command: &str, params: &Value, outside: &[PathBuf]) -> Option<String> {
     let id = command.to_lowercase();
-    let writes = id.contains("save") || id.contains("export");
+    let writes = writes_files(command);
     let has_path = PATH_KEYS.iter().any(|k| params.get(*k).is_some_and(|v| !v.is_null()));
     if id.starts_with("prefs.") || id.starts_with("shortcuts.") || id == "app.language" {
         Some("Let Claude change the app's settings?".into())
@@ -458,7 +484,14 @@ fn render((caption, job): (String, AgentRender), args: &Value, max_side: u32, wo
     }
     let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
     let mut img = image::RgbaImage::from_raw(w as u32, h as u32, rgba).ok_or("The app returned a broken picture.")?;
-    if w.max(h) as u32 > max_side {
+    let target = args["target"].as_str().unwrap_or("document");
+    let whole = matches!(target, "document" | "page" | "artboard" | "frame" | "comp" | "sequence" | "photo");
+    // A part rendered on its whole canvas (Effectcraft's layers): only what it covers.
+    if !whole {
+        img = trim(img);
+    }
+    let (w, h) = img.dimensions();
+    if w.max(h) > max_side {
         let s = max_side as f32 / w.max(h) as f32;
         let (nw, nh) = (((w as f32 * s).round() as u32).max(1), ((h as f32 * s).round() as u32).max(1));
         img = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
@@ -470,8 +503,6 @@ fn render((caption, job): (String, AgentRender), args: &Value, max_side: u32, wo
         img.save_with_format(&out, image::ImageFormat::Png).map_err(|e| format!("{}: {e}", out.display()))?;
         note.push_str(&format!(" Saved {}.", out.display()));
     }
-    let target = args["target"].as_str().unwrap_or("document");
-    let whole = matches!(target, "document" | "page" | "artboard" | "frame" | "comp" | "sequence" | "photo");
     let background = match args["background"].as_str().unwrap_or("auto") {
         "auto" if whole => Background::Solid(Color32::WHITE),
         "auto" | "checker" | "checkerboard" => Background::Checker,
@@ -490,6 +521,23 @@ fn render((caption, job): (String, AgentRender), args: &Value, max_side: u32, wo
         ],
         is_error: false,
     })
+}
+
+/// `img` without its fully transparent margins (a few pixels of them stay); unchanged when
+/// nothing in it is transparent or everything is.
+fn trim(img: image::RgbaImage) -> image::RgbaImage {
+    let (w, h) = img.dimensions();
+    let shows = |x: u32, y: u32| img.get_pixel(x, y)[3] > 0;
+    let rows: Vec<u32> = (0..h).filter(|&y| (0..w).any(|x| shows(x, y))).collect();
+    let cols: Vec<u32> = (0..w).filter(|&x| (0..h).any(|y| shows(x, y))).collect();
+    let (Some(&top), Some(&bottom), Some(&left), Some(&right)) = (rows.first(), rows.last(), cols.first(), cols.last()) else { return img };
+    let pad = 2;
+    let (x0, y0) = (left.saturating_sub(pad), top.saturating_sub(pad));
+    let (x1, y1) = ((right + pad).min(w - 1), (bottom + pad).min(h - 1));
+    if (x0, y0, x1, y1) == (0, 0, w - 1, h - 1) {
+        return img;
+    }
+    image::imageops::crop_imm(&img, x0, y0, x1 - x0 + 1, y1 - y0 + 1).to_image()
 }
 
 #[derive(Clone, Copy)]
@@ -561,13 +609,30 @@ mod tests {
         std::fs::create_dir_all(&ws).unwrap();
         let recent = crate::recent::Recent::default();
         let mut p = json!({"path": "out/logo.svg", "paths": ["a.png", "/etc/hostname"], "width": 3});
-        let outside = resolve_paths(&mut p, Some(&ws), &recent).unwrap();
+        let outside = resolve_paths(&mut p, Some(&ws), &recent, false).unwrap();
         let real = ws.canonicalize().unwrap();
         assert_eq!(p["path"], json!(real.join("out/logo.svg").to_string_lossy()));
         assert_eq!(p["paths"][0], json!(real.join("a.png").to_string_lossy()));
         assert_eq!(outside.len(), 1, "{outside:?}");
-        assert!(resolve_paths(&mut json!({"path": "../escape.svg"}), Some(&ws), &recent).unwrap().len() == 1);
+        assert!(resolve_paths(&mut json!({"path": "../escape.svg"}), Some(&ws), &recent, false).unwrap().len() == 1);
+        let mut prop = json!({"path": "transform/position", "layer": 3});
+        assert!(resolve_paths(&mut prop, Some(&ws), &recent, false).unwrap().is_empty());
+        assert_eq!(prop["path"], "transform/position", "a property path stays as it is");
+        let mut save = json!({"path": "poster"});
+        resolve_paths(&mut save, Some(&ws), &recent, true).unwrap();
+        assert_eq!(save["path"], json!(real.join("poster").to_string_lossy()), "saving: any path is a file");
         let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn parts_lose_their_transparent_margins() {
+        let mut img = image::RgbaImage::new(100, 80);
+        for (x, y) in [(30, 20), (60, 50)] {
+            img.put_pixel(x, y, image::Rgba([255, 0, 0, 255]));
+        }
+        let t = trim(img);
+        assert_eq!(t.dimensions(), (35, 35), "30..=60 and 20..=50 with 2 px around");
+        assert_eq!(trim(image::RgbaImage::new(10, 10)).dimensions(), (10, 10), "nothing shows: unchanged");
     }
 
     #[test]

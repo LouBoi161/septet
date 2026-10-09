@@ -442,6 +442,8 @@ pub struct Session {
 
 /// A thumbnail render ([`Session::thumbnail_job`]): (width, height, RGBA8).
 pub type ThumbnailJob = Box<dyn FnOnce() -> Option<(u32, u32, Vec<u8>)> + Send>;
+/// A comp frame made off the UI thread ([`Session::frame_job`]): width, height, RGBA8.
+pub type FrameJob = Box<dyn FnOnce() -> (u32, u32, Vec<u8>) + Send>;
 
 /// A script to run (see [`Session::script`]).
 #[derive(Clone, Copy, Debug)]
@@ -872,6 +874,52 @@ impl Session {
             }
             _ => None,
         }
+    }
+
+    /// A frame of `comp` at comp time `t`, longest side at most `max_side` pixels (0 = full size),
+    /// as a job that owns everything it reads, like [`Self::thumbnail_job`]: straight-alpha RGBA,
+    /// transparent where nothing is drawn, or over the comp's background with `background`. With
+    /// `only` layers, the frame shows them alone (with their track mattes and the comp's cameras
+    /// and lights): the other layers are switched off in a copy of the project, never in the
+    /// project itself.
+    pub fn frame_job(&self, comp: ItemId, t: Tick, max_side: u32, background: bool, only: &[LayerId]) -> Result<FrameJob> {
+        let c = self.project.comp(comp).ok_or(EngineError::NoComp)?;
+        let long = c.width.max(c.height).max(1) as f64;
+        let scale = if max_side == 0 { 1.0 } else { (max_side as f64 / long).min(1.0) };
+        let bg = background.then_some(c.background);
+        let mut project = self.project.clone();
+        if !only.is_empty() {
+            if let Some(id) = only.iter().find(|id| !c.layers.iter().any(|l| l.id == **id)) {
+                return Err(EngineError::Other(format!("the composition has no layer {}", id.0)));
+            }
+            let mattes: Vec<LayerId> = c.layers.iter().filter(|l| only.contains(&l.id)).filter_map(|l| l.track_matte.as_ref().map(|m| m.layer)).collect();
+            // The project is shared: this copies it, once.
+            let c = Arc::make_mut(&mut project).comp_mut(comp).ok_or(EngineError::NoComp)?;
+            for l in &mut c.layers {
+                l.switches.solo = false;
+                if !only.contains(&l.id) && !mattes.contains(&l.id) && !l.is_camera() && !l.is_light() {
+                    l.switches.video = false;
+                }
+            }
+        }
+        let (footage, expr, cache) = (self.footage.clone(), self.expr.clone(), self.layer_cache.clone());
+        let opts = RenderOpts {
+            scale,
+            nested_switches: self.prefs.general.switches_affect_nested_comps,
+            draft_shadows: self.prefs.three_d.realtime_shadows,
+            ..Default::default()
+        };
+        Ok(Box::new(move || {
+            let mut r = Renderer::new(&project, footage.as_ref(), opts);
+            r.expr = expr.as_deref();
+            r.cache = Some(&cache);
+            let img = r.comp_frame(comp, t);
+            let px = match bg {
+                Some(bg) => img.to_rgba8_over(bg),
+                None => img.to_rgba8(),
+            };
+            (img.width, img.height, px)
+        }))
     }
 
     /// [`Session::render_rgba8`], or with `transparent` the frame's own straight alpha (what a
