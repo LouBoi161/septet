@@ -57,6 +57,18 @@ The builds are not signed by Microsoft or Apple (that needs paid certificates):
 - **Shortcuts**: Ctrl+PageUp/PageDown switch tabs, Ctrl+Alt+1…7 jump to an app, Ctrl+Shift+T new tab,
   Ctrl+Alt+W close tab.
 
+## Claude
+
+Septet has a chat panel (speech bubble at the top right, or Ctrl+Shift+K) where Claude works in the
+apps with you: it runs their commands, looks at the result, and can undo. It can also make SVGs,
+layouts, PDFs and motion graphics from code and place them in an app.
+
+It needs [Claude Code](https://code.claude.com/docs/en/setup), installed by you and signed in with
+your own Claude subscription. Septet starts that program and never sees your sign-in. The Claude
+settings show whether it is ready, let you pick the model and effort, and add your own skills,
+plugins and MCP servers. Septet asks you first before Claude saves or exports outside its working folder,
+changes settings, prints or signs.
+
 ## Build from source
 
 Rust 1.95 or newer:
