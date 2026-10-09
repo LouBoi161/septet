@@ -431,6 +431,13 @@ fn resolve_paths(params: &mut Value, workspace: Option<&Path>, recent: &crate::r
             if !inside && !opened {
                 outside.push(real.clone());
             }
+            // Saving into a workspace folder that does not exist yet (`out/flyer.png`): make it.
+            if writes && inside {
+                let dir = if FOLDER_KEYS.contains(&key.as_str()) { Some(real.as_path()) } else { real.parent() };
+                if let Some(dir) = dir {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+            }
             *item = json!(real.to_string_lossy());
         }
     }
@@ -663,6 +670,8 @@ mod tests {
         let mut save = json!({"path": "poster"});
         resolve_paths(&mut save, Some(&ws), &recent, true).unwrap();
         assert_eq!(save["path"], json!(real.join("poster").to_string_lossy()), "saving: any path is a file");
+        resolve_paths(&mut json!({"path": "out/deep/flyer.png"}), Some(&ws), &recent, true).unwrap();
+        assert!(real.join("out/deep").is_dir(), "saving makes the folder it goes into");
         let mut folder = json!({"out_dir": "pages"});
         assert!(resolve_paths(&mut folder, Some(&ws), &recent, false).unwrap().is_empty());
         assert_eq!(folder["out_dir"], json!(real.join("pages").to_string_lossy()), "a folder is always a path");

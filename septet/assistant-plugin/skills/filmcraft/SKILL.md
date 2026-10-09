@@ -77,8 +77,8 @@ what isn't in the params string is ignored.
 | Video transition | `sequence.applyVideoTransition {clip?, edge?:"in"\|"out", effect?:"cross_dissolve"\|"dip_to_black"\|"dip_to_white"\|"film_dissolve"\|…, frames?, params?, reverse?}`; edit later with `sequence.setTransition {transition, params?, reverse?, reset?}` |
 | Audio transition | `sequence.applyAudioTransition {clip?, edge?, effect?:"constant_power"\|"constant_gain"\|"exponential_fade", frames?}` |
 | List effects | `effects.list {kind?:"Video"\|"Audio"\|"VideoTransition"\|"AudioTransition", folder?, detail?:bool}` (`detail` adds param info) |
-| Title text | `graphics.newText {text, time\|frame (start), seconds=5 (duration!), size=100, position?:[x,y], box?:[w,h], font?, fontStyle?, track?:index, clip?, newClip?}` → `{"clip", "layer"}`; it lands above the clips there |
-| Edit title | `graphics.setText {clip?, layer?, text}`; shapes `graphics.newRectangle {position?, size?:[w,h], clip?}`; image/video above: `graphics.newFromFile {path, time?, track?}` |
+| Title text | `graphics.newText {text, time\|frame (start), seconds=5 (duration!), size=100, position?:[x,y], box?:[w,h], font?, fontStyle?, track?:index, clip?, newClip?}` → `{"clip", "layer"}`; it lands above the clips there. Text is **left-aligned**: `position` (default: frame centre) is where the first baseline **starts**, so it is not centred until you set `align: "center"`; to centre it vertically too, put the baseline about `0.35 × size` below the middle (`[960, 610]` for size 200 in 1080p) |
+| Edit title | `graphics.set {clip, layer, props: {align: "left"\|"center"\|"right", font, font_style, size, fill_color: "#rrggbb", stroke, background, shadow, position, scale, rotation, opacity, …}}`; `graphics.setText {clip?, layer?, text}`; shapes `graphics.newRectangle {position?, size?:[w,h], clip?}`; image/video above: `graphics.newFromFile {path, time?, track?}` |
 | Captions | `captions.add {text?, time\|seconds (start), durationSeconds=3, track?:"C1"}` (makes a caption track if none); `captions.setText {caption?, text?}`; `captions.setStyle {track:"C1", font?, size?, color?, align?, anchor?, …}`; `captions.import {path}`; `captions.list {}` |
 | Audio level | `clip.audioGain {clips?, mode?:"set\|adjust\|normalizeMax\|normalizeAll", db}` (no `mode`: adjust); track: `timeline.setTrack {track:"A1", volumeDb?, pan?, muted?, solo?, locked?, enabled?, name?}` |
 | Loudness / ducking | `essentialSound.setType {clips?, type:"dialogue\|music\|sfx\|ambience"}`, `essentialSound.autoMatch {clips?, target?}`, `essentialSound.generateDucking {clips?}` |
@@ -111,9 +111,10 @@ A 1 s cross dissolve centred on the cut between them (the out edge of clip 12, t
 ```json
 {"command": "sequence.applyVideoTransition", "params": {"clip": 12, "edge": "out", "effect": "cross_dissolve", "frames": 25}}
 ```
-Then `app_render target: "frame"` at 9.5, 10 and 10.5 s. A title over the first 4 s, low in the frame:
+Then `app_render target: "frame"` at 9.5, 10 and 10.5 s. A title over the first 4 s, centred low in the frame (newText answers `{"clip": 31, "layer": 0}`):
 ```json
 {"command": "graphics.newText", "params": {"text": "Summer 2026", "frame": 0, "seconds": 4, "size": 120, "position": [960, 900]}}
+{"command": "graphics.set", "params": {"clip": 31, "layer": 0, "props": {"align": "center"}}}
 ```
 Export into the workspace as a background job, then poll:
 ```json

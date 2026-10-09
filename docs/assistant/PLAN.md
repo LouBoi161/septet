@@ -458,6 +458,16 @@ Speichern und Exportieren bleiben sonst Sache des Users.
    - Autotest `assistant-apps`: pro App ein Befehl, eine Abfrage, ein Render von Dokument und Ebene. Nicht-leeres
      PNG prüfen und Screenshot anschauen.
    - Danach ein echter Chat mit Haiku (`SEPTET_AUTOTEST_MODEL=haiku`).
+   - ✅ Echter Chat mit Haiku in allen sieben Apps (2026-10-09, Xvfb, `assistant-panel` mit `SEPTET_AUTOTEST_APP`
+     und `SEPTET_AUTOTEST_PROMPT`): Claude lädt jedes Mal den App-Skill, erledigt die Aufgabe (Vectorcraft Kreise
+     per `command.batch` + Auswahl + Gruppe; Photocraft Text + PNG-Kopie; Designcraft A5-Flyer + `app.exportPng` mit
+     Pfad; Effectcraft Einblendung per `engine.batch` + Renders zu zwei Zeiten; Filmcraft Titel + MP4-Export als Job,
+     Fortschritt per `jobs.list`; Lightcraft Belichtung + Sterne; Pdfcraft Überschrift + Notiz + Speichern) und
+     prüft per Render. Behoben: Speichern/Exportieren in einen noch fehlenden Workspace-Unterordner legt ihn an;
+     Filmcraft-Skill erklärt, dass Text linksbündig an der Grundlinie sitzt (`graphics.set` `align: "center"`);
+     ein Werkzeugaufruf mit unlesbarem JSON heißt im Panel „Garbled tool call“ statt „Ran  in“.
+     Beobachtet, offen: Ein modaler App-Dialog (z. B. „Recover unsaved changes“ von Filmcraft/Pdfcraft) nimmt auch
+     dem Chat-Feld die Tastatur. Im Test lag das an Recovery-Daten früherer Läufe (Testskript leert sie jetzt).
 
 **Abnahme:** In jeder App kann Claude per Chat etwas ändern, sich das Ergebnis als Bild ansehen (gesamt und eine
 Ebene, ein Objekt oder einen Clip einzeln) und es rückgängig machen. Das gilt auch dann, wenn der Tab gerade nicht

@@ -52,6 +52,10 @@ fn label(name: &str, input: &Value) -> String {
             .collect();
         names.join(", ")
     };
+    // Claude Code could not parse what Claude sent; Claude sees the error and usually tries again.
+    if input.get("__unparsedToolInput").is_some() {
+        return "Garbled tool call (Claude retries)".into();
+    }
     match name.strip_prefix("mcp__septet__").unwrap_or(name) {
         "septet_state" => "Looked at the open tabs".into(),
         "septet_open" if s("app").is_empty() => format!("Open {}", paths()),

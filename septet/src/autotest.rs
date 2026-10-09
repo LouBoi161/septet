@@ -116,10 +116,14 @@ impl Autotest {
                 Step::Wait(1.0),
                 Step::Exit,
             ],
-            // The Claude panel beside Vectorcraft: type a request (keys must not reach the app), let Claude work.
+            // The Claude panel beside one app (`SEPTET_AUTOTEST_APP`, default Vectorcraft): type a request (keys
+            // must not reach the app), let Claude work.
             Ok("assistant-panel") => vec![
                 Step::Wait(2.0),
-                Step::Open(AppKind::Vectorcraft),
+                Step::Open({
+                    let name = std::env::var("SEPTET_AUTOTEST_APP").unwrap_or_else(|_| "vectorcraft".into());
+                    AppKind::ALL.into_iter().find(|k| k.name().eq_ignore_ascii_case(&name))?
+                }),
                 Step::Wait(5.0),
                 Step::ClaudePanel,
                 Step::Wait(3.0),
