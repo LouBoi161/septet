@@ -428,6 +428,16 @@ Speichern und Exportieren bleiben sonst Sache des Users.
    (Kernelmodul 615.71.09, Bibliotheken 615.78.08 nach einem Update) → neue Prozesse bekommen keine GPU, Septet stürzt
    auf `:99` in wgpu ab („Invalid surface“). Bis zum Neustart mit Software-GL testen: `WGPU_BACKEND=gl
    LIBGL_ALWAYS_SOFTWARE=1 __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json`.
+   **Pdfcraft** fertig (Sonderweg): statt der Registry ohne Parameter die 132 Automation-Werkzeuge (`pdfcraft-cli mcp`)
+   mit JSON-Schemas, auf der Sitzung der App: neues `Automation::on_session` tauscht die App-Sitzung für den Aufruf ein
+   und wieder aus (auch bei Panic; Test im Pdfcraft-Workspace). `doc` fehlt → das PDF im Vordergrund. Danach
+   `sync_tabs`: neue Dokumente bekommen einen Tab, geschlossene verlieren ihn, geänderte werden neu gezeichnet
+   (`DocView::document_changed`). Ansichten `document`, `documents`, `page` (Text), `comments`, `fields`,
+   `bookmarks`, `links`, `history`. Render: Seite über `PageRenderer` auf dem Worker. Septet fragt jetzt auch vor
+   Drucken (`*print*`) und Signieren (`sign_*`). Die Werkzeugbeschreibungen von `app_inspect`/`app_render` nennen die
+   Ansichten und Ziele jeder App.
+   Damit ist Schritt 3 (alle sieben Apps) erledigt. Offen aus dem Plan: `app_batch` (Effectcraft `engine.batch`), der
+   Warteschlangen-Weg für `ui.*` (Schritt 4), Skills (Schritt 5), echter Chat-Test pro App.
    Beobachtet, offen: Ein per Befehl angelegtes Dokument war im Chat-Test nicht ganz eingepasst (Zoom zu groß, links
    abgeschnitten); vermutlich eine Embedding-Frage von Vectorcrafts `canvas::fit`, nicht der Werkzeuge.
 3. **Photocraft, Designcraft, Effectcraft, Filmcraft**, dann **Lightcraft**, zuletzt **Pdfcraft** (Sonderweg).

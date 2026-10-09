@@ -308,7 +308,17 @@ impl Autotest {
                 3,
                 vec![run("library.import", json!({}))],
             ),
-            _ => (Step::Report, "", vec![], "object", 1, vec![]),
+            AppKind::Pdfcraft => (
+                run("doc_create", json!({"from": "blank", "pages": 1, "width": 400, "height": 300, "name": "Agent test"})),
+                "comment",
+                vec![
+                    run("page_add_text", json!({"page": 1, "text": "Hello from Septet", "at": [40, 40], "size": 28, "color": "#2f6fd6"})),
+                    run("comment_add", json!({"page": 1, "type": "rectangle", "rect": [30, 120, 250, 220], "contents": "Agent box"})),
+                ],
+                "page",
+                1,
+                vec![run("doc_print", json!({}))],
+            ),
         };
         let mut steps = vec![Step::Wait(2.0), new, Step::ToolWait(40.0), call("app_commands", json!({})), call("app_commands", json!({"filter": filter}))];
         for change in changes {

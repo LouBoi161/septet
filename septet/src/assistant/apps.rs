@@ -21,7 +21,7 @@ const MAX_SIDE: u64 = 1568;
 /// Longer text answers are cut (Claude Code's default limit is 25 000 tokens a tool result).
 const MAX_TEXT: usize = 40_000;
 /// Without a filter, longer command lists are summed up instead of listed.
-const MAX_UNFILTERED: usize = 150;
+const MAX_UNFILTERED: usize = 80;
 /// Longer command lists leave out the commands' JSON Schemas (their `params` text stays).
 const MAX_SCHEMAS: usize = 12;
 /// How long a command may take to answer when it waits for the app's frames.
@@ -74,7 +74,7 @@ pub fn definitions(apps: &[String]) -> Vec<Value> {
         }),
         json!({
             "name": "app_inspect",
-            "description": "Read an app's document as JSON. `what`: `document` (summary and object or layer tree with ids; `depth` levels), `selection`, `object` or `layer` (one item by `id`), `history`, `documents` (all open ones); Vectorcraft also has `find` (params name/kind/text). An unknown `what` lists the app's views.",
+            "description": "Read an app's document as JSON. `what` per app: Vectorcraft document (layer tree; `depth`), object (`id`), selection, find (params name/kind/text), history, documents; Photocraft document (layer tree), layer (`id`), selection, history, documents; Designcraft document (pages; params.page), page, object (`id`), story (`id`: its text), selection, history, documents; Effectcraft document, comp, layer (`id`: property tree), property (params layer/path), selection, history; Filmcraft document (bins), sequence, clip (`id`), selection, history; Lightcraft document, photos (params filter/limit), photo, develop (with masks), controls (slider ids), albums, history; Pdfcraft document, documents, page (params.page: its text), comments, fields, bookmarks, links, history. An unknown `what` lists the app's views.",
             "inputSchema": {"type": "object", "properties": {
                 "app": app,
                 "what": {"type": "string"},
@@ -86,7 +86,7 @@ pub fn definitions(apps: &[String]) -> Vec<Value> {
         }),
         json!({
             "name": "app_render",
-            "description": "Look at an app's document as a picture, made off-screen (not a screenshot): `target` `document` (the artboard or page in view, or `page`, counted from 1), `object` or `layer` (one by `id`, cut out on its own), or `selection`. Use it after changes to check them. The picture is shown over `background` (auto: white for documents, a checkerboard for parts; or white, black, checker, transparent, #rrggbb). `save_as` also writes it as a transparent PNG into the workspace. Works while the app's tab is hidden.",
+            "description": "Look at an app's document as a picture, made off-screen (not a screenshot), also while its tab is hidden. Use it after changes to check them. `target` per app: Vectorcraft document (artboard in view, or `page`), object or layer (`id`, cut out alone), selection; Photocraft document, layer (`id`, alone), selection; Designcraft page (`page`), object (`id`), selection, layer (`id`); Effectcraft frame (params comp, `time`), layer (`id`, alone), selection; Filmcraft frame (`time`, else the playhead), clip (`id`), selection, item (`id`); Lightcraft photo (`id`), before (unedited), mask (params mask, view); Pdfcraft page (`page`). The picture is shown over `background` (auto: white for documents, a checkerboard for parts; or white, black, checker, transparent, #rrggbb). `save_as` also writes it as a transparent PNG into the workspace.",
             "inputSchema": {"type": "object", "properties": {
                 "app": app,
                 "target": {"type": "string"},
@@ -342,7 +342,7 @@ fn commands(app: &str, list: Vec<Value>, filter: &str, enabled_only: bool) -> St
     if words.is_empty() && found.len() > MAX_UNFILTERED {
         let mut groups: Vec<(String, usize)> = Vec::new();
         for c in &found {
-            let g = c["id"].as_str().unwrap_or_default().split('.').next().unwrap_or_default().to_owned();
+            let g = c["id"].as_str().unwrap_or_default().split(['.', '_']).next().unwrap_or_default().to_owned();
             match groups.iter_mut().find(|(name, _)| *name == g) {
                 Some((_, n)) => *n += 1,
                 None => groups.push((g, 1)),
@@ -444,6 +444,10 @@ fn needs_approval(command: &str, params: &Value, outside: &[PathBuf]) -> Option<
     let has_path = PATH_KEYS.iter().any(|k| params.get(*k).is_some_and(|v| !v.is_null()));
     if id.starts_with("prefs.") || id.starts_with("shortcuts.") || id == "app.language" {
         Some("Let Claude change the app's settings?".into())
+    } else if id.contains("print") && !id.ends_with("printers") {
+        Some("Let Claude print?".into())
+    } else if id.starts_with("sign_") && id != "sign_list" {
+        Some("Let Claude use your digital IDs to sign?".into())
     } else if !outside.is_empty() {
         Some(if writes { "Let Claude write a file outside its workspace?" } else { "Let Claude use a file outside its workspace?" }.into())
     } else if writes && !has_path {
@@ -600,6 +604,8 @@ mod tests {
         assert!(needs_approval("file.saveAs", &json!({"path": "/ws/a.svg"}), &none).is_none());
         assert!(needs_approval("document.export", &json!({"path": "/x.png"}), &[PathBuf::from("/x.png")]).is_some());
         assert!(needs_approval("prefs.set", &json!({}), &none).is_some());
+        assert!(needs_approval("doc_print", &json!({}), &none).is_some() && needs_approval("printers", &json!({}), &none).is_none());
+        assert!(needs_approval("sign_document", &json!({}), &none).is_some() && needs_approval("sign_list", &json!({}), &none).is_none());
         assert!(blocked("app.quit") && blocked("ui.screenshot") && !blocked("edit.undo"));
     }
 

@@ -20,6 +20,10 @@ path = "src/lib.rs"
 ureq = { version = "3.4", default-features = false, features = ["rustls-no-provider", "_ring"] }
 rustls-native-certs = "0.8"
 pdfcraft-ui-egui = { workspace = true }
+# The agent methods of embed.rs: the automation tools on the app's own session, page renders.
+pdfcraft-automation = { workspace = true }
+pdfcraft-engine = { workspace = true }
+pdfcraft-render = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "persistence", "links"] }
 egui = { workspace = true }
 serde_json = { workspace = true }

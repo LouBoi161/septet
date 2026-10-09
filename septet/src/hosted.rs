@@ -133,7 +133,7 @@ hosted!(photocraft_embed::Embedded, agent);
 hosted!(vectorcraft_embed::Embedded, agent);
 hosted!(lightcraft_embed::Embedded, agent);
 hosted!(designcraft_embed::Embedded, agent);
-hosted!(pdfcraft_embed::Embedded);
+hosted!(pdfcraft_embed::Embedded, agent);
 hosted!(filmcraft_embed::Embedded, agent);
 hosted!(effectcraft_embed::Embedded, agent);
 

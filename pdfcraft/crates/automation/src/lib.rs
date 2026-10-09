@@ -119,6 +119,15 @@ impl Automation {
         &self.session
     }
 
+    /// Run `f` on `session` (a running app's) instead of the automation's own: it is swapped in
+    /// for the call and back out afterwards, also when `f` panics (then the panic is the error).
+    pub fn on_session<R>(&mut self, session: &mut Session, f: impl FnOnce(&mut Self) -> R) -> std::thread::Result<R> {
+        std::mem::swap(&mut self.session, session);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
+        std::mem::swap(&mut self.session, session);
+        r
+    }
+
     /// Save `bytes` that a caller writes on the session's behalf, such as `pdfcraft-cli run`
     /// saving a rendered page. With a root, it is confined like a tool's own output (a relative
     /// path resolves inside it) and written atomically. Without one, the path is written as
@@ -1739,6 +1748,19 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn another_session_is_worked_on_and_given_back_even_after_a_panic() {
+        let mut a = Automation::new();
+        let mut app = Session::new();
+        let made = a.on_session(&mut app, |a| a.call("doc_create", &json!({ "from": "blank" })).is_ok()).unwrap();
+        assert!(made);
+        assert_eq!(app.docs().len(), 1, "the document went into the app's session");
+        assert!(a.session().docs().is_empty(), "the automation's own session is untouched");
+        let r = a.on_session(&mut app, |_| -> () { panic!("a bug in a tool") });
+        assert!(r.is_err());
+        assert_eq!(app.docs().len(), 1, "the app's session came back");
+    }
 
     #[test]
     fn dot_dot_resolves_by_name_and_never_climbs_above_the_start() {
