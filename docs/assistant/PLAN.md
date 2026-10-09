@@ -1,6 +1,7 @@
 # Plan: Claude in Septet
 
-Stand: 2026-10-09. Status: Phasen 0–2, 4 und 4b erledigt (Spike: `protocol-notes.md`); als Nächstes Phase 3.
+Stand: 2026-10-09. Status: Phasen 0–2, 4 und 4b erledigt (Spike: `protocol-notes.md`); Phase 3 läuft (Spec und Pilot
+Vectorcraft fertig, siehe „Stand Phase 3“).
 
 ## Ziel
 
@@ -95,6 +96,7 @@ env = Elternumgebung OHNE ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN (sonst wird �
 | API-Key-Modus | **Später als Phase 9**, hinter derselben `session`-Schnittstelle. Zuerst nur Abo über lokales Claude Code. |
 | Tabwechsel | Claude **darf den Ziel-Tab selbst aktivieren** (sichtbar); nötig, weil nur der sichtbare Tab Befehle verarbeitet. |
 | App-Steuerung (2026-10-09) | **Über ein sauberes Backend** (Befehls-Registry der Apps), nicht visuell per Computer Use. Claude soll die Leinwand **und jede Ebene einzeln** als Bild abrufen können. Siehe Phase 3. |
+| MCP-Server der Apps (2026-10-09) | **Nicht direkt nutzen.** Jede App hat einen (`<app>-cli mcp`, stdio), aber Headless arbeitet auf einer eigenen Sitzung (nicht dem Dokument im Tab), Bridge braucht den im Embed-Modus abgeschalteten TCP-Steuerport (Vectorcraft und Designcraft beide 7979), dazu 7 CLI-Binaries und ~250 Werkzeuge. Stattdessen: ihre Werkzeugkataloge als Quelle für die App-Skills, ihr Render-Code als Vorlage für `agent_render`. Einbinden in-process (Vectorcrafts `Backend`-Trait ist austauschbar) nur, falls die generischen `app_*`-Werkzeuge nicht reichen. |
 
 ## Neue Module
 
@@ -369,14 +371,28 @@ Speichern und Exportieren bleiben sonst Sache des Users.
 
 ### Umsetzung in Schritten
 
-1. **Spec:** `docs/embedding/` um „Phase 5: Steuerung und Rendern“ ergänzen. Darin der Vertrag für
-   `Embedded::control`, `render(target)` und die Sperrliste.
-2. **Pilot Vectorcraft** (einfachste App):
+1. ✅ **Spec:** `docs/embedding/phase5-agent-control.md`. Statt `control`/`render` vier Methoden: `agent_commands`,
+   `agent_execute` (Antwort über `Receiver`, auch aufgeschoben), `agent_inspect`, `agent_render` (Beschriftung + Job für
+   einen Worker-Thread, liefert `egui::ColorImage`).
+2. ✅ **Pilot Vectorcraft** (einfachste App):
    - `Embedded::control` und `Embedded::render`
    - `HostedApp` um `control`/`render` erweitern, im `hosted!`-Makro durchreichen (`hosted.rs:44`); Apps ohne
      Umsetzung bekommen einen Default „not supported“
    - `app_commands`/`app_execute`/`app_inspect`/`app_render`/`app_undo` in `tools.rs`
    - Autotest: Rechteck per Befehl anlegen, Objekt einzeln rendern, Undo
+
+   **Stand Phase 3 (2026-10-09):** Vectorcraft fertig und getestet. Host: `assistant/apps.rs` (Werkzeuge, Warteliste für
+   startende Apps und Freigaben, Pfadregeln, Hintergrund und PNG), `hosted.rs` (Trait-Methoden mit Default „kann noch
+   nicht“, Makro-Arm `hosted!(…, agent)`), Freigabe-Karten und Beschriftungen in `panel.rs`, System-Prompt erwähnt die
+   Werkzeuge. Vectorcraft (`apps/vectorcraft/src/embed.rs`): Registry normalisiert (939 Befehle), Befehle über
+   `app.run`; öffnet ein Befehl einen Dialog, wird er wieder geschlossen und Claude bekommt einen Fehler; Ansichten
+   `document`/`object`/`selection`/`find`/`history`/`documents`; Renders von Zeichenfläche, Objekt/Ebene (freigestellt
+   über `fileio::objects_document`) und Auswahl. Autotest `SEPTET_AUTOTEST_SCENARIO=assistant-apps` (ruft die
+   Werkzeuge direkt auf, ohne Claude, kein Login nötig): App starten per `file.new`, Formen, Abfragen und Renders bei
+   verstecktem Tab, Dialog-Schutz, Sperrliste, Undo. Echter Chat mit Haiku: neues Dokument, Kreis und Quadrat, Farben,
+   Prüf-Render, in 10 s ohne Fehlversuch.
+   Beobachtet, offen: Ein per Befehl angelegtes Dokument war im Chat-Test nicht ganz eingepasst (Zoom zu groß, links
+   abgeschnitten); vermutlich eine Embedding-Frage von Vectorcrafts `canvas::fit`, nicht der Werkzeuge.
 3. **Photocraft, Designcraft, Effectcraft, Filmcraft**, dann **Lightcraft**, zuletzt **Pdfcraft** (Sonderweg).
 4. **Warteschlangen-Weg** für aufgeschobene Outcomes und `ui.*`, inklusive Tab-Aktivierung und Zeitlimits.
 5. **Skill und Prompt:**

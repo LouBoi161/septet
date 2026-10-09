@@ -8,13 +8,13 @@ use serde_json::{Value, json};
 use super::mcp::{ToolCall, ToolReply};
 use super::{Approval, approval_key};
 use crate::kinds::AppKind;
-use crate::shell::{Action, OpenRequest, Shell, TabKind};
+use crate::shell::{OpenRequest, Shell, TabKind};
 
 fn app_names() -> Vec<String> {
     AppKind::ALL.iter().map(|k| k.name().to_ascii_lowercase()).collect()
 }
 
-fn app_from(v: &Value) -> Result<Option<AppKind>, String> {
+pub fn app_from(v: &Value) -> Result<Option<AppKind>, String> {
     match v.as_str() {
         None => Ok(None),
         Some(name) => AppKind::ALL
@@ -34,7 +34,7 @@ pub fn file_types() -> String {
 pub fn definitions() -> Vec<Value> {
     let apps = app_names();
     let paths = json!({"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Absolute paths, or paths relative to the workspace (your working directory)."});
-    vec![
+    let mut tools = vec![
         json!({
             "name": "septet_state",
             "description": "What is open in Septet: its windows, their tabs (one per app), each app's document title, whether it has unsaved changes, and which tab is visible. Also the workspace folder.",
@@ -79,7 +79,9 @@ pub fn definitions() -> Vec<Value> {
             "description": "Internal: asks the user whether a tool may run.",
             "inputSchema": {"type": "object", "properties": {"tool_name": {"type": "string"}, "input": {"type": "object"}, "tool_use_id": {"type": "string"}}, "required": ["tool_name", "input"]},
         }),
-    ]
+    ];
+    tools.extend(super::apps::definitions(&apps));
+    tools
 }
 
 /// Added to Claude Code's system prompt for every conversation.
@@ -93,6 +95,10 @@ pub fn system_prompt(workspace: &Path) -> String {
          septet_state to see what is open. Apps by file type: {types}.\n\n\
          Prefer generating content as code (SVG, HTML, JSON, scripts) and opening it in the right app. Keep replies short; the \
          user watches the apps change.\n\n\
+         To change what is open in an app, drive it with the app_* tools (Vectorcraft so far): find commands with app_commands \
+         (always with a filter), run them with app_execute, read ids and properties with app_inspect, look at the result with \
+         app_render (the whole artboard or page, or one object or layer alone) and take mistakes back with app_undo. Check your \
+         work with app_render before you say it is done.\n\n\
          Septet's skills (septet:*) explain how to do creative work with these apps: load septet:septet-apps with the Skill tool \
          at the start of a creative task, then the skill for the job (svg-graphics, logo-and-icons, typography, color, \
          print-and-pdf, image-editing, video-editing, motion-lottie). Skills named my:* are the user's own; use them when they fit.\n\n\
@@ -107,6 +113,7 @@ pub fn system_prompt(workspace: &Path) -> String {
 
 /// Answer every tool call that arrived since the last frame.
 pub fn drain(shell: &mut Shell, ctx: &Context) {
+    super::apps::retry(shell, ctx);
     let calls: Vec<ToolCall> = match &shell.assistant.mcp {
         Some(server) => server.calls.try_iter().collect(),
         None => return,
@@ -114,6 +121,10 @@ pub fn drain(shell: &mut Shell, ctx: &Context) {
     for call in calls {
         if call.name == "approve" {
             approve(shell, call);
+            continue;
+        }
+        if super::apps::is_app_tool(&call.name) {
+            super::apps::call(shell, ctx, call, false);
             continue;
         }
         // File work off the UI thread.
@@ -160,7 +171,7 @@ fn run(shell: &mut Shell, ctx: &Context, name: &str, args: &Value) -> Result<Too
             let place = name == "septet_place";
             if place {
                 let kind = app.ok_or("septet_place needs `app`.")?;
-                if shell.apps.get(&kind).is_none() {
+                if !shell.apps.contains_key(&kind) {
                     return Err(format!("{} is not running; open a document in it with septet_open first.", kind.name()));
                 }
             }
@@ -171,17 +182,7 @@ fn run(shell: &mut Shell, ctx: &Context, name: &str, args: &Value) -> Result<Too
         }
         "septet_activate" => {
             let kind = app_from(&args["app"])?.ok_or("`app` is required.")?;
-            match shell.find_app_tab(kind) {
-                Some((wi, ti)) => {
-                    let tab = shell.windows[wi].tabs[ti].id;
-                    shell.actions.push(Action::Activate { tab });
-                }
-                None => {
-                    let window = shell.focused_window(ctx);
-                    shell.actions.push(Action::NewTab { window, kind: TabKind::App(kind) });
-                }
-            }
-            ctx.request_repaint();
+            super::apps::show(shell, ctx, kind);
             Ok(ToolReply::text(format!("{} is in front.", kind.name())))
         }
         _ => Err(format!("Septet has no tool {name:?}.")),

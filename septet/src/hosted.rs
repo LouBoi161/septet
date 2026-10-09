@@ -8,8 +8,10 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::mpsc::Receiver;
 
 use egui::{Context, FontDefinitions, Pos2, Style, ThemePreference};
+use serde_json::Value;
 
 use crate::kinds::AppKind;
 
@@ -39,10 +41,52 @@ pub trait HostedApp {
     fn export_active(&mut self, _accept: &[&str], _dir: &Path) -> Option<PathBuf> {
         None
     }
+
+    // Claude drives the app (`docs/embedding/phase5-agent-control.md`). None: the app can't yet.
+
+    /// The app's commands, as its menus and command palette run them.
+    fn agent_commands(&mut self, _ctx: &Context) -> Option<Vec<Value>> {
+        None
+    }
+    /// Run a command; the reply (`{"ok", "result"|"error"}`) comes at once or on a later frame of the app.
+    fn agent_execute(&mut self, _ctx: &Context, _command: &str, _params: Value) -> Option<Receiver<Value>> {
+        None
+    }
+    /// The document's state as JSON (`what`: document, object, selection…).
+    fn agent_inspect(&mut self, _ctx: &Context, _what: &str, _params: &Value) -> Option<Result<Value, String>> {
+        None
+    }
+    /// A caption and a job that renders the document or a part of it (run it off the UI thread).
+    fn agent_render(&mut self, _ctx: &Context, _target: &Value) -> Option<Result<(String, AgentRender), String>> {
+        None
+    }
 }
+
+/// A picture the app makes for Claude, on a worker thread (premultiplied, transparent where empty).
+pub type AgentRender = Box<dyn FnOnce() -> Result<egui::ColorImage, String> + Send>;
 
 macro_rules! hosted {
     ($ty:ty) => {
+        hosted!($ty, {});
+    };
+    // Apps that implement the agent methods of phase 5.
+    ($ty:ty, agent) => {
+        hosted!($ty, {
+            fn agent_commands(&mut self, ctx: &Context) -> Option<Vec<Value>> {
+                Some(<$ty>::agent_commands(self, ctx))
+            }
+            fn agent_execute(&mut self, ctx: &Context, command: &str, params: Value) -> Option<Receiver<Value>> {
+                Some(<$ty>::agent_execute(self, ctx, command, params))
+            }
+            fn agent_inspect(&mut self, ctx: &Context, what: &str, params: &Value) -> Option<Result<Value, String>> {
+                Some(<$ty>::agent_inspect(self, ctx, what, params))
+            }
+            fn agent_render(&mut self, ctx: &Context, target: &Value) -> Option<Result<(String, AgentRender), String>> {
+                Some(<$ty>::agent_render(self, ctx, target))
+            }
+        });
+    };
+    ($ty:ty, { $($agent:tt)* }) => {
         impl HostedApp for $ty {
             fn app(&mut self) -> &mut dyn eframe::App {
                 self
@@ -80,12 +124,13 @@ macro_rules! hosted {
             fn set_open_app(&mut self, handler: Box<dyn FnMut(&str)>) {
                 <$ty>::set_open_app(self, handler)
             }
+            $($agent)*
         }
     };
 }
 
 hosted!(photocraft_embed::Embedded);
-hosted!(vectorcraft_embed::Embedded);
+hosted!(vectorcraft_embed::Embedded, agent);
 hosted!(lightcraft_embed::Embedded);
 hosted!(designcraft_embed::Embedded);
 hosted!(pdfcraft_embed::Embedded);

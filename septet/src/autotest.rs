@@ -52,6 +52,13 @@ enum Step {
     ClaudePanel,
     /// Type into the focused widget of the first window (Enter: `\n`).
     TypeText(&'static str),
+    /// Call one of Claude's app tools directly, without Claude. `"$id"` in the arguments stands for
+    /// the last `id` a tool answered with.
+    Tool(&'static str, serde_json::Value),
+    /// Wait for the tools' answers (at most this many seconds); log them and save their images.
+    ToolWait(f64),
+    /// A Home tab in the first window, which hides the app shown there.
+    Home,
     Exit,
 }
 
@@ -80,6 +87,10 @@ pub struct Autotest {
     /// When the last message went to Claude.
     claude_since: f64,
     approval_shot: bool,
+    /// Tool calls made by `Step::Tool`, waiting for their answers.
+    tools: Vec<(String, std::sync::mpsc::Receiver<crate::assistant::mcp::ToolReply>)>,
+    tool_answers: usize,
+    last_id: Option<serde_json::Value>,
 }
 
 impl Autotest {
@@ -147,6 +158,55 @@ impl Autotest {
                 Step::Wait(1.0),
                 Step::Exit,
             ],
+            // Claude's app tools against Vectorcraft, called directly: commands, inspecting and rendering
+            // (also while the tab is hidden), a dialog that must not stay open, a blocked command, undo.
+            Ok("assistant-apps") => {
+                use serde_json::json;
+                let vc = |what: serde_json::Value| {
+                    let mut v = json!({"app": "vectorcraft"});
+                    v.as_object_mut().expect("object").extend(what.as_object().cloned().unwrap_or_default());
+                    v
+                };
+                vec![
+                    Step::Wait(2.0),
+                    Step::Tool("app_execute", vc(json!({"command": "file.new", "params": {"width": 400, "height": 300}}))),
+                    Step::ToolWait(40.0),
+                    Step::Tool("app_commands", vc(json!({}))),
+                    Step::Tool("app_commands", vc(json!({"filter": "rectangle"}))),
+                    Step::Tool("app_execute", vc(json!({"command": "shape.ellipse", "params": {"x": 40, "y": 40, "width": 200, "height": 140}}))),
+                    Step::Tool("app_execute", vc(json!({"command": "paint.setFill", "params": {"color": "#e8a33d"}}))),
+                    Step::ToolWait(10.0),
+                    Step::Tool("app_execute", vc(json!({"command": "shape.rectangle", "params": {"x": 180, "y": 120, "width": 160, "height": 120}}))),
+                    Step::ToolWait(10.0),
+                    Step::Tool("app_execute", vc(json!({"command": "paint.setFill", "params": {"color": "#2f6fd6"}}))),
+                    Step::ToolWait(10.0),
+                    Step::Wait(1.0),
+                    Step::Shot("x01-drawn"),
+                    Step::Home,
+                    Step::Wait(1.5),
+                    Step::Tool("app_inspect", vc(json!({"what": "document", "depth": 2}))),
+                    Step::Tool("app_inspect", vc(json!({"what": "object", "id": "$id"}))),
+                    Step::Tool("app_inspect", vc(json!({"what": "nonsense"}))),
+                    Step::Tool("app_render", vc(json!({"target": "document"}))),
+                    Step::Tool("app_render", vc(json!({"target": "object", "id": "$id", "max_side": 400}))),
+                    Step::Tool("app_render", vc(json!({"target": "selection", "background": "transparent"}))),
+                    Step::ToolWait(20.0),
+                    Step::Report,
+                    Step::Shot("x02-hidden"),
+                    Step::Tool("app_execute", vc(json!({"command": "file.newDialog"}))),
+                    Step::Tool("app_execute", vc(json!({"command": "app.quit"}))),
+                    Step::Tool("app_undo", vc(json!({"steps": 2}))),
+                    Step::ToolWait(10.0),
+                    Step::Wait(1.5),
+                    Step::Report,
+                    Step::Tool("app_inspect", vc(json!({"what": "history"}))),
+                    Step::Tool("app_render", vc(json!({"target": "document", "max_side": 600}))),
+                    Step::ToolWait(10.0),
+                    Step::Shot("x03-undone"),
+                    Step::Wait(1.0),
+                    Step::Exit,
+                ]
+            }
             // Run 1 of 2: a few tabs and a torn-off window, then quit (the layout is saved).
             Ok("session-save") => vec![
                 Step::Wait(1.0),
@@ -192,6 +252,9 @@ impl Autotest {
             pointer: Pos2::ZERO,
             claude_since: 0.0,
             approval_shot: false,
+            tools: Vec::new(),
+            tool_answers: 0,
+            last_id: None,
         })
     }
 
@@ -609,6 +672,60 @@ impl Autotest {
                     }
                     let limit = shell.assistant.conversation.as_ref().and_then(|c| c.rate_limit.clone());
                     at.note(format!("rate limit: {limit:?}"));
+                }
+                Step::Tool(name, mut args) => {
+                    if let Some(id) = &at.last_id {
+                        for v in args.as_object_mut().into_iter().flat_map(|o| o.values_mut()) {
+                            if v == "$id" {
+                                *v = id.clone();
+                            }
+                        }
+                    }
+                    at.note(format!("tool {name} {args}"));
+                    let (reply, rx) = std::sync::mpsc::channel();
+                    at.tools.push((format!("{name} {args}"), rx));
+                    at.claude_since = now;
+                    crate::assistant::apps::call(shell, ctx, crate::assistant::mcp::ToolCall { name: name.into(), args, reply }, false);
+                }
+                Step::ToolWait(limit) => {
+                    let mut waiting = Vec::new();
+                    for (what, rx) in std::mem::take(&mut at.tools) {
+                        let Ok(r) = rx.try_recv() else {
+                            waiting.push((what, rx));
+                            continue;
+                        };
+                        at.tool_answers += 1;
+                        let n = at.tool_answers;
+                        let mut parts = Vec::new();
+                        for c in &r.content {
+                            if let Some(text) = c["text"].as_str() {
+                                if let Some(id) = serde_json::from_str::<serde_json::Value>(text).ok().and_then(|v| v.get("id").cloned()) {
+                                    at.last_id = Some(id);
+                                }
+                                parts.push(text.chars().take(700).collect::<String>());
+                            } else if let Some(data) = c["data"].as_str() {
+                                use base64::Engine;
+                                let path = at.dir.join(format!("tool-{n:02}.png"));
+                                let saved = base64::engine::general_purpose::STANDARD.decode(data).ok().map(|png| std::fs::write(&path, png));
+                                parts.push(format!("[image {}: {}]", path.display(), if matches!(saved, Some(Ok(()))) { "saved" } else { "NOT SAVED" }));
+                            }
+                        }
+                        at.note(format!("answer {n} to {what}: error={} {}", r.is_error, parts.join(" | ")));
+                    }
+                    let left = waiting.len();
+                    at.tools = waiting;
+                    if left > 0 && now - at.claude_since < limit {
+                        at.steps.push(Step::ToolWait(limit));
+                        at.next_at = now + 0.1;
+                        break;
+                    }
+                    if left > 0 {
+                        at.note(format!("{left} tool calls did not answer"));
+                    }
+                }
+                Step::Home => {
+                    let window = shell.windows[0].viewport;
+                    shell.actions.push(Action::NewTab { window, kind: TabKind::Home });
                 }
                 Step::Exit => {
                     at.note("exit".into());

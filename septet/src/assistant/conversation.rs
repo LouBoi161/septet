@@ -55,6 +55,13 @@ pub fn approval_key(tool: &str, input: &Value) -> String {
         "Bash" => format!("Bash:{}", input["command"].as_str().unwrap_or_default()),
         // "For this conversation" covers the whole site.
         "WebFetch" => format!("WebFetch:{}", input["url"].as_str().and_then(host).unwrap_or_default()),
+        // A command in an app, for one file (or the document's own).
+        "app_execute" => format!(
+            "app_execute:{}:{}:{}",
+            input["app"].as_str().unwrap_or_default(),
+            input["command"].as_str().unwrap_or_default(),
+            input["path"].as_str().unwrap_or_default()
+        ),
         _ => match input.get("file_path").or_else(|| input.get("path")).and_then(Value::as_str) {
             Some(p) => format!("{tool}:{p}"),
             None => tool.to_owned(),

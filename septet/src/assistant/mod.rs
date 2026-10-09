@@ -3,6 +3,7 @@
 //! Off by default. The settings dialog finds Claude Code, shows whether it is signed in and starts
 //! Anthropic's sign-in flow when it is not; Septet itself never touches the credentials.
 
+pub mod apps;
 pub mod assets;
 pub mod cli;
 pub mod conversation;
@@ -122,6 +123,8 @@ pub struct Assistant {
     pub thumbs: std::collections::HashMap<String, egui::TextureHandle>,
     /// The user's skills and plugins, and when the folders were last looked at.
     found: Option<(std::time::Instant, extensions::Found)>,
+    /// App tool calls waiting for their app to start or for the user's approval.
+    pub waiting: Vec<apps::Waiting>,
 }
 
 impl Assistant {
@@ -145,6 +148,7 @@ impl Assistant {
             history: history::History::load(),
             thumbs: Default::default(),
             found: None,
+            waiting: Vec::new(),
         }
     }
 

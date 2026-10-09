@@ -6,15 +6,25 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::mpsc::{Receiver, channel};
 
-use serde_json::json;
-use vectorcraft_engine::Session;
+use serde_json::{Value, json};
 use vectorcraft_engine::cmd::fileio;
+use vectorcraft_engine::doc::{Document, NodeId};
+use vectorcraft_engine::{Session, guard};
+use vectorcraft_render::{RenderOptions, Renderer};
 use vectorcraft_ui_egui::VectorcraftApp;
 use vectorcraft_ui_egui::outgoing::Outgoing;
 use vectorcraft_ui_egui::place::DropTarget;
 
 use crate::{desktop, prefs};
+
+/// A picture for the host's agent, made on a worker thread ([`Embedded::agent_render`]).
+pub type AgentRender = Box<dyn FnOnce() -> Result<egui::ColorImage, String> + Send>;
+
+/// What the agent hears when there is nothing to work on.
+const NO_DOCUMENT: &str = "No document is open in Vectorcraft: open one with septet_open, or make one with app_execute `file.new` {width, height}.";
 
 /// The host's hook for files the app opens in another app ([`Embedded::set_open_externally`]).
 type OpenExternally = Box<dyn FnMut(&Path) -> bool>;
@@ -193,6 +203,193 @@ impl Embedded {
             }
         }
     }
+
+    /// The commands the host's agent may run: the engine's and the UI's, as the command palette
+    /// lists them, with their parameters and whether they can run now.
+    pub fn agent_commands(&mut self, _ctx: &egui::Context) -> Vec<Value> {
+        let all = vectorcraft_ui_egui::control::all_commands(&self.app);
+        all.as_array().into_iter().flatten().map(agent_command).collect()
+    }
+
+    /// Run a command for the host's agent as its menu item does (undoable like it). A command
+    /// that opens a dialog instead (it needs parameters) gets the dialog closed again and fails:
+    /// the agent can't answer it and the user didn't ask for it. The reply is always there at once.
+    pub fn agent_execute(&mut self, ctx: &egui::Context, command: &str, params: Value) -> Receiver<Value> {
+        let (tx, rx) = channel();
+        let before = self.app.ui.dialog.as_ref().map(|d| d.kind.clone());
+        let params = if params.is_null() { json!({}) } else { params };
+        let r =
+            guard::catch_panic(|| self.app.run(command, params)).unwrap_or_else(|msg| Err(format!("internal error: {msg} (please report this bug)")));
+        let opened = self.app.ui.dialog.as_ref().map(|d| d.kind.clone()).filter(|k| before.as_ref() != Some(k));
+        let reply = match (r, opened) {
+            (_, Some(kind)) => {
+                vectorcraft_ui_egui::dialogs::cancel(&mut self.app);
+                let error = format!(
+                    "`{command}` opened the “{kind}” dialog, which waits for the user, so it was closed again: run the command with the parameters it lists instead."
+                );
+                json!({ "ok": false, "error": error })
+            }
+            (Ok(v), None) => json!({ "ok": true, "result": v }),
+            (Err(e), None) => json!({ "ok": false, "error": e }),
+        };
+        ctx.request_repaint();
+        // The receiver is ours until we return.
+        let _ = tx.send(reply);
+        rx
+    }
+
+    /// The document's state for the host's agent: `document` (summary and layer tree; `depth`,
+    /// `limit` children per level), `object` (one by `id`), `selection`, `find` (`name`, `kind`,
+    /// `text`), `history` and `documents` (all open ones).
+    pub fn agent_inspect(&mut self, _ctx: &egui::Context, what: &str, p: &Value) -> Result<Value, String> {
+        let count = |key: &str, default: u64| p.get(key).and_then(Value::as_u64).unwrap_or(default);
+        let session = &mut self.app.session;
+        if what == "documents" {
+            let active = session.active_index();
+            let docs = session.documents().iter().enumerate();
+            return Ok(json!(
+                docs.map(|(i, d)| json!({ "index": i, "title": d.title(), "path": d.path, "dirty": d.is_dirty(), "active": Some(i) == active }))
+                    .collect::<Vec<_>>()
+            ));
+        }
+        if session.active().is_none() {
+            return Err(NO_DOCUMENT.into());
+        }
+        let mut query = |id: &str, params: Value| {
+            guard::catch_panic(|| session.execute(id, &params).map_err(|e| e.to_string())).map_err(|msg| format!("internal error: {msg}"))?
+        };
+        match what {
+            "document" => {
+                let mut v = query("document.inspect", json!({ "depth": count("depth", 3), "childLimit": count("limit", 50) }))?;
+                // The undo history can be thousands of steps long: the latest ten tell what happened.
+                for key in ["history", "redo"] {
+                    if let Some(list) = v.get_mut(key).and_then(Value::as_array_mut)
+                        && list.len() > 10
+                    {
+                        let n = list.len();
+                        list.drain(..n - 10);
+                        v[format!("{key}Count")] = json!(n);
+                    }
+                }
+                Ok(v)
+            }
+            "object" | "layer" | "node" | "group" => {
+                let id = p.get("id").and_then(Value::as_u64).ok_or("give the object's `id` (from `document`, `selection` or `find`)")?;
+                query("document.node", json!({ "id": id, "summary": true, "depth": count("depth", 2), "childLimit": count("limit", 50) }))
+            }
+            "selection" => {
+                let doc = query("document.inspect", json!({ "depth": 0 }))?;
+                let ids: Vec<u64> = doc["selection"].as_array().into_iter().flatten().filter_map(Value::as_u64).collect();
+                let limit = count("limit", 50) as usize;
+                let objects = ids
+                    .iter()
+                    .take(limit)
+                    .map(|id| query("document.node", json!({ "id": id, "summary": true, "depth": 1, "childLimit": 20 })))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(json!({ "count": ids.len(), "bounds": doc["selectionBounds"], "objects": objects }))
+            }
+            "find" => {
+                let mut params = json!({ "limit": count("limit", 100) });
+                for key in ["name", "kind", "text"] {
+                    if let Some(s) = p.get(key) {
+                        params[key] = s.clone();
+                    }
+                }
+                query("document.find", params)
+            }
+            "history" => {
+                let doc = query("document.inspect", json!({ "depth": 0 }))?;
+                Ok(json!({ "undo": doc["history"], "redo": doc["redo"] }))
+            }
+            _ => Err(format!("Vectorcraft has no view “{what}”: use document, object, selection, find, history or documents.")),
+        }
+    }
+
+    /// A picture for the host's agent: `document` (alias `artboard`, `page`: the artboard `page`,
+    /// 1-based, else the one in view), `object`/`layer` (one by `id`, alone and cropped) or
+    /// `selection`, fitted into `max_side` pixels. Only the document is snapshotted here; the
+    /// returned job renders it.
+    pub fn agent_render(&mut self, _ctx: &egui::Context, t: &Value) -> Result<(String, AgentRender), String> {
+        let st = self.app.session.active().ok_or(NO_DOCUMENT)?;
+        let max_side = t.get("max_side").and_then(Value::as_u64).unwrap_or(1024).clamp(16, 4096) as f64;
+        let target = t.get("target").and_then(Value::as_str).unwrap_or("document");
+        let (doc, region, caption) = match target {
+            "document" | "artboard" | "page" => {
+                let index = match t.get("page").and_then(Value::as_u64) {
+                    Some(n) => (n as usize).checked_sub(1).ok_or("pages count from 1")?,
+                    None => self.app.view().map_or(0, |v| v.artboard),
+                };
+                let a = st.doc.artboards.get(index).ok_or_else(|| format!("the document has {} artboards", st.doc.artboards.len()))?;
+                (st.doc.clone(), a.rect, format!("Artboard {} “{}”", index + 1, a.name))
+            }
+            "object" | "layer" | "node" | "group" | "selection" => {
+                let ids: Vec<NodeId> = if target == "selection" {
+                    st.selection.objects.clone()
+                } else {
+                    vec![NodeId(t.get("id").and_then(Value::as_u64).ok_or("give the object's `id` (from app_inspect)")?)]
+                };
+                let first = ids.first().and_then(|id| st.doc.node(*id)).ok_or(if target == "selection" {
+                    "nothing is selected"
+                } else {
+                    "no object has that id"
+                })?;
+                let name = match &ids[..] {
+                    [_] => format!("{} “{}” (id {})", first.kind_label(), first.display_name(), first.id.0),
+                    _ => format!("{} selected objects", ids.len()),
+                };
+                let (doc, bounds) =
+                    fileio::objects_document(st, &art_of(&st.doc, &ids), &name).ok_or("it draws nothing (empty, hidden or on a template layer)")?;
+                (Arc::new(doc), bounds, name)
+            }
+            other => {
+                return Err(format!("Vectorcraft can't render “{other}”: use document (with `page`), object or layer (with `id`) or selection."));
+            }
+        };
+        let scale = max_side / region.width().max(region.height()).max(1e-6);
+        vectorcraft_render::raster_size(region, scale)?;
+        let caption = format!("{caption}, {:.0} × {:.0} pt", region.width(), region.height());
+        let job: AgentRender = Box::new(move || {
+            let opts = RenderOptions { skip_templates: true, ..Default::default() };
+            let img = guard::catch_panic(|| Renderer::new().render_region_with(&doc, region, scale, &opts))
+                .map_err(|msg| format!("internal error: {msg}"))?;
+            Ok(egui::ColorImage::from_rgba_premultiplied([img.width as usize, img.height as usize], &img.pixels))
+        });
+        Ok((caption, job))
+    }
+}
+
+/// A registry entry from `control::all_commands` in the shape the host's agent reads.
+fn agent_command(c: &Value) -> Value {
+    let text = |k: &str| c.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty() && *s != "{}");
+    let mut out = json!({ "id": c["id"], "label": c["label"], "enabled": c["enabled"].as_bool().unwrap_or(true) });
+    let menu: Vec<&str> = c["menu"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if !menu.is_empty() {
+        out["menu"] = json!(menu.join(" › "));
+    }
+    for key in ["params", "shortcut", "disabled_reason"] {
+        if let Some(s) = text(key) {
+            out[key] = json!(s);
+        }
+    }
+    out
+}
+
+/// The objects `ids` stand for in a picture of them: a layer is its art (and its shown sublayers').
+fn art_of(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
+    fn add(n: &vectorcraft_engine::doc::Node, top: bool, out: &mut Vec<NodeId>) {
+        if !n.is_layer() {
+            out.push(n.id);
+        } else if top || n.visible {
+            for c in n.children().into_iter().flatten() {
+                add(c, false, out);
+            }
+        }
+    }
+    let mut out = vec![];
+    for n in ids.iter().filter_map(|id| doc.node(*id)) {
+        add(n, true, &mut out);
+    }
+    out
 }
 
 impl eframe::App for Embedded {
@@ -241,6 +438,17 @@ fn sibling_app(url: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_entries_read_short_for_the_agent() {
+        let engine = json!({"id": "object.arrange.front", "label": "Bring to Front", "menu": ["Object", "Arrange"], "shortcut": "Cmd+Shift+]", "params": "{}", "enabled": false, "disabled_reason": "nothing selected"});
+        assert_eq!(
+            agent_command(&engine),
+            json!({"id": "object.arrange.front", "label": "Bring to Front", "menu": "Object › Arrange", "shortcut": "Cmd+Shift+]", "enabled": false, "disabled_reason": "nothing selected"})
+        );
+        let ui = json!({"id": "view.zoomIn", "label": "Zoom In", "shortcut": "", "params": "", "enabled": true, "ui": true});
+        assert_eq!(agent_command(&ui), json!({"id": "view.zoomIn", "label": "Zoom In", "enabled": true}));
+    }
 
     #[test]
     fn only_the_other_apps_pages_are_sibling_links() {

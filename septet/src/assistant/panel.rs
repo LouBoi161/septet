@@ -37,6 +37,11 @@ fn label(name: &str, input: &Value) -> String {
         let mut c = a.chars();
         c.next().map(|f| f.to_uppercase().chain(c).collect::<String>()).unwrap_or_default()
     };
+    let id = || match &input["id"] {
+        Value::Null => String::new(),
+        Value::String(v) => format!(" {v}"),
+        v => format!(" {v}"),
+    };
     let paths = || {
         let names: Vec<String> = input["paths"]
             .as_array()
@@ -55,6 +60,13 @@ fn label(name: &str, input: &Value) -> String {
         "septet_activate" => format!("Show {}", app()),
         "septet_render" => format!("Look at {}", file("path")),
         "septet_fetch" => format!("Download {}", file("path")),
+        "app_commands" if s("filter").is_empty() => format!("Looked up {}'s commands", app()),
+        "app_commands" => format!("Looked up {}'s commands for “{}”", app(), s("filter")),
+        "app_execute" => format!("Ran {} in {}", s("command"), app()),
+        "app_inspect" => format!("Looked at the {}{} in {}", s("what"), id(), app()),
+        "app_render" => format!("Looked at the {}{} in {}", input["target"].as_str().unwrap_or("document"), id(), app()),
+        "app_undo" if input["redo"].as_bool() == Some(true) => format!("Redo in {}", app()),
+        "app_undo" => format!("Undo in {}", app()),
         "Skill" => format!("Use the {} skill", s("skill").trim_start_matches("septet:")),
         "WebSearch" => format!("Search the web for “{}”", s("query")),
         "WebFetch" => format!("Read {}", super::conversation::host(s("url")).unwrap_or_else(|| s("url").to_owned())),
@@ -85,6 +97,13 @@ fn ask(tool: &str, input: &Value) -> (String, Option<String>) {
         "Glob" | "Grep" => ("Search outside the workspace?".into(), s("path").or_else(|| s("pattern"))),
         "WebSearch" => ("Search the web?".into(), s("query")),
         "WebFetch" => ("Open a web page?".into(), s("url")),
+        "app_execute" => {
+            let what = s("path").map_or_else(|| input["params"].to_string(), |p| format!("→ {p}"));
+            (
+                s("question").unwrap_or_else(|| "Let Claude run this?".into()),
+                Some(format!("{}: {} {what}", s("app").unwrap_or_default(), s("command").unwrap_or_default())),
+            )
+        }
         _ => {
             let what = match tool.strip_prefix("mcp__").and_then(|r| r.split_once("__")) {
                 Some((server, name)) => format!("Use {name} from {server}?"),

@@ -4312,6 +4312,7 @@ dependencies = [
  "rfd",
  "serde_json",
  "vectorcraft-engine",
+ "vectorcraft-render",
  "vectorcraft-ui-egui",
  "webbrowser",
  "winit",
