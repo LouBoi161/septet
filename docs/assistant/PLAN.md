@@ -442,7 +442,13 @@ Speichern und Exportieren bleiben sonst Sache des Users.
    abgeschnitten); vermutlich eine Embedding-Frage von Vectorcrafts `canvas::fit`, nicht der Werkzeuge.
 3. **Photocraft, Designcraft, Effectcraft, Filmcraft**, dann **Lightcraft**, zuletzt **Pdfcraft** (Sonderweg).
 4. **Warteschlangen-Weg** für aufgeschobene Outcomes und `ui.*`, inklusive Tab-Aktivierung und Zeitlimits.
-5. **Skill und Prompt:**
+5. ✅ **Skill und Prompt** (2026-10-09): `septet-apps` erklärt die `app_*`-Werkzeuge und die Prüfschleife; je App ein
+   Skill (`septet:photocraft` … `septet:pdfcraft`) mit geprüften Befehls-IDs, Parametern, Beispielen und Eigenheiten
+   (aus Registry und `embed.rs` gelesen, Photocraft zusätzlich gegen die Engine ausgeführt). System-Prompt nennt die
+   App-Skills; Lottie-Import per `file.importLottie`. Dabei in `apps.rs` behoben: Batch-Schritte (`engine.batch`,
+   `command.batch`) werden einzeln geprüft (Sperrliste, Pfade, Freigabe); Ordner-Parameter (`out_dir`, `dir` …)
+   immer als Pfad; Skripte/Aktionen/Plugins nur mit Freigabe; `photo.editExternal` gesperrt; `app_render` hat
+   `comp`, `mask`, `view` im Schema. Ursprünglicher Plan:
    - `septet:septet-apps` um die `app_*`-Werkzeuge ergänzen: Prüfschleife „Befehl → `app_render` (Ebene/Ganzes) →
      korrigieren“, wichtige Befehle je App.
    - Pro App evtl. ein kurzer Skill (`septet:photocraft` …) mit den häufigsten Befehls-IDs aus den `AGENTS.md`.

@@ -31,11 +31,45 @@ const START_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Commands Claude may never run here: the host owns the app's lifetime and its window.
 fn blocked(command: &str) -> bool {
-    matches!(command, "app.quit" | "app.exit" | "file.quit" | "file.exit") || command.starts_with("ui.")
+    // `photo.editExternal` (Lightcraft) writes a copy next to the user's photo and opens another program.
+    matches!(command, "app.quit" | "app.exit" | "file.quit" | "file.exit" | "photo.editExternal") || command.starts_with("ui.")
+}
+
+/// Check a command (and each step of a batch) before it runs: blocked ones fail, paths are made
+/// absolute → the paths outside the workspace and what to ask the user first, if anything.
+fn vet(command: &str, params: &mut Value, workspace: Option<&Path>, recent: &crate::recent::Recent) -> Result<(Vec<PathBuf>, Option<String>), String> {
+    if blocked(command) {
+        return Err(format!("`{command}` is not available in Septet."));
+    }
+    let mut outside = resolve_paths(params, workspace, recent, writes_files(command))?;
+    let mut question = needs_approval(command, params, &outside);
+    // Effectcraft's `engine.batch {steps}` and Vectorcraft's `command.batch {commands}`: [{command, params}].
+    let key = if params.get("steps").is_some() { "steps" } else { "commands" };
+    if command.ends_with(".batch")
+        && let Some(Value::Array(steps)) = params.get_mut(key)
+    {
+        for step in steps {
+            let Some(id) = step.get("command").or(step.get("id")).and_then(Value::as_str).map(str::to_owned) else { continue };
+            let Some(step) = step.as_object_mut() else { continue };
+            let p = step.entry("params").or_insert_with(|| json!({}));
+            let (o, q) = vet(&id, p, workspace, recent).map_err(|e| format!("Batch step `{id}`: {e}"))?;
+            outside.extend(o);
+            question = question.or(q);
+        }
+    }
+    Ok((outside, question))
+}
+
+/// Commands that run code from a file or the user's plugins: only with the user's consent.
+fn runs_code(id: &str) -> bool {
+    matches!(id, "file.runscript" | "script.run" | "file.installscript" | "file.uninstallscript" | "actions.play") || id.starts_with("plugin.")
+        && !matches!(id, "plugin.list")
 }
 
 /// Parameters that name files.
-const PATH_KEYS: &[&str] = &["path", "paths", "file", "files", "folder", "dir", "directory", "out", "output", "dest", "destination"];
+const PATH_KEYS: &[&str] = &["path", "paths", "file", "files", "folder", "dir", "directory", "out", "output", "dest", "destination", "out_dir", "output_dir"];
+/// Path parameters that name a folder: always a path, though they never look like a file.
+const FOLDER_KEYS: &[&str] = &["folder", "dir", "directory", "out_dir", "output_dir"];
 
 /// A tool call that has to wait: for its app to start, or for the user's answer to an approval.
 pub struct Waiting {
@@ -86,13 +120,16 @@ pub fn definitions(apps: &[String]) -> Vec<Value> {
         }),
         json!({
             "name": "app_render",
-            "description": "Look at an app's document as a picture, made off-screen (not a screenshot), also while its tab is hidden. Use it after changes to check them. `target` per app: Vectorcraft document (artboard in view, or `page`), object or layer (`id`, cut out alone), selection; Photocraft document, layer (`id`, alone), selection; Designcraft page (`page`), object (`id`), selection, layer (`id`); Effectcraft frame (params comp, `time`), layer (`id`, alone), selection; Filmcraft frame (`time`, else the playhead), clip (`id`), selection, item (`id`); Lightcraft photo (`id`), before (unedited), mask (params mask, view); Pdfcraft page (`page`). The picture is shown over `background` (auto: white for documents, a checkerboard for parts; or white, black, checker, transparent, #rrggbb). `save_as` also writes it as a transparent PNG into the workspace.",
+            "description": "Look at an app's document as a picture, made off-screen (not a screenshot), also while its tab is hidden. Use it after changes to check them. `target` per app: Vectorcraft document (artboard in view, or `page`), object or layer (`id`, cut out alone), selection; Photocraft document, layer (`id`, alone), selection; Designcraft page (`page`), object (`id`), selection, layer (`id`); Effectcraft frame (`comp`, `time`), layer (`id`, alone), selection; Filmcraft frame (`time`, else the playhead), clip (`id`), selection, item (`id`); Lightcraft photo (`id`), before (unedited), mask (`mask` id, `view`); Pdfcraft page (`page`). The picture is shown over `background` (auto: white for documents, a checkerboard for parts; or white, black, checker, transparent, #rrggbb). `save_as` also writes it as a transparent PNG into the workspace.",
             "inputSchema": {"type": "object", "properties": {
                 "app": app,
                 "target": {"type": "string"},
                 "id": id,
                 "page": {"type": "integer", "minimum": 1},
                 "time": {"type": "number", "description": "Seconds, for video and animation."},
+                "comp": {"type": ["integer", "string"], "description": "Effectcraft: the composition (id or name; default the open one)."},
+                "mask": {"type": "integer", "description": "Lightcraft: the mask id from app_inspect `develop` (default the first)."},
+                "view": {"type": "string", "enum": ["white", "color"], "description": "Lightcraft masks: white on black, or the mask's colour over the photo."},
                 "max_side": {"type": "integer", "minimum": 64, "maximum": MAX_SIDE, "description": "Longest side in pixels (default 1024)."},
                 "background": {"type": "string"},
                 "save_as": {"type": "string"},
@@ -210,17 +247,14 @@ pub fn call(shell: &mut Shell, ctx: &Context, call: ToolCall, approved: bool) {
             }
             .to_owned();
             let command = command.as_str();
-            if blocked(command) {
-                return reply(&call.reply, Err(format!("`{command}` is not available in Septet.")));
-            }
             let mut params = args.get("params").filter(|p| p.is_object()).cloned().unwrap_or_else(|| json!({}));
             let workspace = shell.assistant.conversation.as_ref().map(|c| c.workspace.clone());
             if !undo {
-                let outside = match resolve_paths(&mut params, workspace.as_deref(), &shell.recent, writes_files(command)) {
-                    Ok(outside) => outside,
+                let (outside, question) = match vet(command, &mut params, workspace.as_deref(), &shell.recent) {
+                    Ok(v) => v,
                     Err(e) => return reply(&call.reply, Err(e)),
                 };
-                if !approved && let Some(question) = needs_approval(command, &params, &outside) {
+                if !approved && let Some(question) = question {
                     drop(slot);
                     let command = command.to_owned();
                     return ask(shell, ctx, call, kind, &command, question, outside);
@@ -389,7 +423,7 @@ fn resolve_paths(params: &mut Value, workspace: Option<&Path>, recent: &crate::r
             v => vec![v],
         };
         for item in items {
-            let Some(p) = item.as_str().filter(|p| writes || looks_like_file(p)) else { continue };
+            let Some(p) = item.as_str().filter(|p| writes || FOLDER_KEYS.contains(&key.as_str()) || looks_like_file(p)) else { continue };
             let path = if Path::new(p).is_absolute() { PathBuf::from(p) } else { workspace.ok_or("Relative paths need a conversation's workspace.")?.join(p) };
             let real = real_path(&path);
             let inside = root.as_ref().is_some_and(|r| real.starts_with(r));
@@ -442,7 +476,9 @@ fn needs_approval(command: &str, params: &Value, outside: &[PathBuf]) -> Option<
     let id = command.to_lowercase();
     let writes = writes_files(command);
     let has_path = PATH_KEYS.iter().any(|k| params.get(*k).is_some_and(|v| !v.is_null()));
-    if id.starts_with("prefs.") || id.starts_with("shortcuts.") || id == "app.language" {
+    if runs_code(&id) {
+        Some("Let Claude run a script, a recorded action or a plugin?".into())
+    } else if id.starts_with("prefs.") || id.starts_with("shortcuts.") || id == "app.language" {
         Some("Let Claude change the app's settings?".into())
     } else if id.contains("print") && !id.ends_with("printers") {
         Some("Let Claude print?".into())
@@ -627,6 +663,29 @@ mod tests {
         let mut save = json!({"path": "poster"});
         resolve_paths(&mut save, Some(&ws), &recent, true).unwrap();
         assert_eq!(save["path"], json!(real.join("poster").to_string_lossy()), "saving: any path is a file");
+        let mut folder = json!({"out_dir": "pages"});
+        assert!(resolve_paths(&mut folder, Some(&ws), &recent, false).unwrap().is_empty());
+        assert_eq!(folder["out_dir"], json!(real.join("pages").to_string_lossy()), "a folder is always a path");
+        assert_eq!(resolve_paths(&mut json!({"dir": ".."}), Some(&ws), &recent, false).unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn batch_steps_are_checked_one_by_one() {
+        let ws = std::env::temp_dir().join(format!("septet-vet-test-{}", std::process::id()));
+        std::fs::create_dir_all(&ws).unwrap();
+        let recent = crate::recent::Recent::default();
+        let mut p = json!({"steps": [{"command": "layer.rename", "params": {"name": "x"}}, {"command": "file.saveAs", "params": {"path": "/etc/out.ecproj"}}]});
+        let (outside, question) = vet("engine.batch", &mut p, Some(&ws), &recent).unwrap();
+        assert_eq!(outside.len(), 1);
+        assert!(question.is_some(), "a step writing outside the workspace asks");
+        let mut p = json!({"commands": [{"command": "rect.create", "params": {}}, {"command": "file.export", "params": {"path": "a.png"}}]});
+        let (outside, question) = vet("command.batch", &mut p, Some(&ws), &recent).unwrap();
+        assert!(outside.is_empty() && question.is_none(), "{question:?}");
+        assert_eq!(p["commands"][1]["params"]["path"], json!(ws.canonicalize().unwrap().join("a.png").to_string_lossy()));
+        assert!(vet("engine.batch", &mut json!({"steps": [{"command": "app.quit"}]}), Some(&ws), &recent).is_err());
+        assert!(vet("file.runScript", &mut json!({"steps": []}), Some(&ws), &recent).unwrap().1.is_some());
+        assert!(vet("text.superscript", &mut json!({}), Some(&ws), &recent).unwrap().1.is_none());
         let _ = std::fs::remove_dir_all(&ws);
     }
 

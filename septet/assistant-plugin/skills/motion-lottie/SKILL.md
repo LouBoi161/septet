@@ -7,10 +7,11 @@ description: Create motion graphics for Effectcraft - hand-written Lottie JSON a
 
 ## How files reach Effectcraft (verified in its code)
 
-- **Lottie is imported only through Effectcraft's menu File ▸ Import ▸ Lottie…** (`.json` or `.lottie`).
-  `septet_open`/`septet_place` do *not* import Lottie: a `.json` lands as a *data file* (for data-driven
-  animation) and a `.lottie` isn't recognised. So: write `anim.json`, tell the user the path and ask them to use
-  File ▸ Import ▸ Lottie…. The import creates a new composition plus an "<name> Assets" folder and opens it.
+- **Lottie is imported with the command `file.importLottie`** (menu File ▸ Import ▸ Lottie…, `.json` or `.lottie`):
+  `app_execute {app: "effectcraft", command: "file.importLottie", params: {path: "anim.json"}}` (start Effectcraft
+  first with a new comp if nothing is open, see `septet:effectcraft`). `septet_open`/`septet_place` do *not* import
+  Lottie: a `.json` lands as a *data file* (for data-driven animation) and a `.lottie` isn't recognised. The import
+  creates a new composition plus an "<name> Assets" folder and opens it; check it with `app_render`.
 - `septet_open`/`septet_place` *do* work for footage: PNG, JPEG, TIFF, WebP, PSD, SVG, EXR, video (mp4, mov, webm,
   …). PSD and PDF/AI/EPS can come in as layered compositions. With a composition open, `septet_place` adds them
   as layers or to the Project panel.
@@ -19,11 +20,11 @@ description: Create motion graphics for Effectcraft - hand-written Lottie JSON a
 - Effectcraft renders to H.264/HEVC/AV1 MP4, ProRes MOV, WebM, GIF, PNG/JPEG/TIFF/EXR sequences, and exports
   Lottie (File ▸ Export ▸ Lottie JSON…). The user does the rendering.
 
-## You can't preview Lottie yourself
+## Preview: key poses first
 
-`septet_render` only renders SVG. Before writing the Lottie, design the **key poses as SVG** (start, middle,
+`septet_render` only renders SVG, and `app_render` only shows the Lottie once it is imported. Before writing the Lottie, design the **key poses as SVG** (start, middle,
 end) in the same coordinate system (same width/height), render them and get them right. Then translate the
-shapes and values into Lottie. After the user imports it, ask what they see (or how many warnings the toast showed).
+shapes and values into Lottie. After importing it, look at frames with `app_render` (and read any warnings the command returns).
 
 ## Lottie essentials
 

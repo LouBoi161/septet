@@ -1,6 +1,6 @@
 ---
 name: septet-apps
-description: The hub for working inside Septet - which of the seven apps (Photocraft, Vectorcraft, Lightcraft, Designcraft, Pdfcraft, Filmcraft, Effectcraft) opens which files, the workspace rules, septet_open vs septet_place, the render-and-look verify loop, checking for CLI tools, and which septet skill to load next. Use at the start of any creative task in Septet, or when unsure which app or file format to use.
+description: The hub for working inside Septet - which of the seven apps (Photocraft, Vectorcraft, Lightcraft, Designcraft, Pdfcraft, Filmcraft, Effectcraft) opens which files, the workspace rules, septet_open vs septet_place, driving open documents with the app_* tools, the render-and-look verify loop, checking for CLI tools, and which septet skill to load next. Use at the start of any creative task in Septet, or when unsure which app or file format to use.
 ---
 
 # Working in Septet
@@ -18,7 +18,7 @@ show them in the apps with the `septet_*` tools. The user watches the apps chang
 | **Designcraft** (layout) | only `.designcraft` and `.idml` | images, SVG, PDF (first page), EPS (preview), text (`.txt .md .docx .rtf`), `.xlsx` as a table |
 | **Pdfcraft** (PDF) | PDF; images and `.txt` become a new PDF | PDF → pages inserted after the current page; image → onto the current page |
 | **Filmcraft** (video) | `.fcproj` projects; media → imported into the bin (not onto the timeline); `.srt/.vtt` → caption track; `.otio/.fcpxml/.xml/.edl/.aaf/.omf` → sequences merged into the project | same as open (bin) |
-| **Effectcraft** (motion) | `.ecproj` projects; images, SVG, PSD, PDF/AI, video → imported into the project | footage → layers / Project panel. **Lottie only via its menu File ▸ Import ▸ Lottie…** |
+| **Effectcraft** (motion) | `.ecproj` projects; images, SVG, PSD, PDF/AI, video → imported into the project | footage → layers / Project panel. **Lottie only via `app_execute` `file.importLottie` (File ▸ Import ▸ Lottie…)** |
 
 Without `app`, `septet_open` picks the app by extension (the first app in the table that lists it in Septet's
 list, which includes a few extensions an app then fails to open, e.g. `.indd`, `.epub`, `.dcraft` for
@@ -38,8 +38,33 @@ e.g. a PNG with `app: "pdfcraft"` makes a PDF; a PDF with `app: "vectorcraft"` o
 - `septet_fetch {url, path}`: download into the workspace from Iconify (`api.iconify.design`) or Google Fonts
   (`fonts.googleapis.com`, `fonts.gstatic.com`, `raw.githubusercontent.com/google/fonts/`) only. No redirects,
   25 MB max. For anything else use WebFetch (needs approval).
+- `app_commands`, `app_execute`, `app_inspect`, `app_render`, `app_undo`: drive the document open in an app with
+  its own commands (see below).
 - Built-ins: Read/Write/Edit/Glob/Grep work freely in the workspace. `Read` shows you images (PNG/JPEG/WebP/GIF)
   and PDFs. Bash, WebSearch and WebFetch ask the user each time, so use them only when they clearly help.
+
+## Driving an app (`app_*` tools)
+
+Use these to change what is already open in an app (the user's document or one you opened), and for edits that are
+easier as commands than as a file: align, recolour, add a layer, trim a clip, set a develop slider, fill a form.
+They run the same commands as the app's menus, so every change is one Undo step for the user.
+
+1. **Find the command:** `app_commands {app, filter}`. Always pass `filter` (a few words of the id, label or menu;
+   lists have hundreds of entries). `enabled_only: true` shows what can run right now. Never guess an id.
+2. **Find the ids:** `app_inspect {app, what: "document"}` (then `layer`/`object`/`clip`/`page` … with `id`).
+   An unknown `what` lists the app's views. Keep `depth` small for big documents.
+3. **Run it:** `app_execute {app, command, params}` with exactly the parameters the command lists. A command that
+   would open a dialog or a file picker fails instead: pass the values (e.g. `path`, relative to the workspace).
+4. **Look:** `app_render` the whole document *and* the part you changed alone (`layer`/`object`/`clip`). Renders and
+   inspects work while the tab is hidden; changing commands bring the tab to the front.
+5. **Fix or take back:** `app_undo {app}` (or `steps`) for mistakes, never leave half-finished changes.
+
+Each app has its own skill with its important commands, ids and quirks: load it before driving that app
+(`septet:photocraft`, `septet:vectorcraft`, `septet:lightcraft`, `septet:designcraft`, `septet:pdfcraft`,
+`septet:filmcraft`, `septet:effectcraft`).
+
+Saving or exporting outside the workspace, changing app settings, printing and signing ask the user first. Window
+commands (quit, resize, focus, screenshots) are blocked in Septet.
 
 ## Workspace rules
 
@@ -54,7 +79,8 @@ e.g. a PNG with `app: "pdfcraft"` makes a PDF; a PDF with `app: "vectorcraft"` o
 ## The verify loop (always)
 
 1. Make the file (SVG, PDF, PNG, timeline, JSON…).
-2. Look at it yourself: SVG → `septet_render`; PNG/JPEG/PDF → `Read`; video → extract a frame (`septet:video-editing`).
+2. Look at it yourself: SVG → `septet_render`; PNG/JPEG/PDF → `Read`; video → extract a frame (`septet:video-editing`);
+   anything open in an app → `app_render`.
 3. Critique honestly (alignment, spacing, contrast, text rendered with the right font, nothing cut off) and fix.
    Two or three rounds are normal for anything visual.
 4. Then open/place it, check `septet_state`, and tell the user in one or two sentences what you made and where.
@@ -88,6 +114,7 @@ Useful tools may or may not be installed: `ffmpeg`/`ffprobe`, `magick` (ImageMag
 | Generative/algorithmic art (p5.js) | `septet:algorithmic-art` |
 | Apply a ready-made colour + font theme | `septet:theme-factory` |
 | Distinctive visual direction for HTML/UI-like designs | `septet:frontend-design` |
+| Driving one app's commands (`app_*`) | `septet:<app>`, e.g. `septet:designcraft` |
 
 ## Style of work
 
