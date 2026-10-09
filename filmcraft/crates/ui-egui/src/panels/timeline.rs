@@ -918,6 +918,22 @@ fn patch_button(ui: &mut egui::Ui, r: Rect, clip: Rect, label: &str, on: bool, s
     resp
 }
 
+/// A track header's right-click menu: add a track after it, delete it.
+fn track_menu(resp: &egui::Response, r: &Row, label: &str, actions: &mut Vec<(String, Value)>) {
+    resp.context_menu(|ui| {
+        let video = r.kind == TrackKind::Video;
+        if ui.button(if video { "Add Video Track" } else { "Add Audio Track" }).clicked() {
+            let p = if video { json!({"video": 1, "audio": 0, "videoAfter": label}) } else { json!({"video": 0, "audio": 1, "audioAfter": label}) };
+            actions.push(("sequence.addTracks".into(), p));
+            ui.close();
+        }
+        if ui.button(format!("Delete Track {label}")).clicked() {
+            actions.push(("sequence.deleteTrack".into(), json!({"track": r.track.0})));
+            ui.close();
+        }
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_headers(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, rows: &[Row], rect: Rect, vclip: Rect, aclip: Rect, t: &Tokens) {
     let hw = app.ui.timeline.header_w;
@@ -936,6 +952,9 @@ fn draw_headers(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, rows:
         p.rect_filled(hrect, 0.0, t.tl_header_bg);
         p.line_segment([pos2(hrect.min.x, hrect.max.y - 0.5), pos2(hrect.max.x, hrect.max.y - 0.5)], Stroke::new(1.0, t.separator));
         let label = format!("{}{}", if r.kind == TrackKind::Video { "V" } else { "A" }, r.index + 1);
+        // Right-click on the header (outside its buttons, which sit on top): the track's menu.
+        let whole = ui.interact(visible, egui::Id::new(("hdr-menu", r.track.0)), Sense::click());
+        track_menu(&whole, r, &label, &mut actions);
         let btn_rect = |x0: f32| Rect::from_min_max(pos2(hrect.min.x + x0, hrect.min.y + 1.0), pos2(hrect.min.x + x0 + 24.0, hrect.max.y - 2.0));
         // 1. source patch (absent when unpatched)
         let patched = if r.kind == TrackKind::Video { tg.video_dest == Some(r.track) } else { tg.audio_dest == Some(r.track) };
@@ -1059,6 +1078,7 @@ fn draw_headers(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, rows:
             let h = if r.kind == TrackKind::Video { &mut app.ui.timeline.video_track_h } else { &mut app.ui.timeline.audio_track_h };
             *h = if *h < 50.0 { 64.0 } else { 30.0 };
         }
+        track_menu(&resp, r, &label, &mut actions);
     }
     // column separator
     ui.painter().line_segment([pos2(rect.min.x + hw - 0.5, vclip.min.y), pos2(rect.min.x + hw - 0.5, aclip.max.y + MASTER_H)], Stroke::new(1.0, t.separator));

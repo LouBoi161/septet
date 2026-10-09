@@ -1062,6 +1062,10 @@ impl FilmcraftApp {
             }
         });
         for mut id in fire {
+            // Delete in Essential Graphics deletes the selected graphic layer, not the whole clip.
+            if self.ui.focused == PanelKind::EssentialGraphics && id == "edit.clear" && !self.session.state.graphic_layers.is_empty() {
+                id = "graphics.deleteLayer".into();
+            }
             // Select All / Deselect All act on the Project panel's items when it has focus (#168).
             if self.ui.focused == PanelKind::Project && matches!(id.as_str(), "edit.selectAll" | "edit.deselectAll") {
                 id = id.replacen("edit.", "project.", 1);

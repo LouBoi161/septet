@@ -249,6 +249,8 @@ struct Out {
     column: Option<Option<ColumnDrag>>,
     /// Rows to open or close, and whether to open them.
     toggle: Vec<(NodeId, bool)>,
+    /// Every row's response, for its right-click menu.
+    rows: Vec<egui::Response>,
 }
 
 pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
@@ -352,18 +354,43 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
     if pressed_outside {
         ui.data_mut(|d| d.insert_temp(key("focus"), false));
     }
-    let focus: bool = ui.data(|d| d.get_temp(key("focus"))).unwrap_or(false);
-    if focus
-        && !view.rows.is_empty()
-        && ui.ctx().memory(|m| m.focused().is_none())
-        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete) || i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace))
-    {
+    let pass = ui.ctx().cumulative_pass_nr();
+    ui.data_mut(|d| d.insert_temp(key("shown"), pass));
+    if !view.rows.is_empty() && has_keyboard(ui.ctx()) && take_delete(ui.ctx()) {
         out.actions.push(("layer.delete".into(), json!({})));
     }
     bottom_bar(app, ui, &view, &doc, &mut out.actions);
+    // Right-click on a row: the panel's menu, for that row (highlighted first when it wasn't).
+    for resp in std::mem::take(&mut out.rows) {
+        resp.context_menu(|ui| menu(app, ui));
+    }
     for (c, p) in out.actions {
         app.run(&c, p).ok();
     }
+}
+
+/// Whether the panel has the keyboard: it shows, a row was clicked last (not the canvas) and no
+/// field has the focus.
+fn has_keyboard(ctx: &egui::Context) -> bool {
+    let shown: Option<u64> = ctx.data(|d| d.get_temp(key("shown")));
+    ctx.data(|d| d.get_temp(key("focus"))).unwrap_or(false)
+        && shown.is_some_and(|f| f + 1 >= ctx.cumulative_pass_nr())
+        && ctx.memory(|m| m.focused().is_none())
+}
+
+fn take_delete(ctx: &egui::Context) -> bool {
+    ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete) || i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace))
+}
+
+/// Delete / Backspace while the panel has the keyboard delete the highlighted rows (Layer ›
+/// Delete Selection), ahead of Edit › Clear. The shortcuts run before the panel draws.
+pub fn delete_key(app: &mut VectorcraftApp, ctx: &egui::Context) -> bool {
+    let rows = app.session.active().is_some_and(|d| !d.highlighted_rows().is_empty());
+    if rows && has_keyboard(ctx) && take_delete(ctx) {
+        app.run("layer.delete", json!({})).ok();
+        return true;
+    }
+    false
 }
 
 /// The bottom bar: the layer count and the panel's buttons.
@@ -599,8 +626,8 @@ fn row(ui: &mut Ui, view: &View, n: &Node, depth: usize, clip_path: bool, expand
         out.actions.push(("layer.target".into(), json!({"id": n.id.0})));
     } else if sq_resp.clicked() {
         out.actions.push(("layer.selectAll".into(), json!({"id": n.id.0, "add": m.shift})));
-    } else if resp.clicked() {
-        out.click = Some((n.id, m));
+    } else if resp.clicked() || (resp.secondary_clicked() && !highlighted) {
+        out.click = Some((n.id, if resp.clicked() { m } else { egui::Modifiers::NONE }));
     }
     if resp.double_clicked() {
         let on_name = ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| p.x <= name_end.max(name_rect.left() + 20.0) && p.x >= name_rect.left());
@@ -622,6 +649,7 @@ fn row(ui: &mut Ui, view: &View, n: &Node, depth: usize, clip_path: bool, expand
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     }
     drop_target(ui, view, n, r, x - 16.0, open, &resp, out);
+    out.rows.push(resp);
     if open && let Some(children) = n.children() {
         for (i, c) in children.iter().enumerate().rev() {
             row(ui, view, c, depth + 1, i == 0 && n.clips(), expanded, out);

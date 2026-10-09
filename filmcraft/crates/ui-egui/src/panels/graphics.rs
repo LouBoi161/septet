@@ -1324,9 +1324,15 @@ pub fn properties(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
                 autos.push((format!("graphics.layers.{li}"), r, layer_display_name(e, li)));
                 if eresp.clicked() {
                     actions.push(("graphics.set".into(), json!({"clip": clip.0, "layer": li, "props": {"enabled": !e.enabled}})));
-                } else if resp.clicked() {
+                } else if resp.clicked() || (resp.secondary_clicked() && !on) {
                     actions.push(("graphics.selectLayer".into(), json!({"clip": clip.0, "layers": [li]})));
                 }
+                resp.context_menu(|ui| {
+                    if ui.button("Delete Layer").clicked() {
+                        actions.push(("graphics.deleteLayer".into(), json!({"clip": clip.0, "layer": li})));
+                        ui.close();
+                    }
+                });
             }
         }
         // ---- template properties (a graphic made from a graphics template)

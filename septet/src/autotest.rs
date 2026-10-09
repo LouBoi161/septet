@@ -36,6 +36,8 @@ enum Step {
     PointerUp(AppKind),
     /// Plain key presses (no modifiers).
     Press(AppKind, Vec<Key>),
+    /// A click (press and release) with this button in the window showing the app.
+    Click(AppKind, Target, PointerButton),
     /// Open the Claude settings dialog in the first window.
     ClaudeSettings,
     /// Press "Test connection" there.
@@ -201,6 +203,22 @@ impl Autotest {
                 Step::Wait(1.0),
                 Step::Exit,
             ],
+            // Deleting layers from the Layers panel (`SEPTET_AUTOTEST_APP`): click a row at
+            // `SEPTET_AUTOTEST_AT` ("x,y"), press Delete, then right-click it.
+            Ok("layers") => {
+                let name = std::env::var("SEPTET_AUTOTEST_APP").unwrap_or_else(|_| "vectorcraft".into());
+                let kind = AppKind::ALL.into_iter().find(|k| k.name().eq_ignore_ascii_case(&name))?;
+                // "x,y;x,y;…": clicks before (a panel tab), the last one on the row.
+                let at: Vec<Pos2> = std::env::var("SEPTET_AUTOTEST_AT")
+                    .unwrap_or_default()
+                    .split(';')
+                    .filter_map(|s| {
+                        let (x, y) = s.split_once(',')?;
+                        Some(egui::pos2(x.trim().parse().ok()?, y.trim().parse().ok()?))
+                    })
+                    .collect();
+                Self::layers(kind, &at)
+            }
             _ => Self::tour(file),
         };
         steps.reverse();
@@ -218,6 +236,93 @@ impl Autotest {
             tool_answers: 0,
             last_id: None,
         })
+    }
+
+    /// The `layers` script: a document with a few layers, then Delete and a right-click on a row.
+    fn layers(kind: AppKind, at: &[Pos2]) -> Vec<Step> {
+        use serde_json::json;
+        let app = kind.name().to_ascii_lowercase();
+        let run = |command: &str, params: serde_json::Value| Step::Tool("app_execute", json!({"app": app, "command": command, "params": params}));
+        let setup: Vec<(&str, serde_json::Value)> = match kind {
+            AppKind::Vectorcraft => vec![
+                ("file.new", json!({"width": 400, "height": 300})),
+                ("shape.rectangle", json!({"x": 40, "y": 40, "width": 100, "height": 80})),
+                ("layer.new", json!({})),
+                ("shape.ellipse", json!({"x": 180, "y": 120, "width": 100, "height": 80})),
+                ("layer.new", json!({})),
+            ],
+            AppKind::Photocraft => vec![
+                ("file.new", json!({"width": 400, "height": 300})),
+                ("layer.new.layer", json!({"name": "One"})),
+                ("layer.new.layer", json!({"name": "Two"})),
+            ],
+            AppKind::Designcraft => vec![
+                ("file.new", json!({"width": 420, "height": 300, "pages": 1})),
+                ("layer.new", json!({"name": "One"})),
+                ("layer.new", json!({"name": "Two"})),
+            ],
+            AppKind::Effectcraft => vec![
+                ("comp.new", json!({"name": "Main", "width": 640, "height": 360, "duration": 4})),
+                ("layer.newSolid", json!({"name": "Orange", "color": "#e8a33d"})),
+                ("layer.newSolid", json!({"name": "Blue", "color": "#2f6fd6"})),
+            ],
+            AppKind::Filmcraft => vec![
+                ("file.newSequence", json!({"name": "Test", "width": 640, "height": 360, "fps": 25})),
+                ("file.newColorMatte", json!({"color": "#e8a33d", "seconds": 4})),
+                ("timeline.place", json!({"item": "$id", "track": "V1", "seconds": 0})),
+            ],
+            AppKind::Lightcraft => vec![
+                ("library.import", json!({"paths": [std::env::var("SEPTET_AUTOTEST_FILE").unwrap_or_default()]})),
+                ("library.select", json!({"ids": [1], "active": 1})),
+                ("panel.masking", json!({})),
+                ("mask.add", json!({"kind": "radial", "center": [0.5, 0.5], "rx": 0.3, "ry": 0.25})),
+                ("mask.add", json!({"kind": "linear"})),
+            ],
+            AppKind::Pdfcraft => vec![("doc_create", json!({"from": "blank", "pages": 2, "width": 400, "height": 300, "name": "Layers"}))],
+        };
+        // More commands after these: `SEPTET_AUTOTEST_CMDS` = [["command", {params}], …].
+        let more: Vec<(String, serde_json::Value)> =
+            std::env::var("SEPTET_AUTOTEST_CMDS").ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        let mut steps = vec![Step::Wait(2.0), Step::Open(kind), Step::Wait(6.0)];
+        let more = more.iter().map(|(c, p)| (Box::leak(c.clone().into_boxed_str()) as &str, p.clone()));
+        for (c, p) in setup.into_iter().chain(more) {
+            steps.extend([run(c, p), Step::ToolWait(30.0)]);
+        }
+        steps.extend([Step::Wait(1.5), Step::Shot("l01-made"), Step::Tool("app_inspect", json!({"app": app, "what": "document", "depth": 2})), Step::ToolWait(10.0)]);
+        if let Some((&p, before)) = at.split_last() {
+            for &b in before {
+                steps.extend([Step::Click(kind, Target::At(b), PointerButton::Primary), Step::Wait(1.0)]);
+            }
+            steps.extend([
+                Step::Shot("l01b-before"),
+                Step::Wait(0.5),
+                Step::Click(kind, Target::At(p), PointerButton::Primary),
+                Step::Wait(1.0),
+                Step::Report,
+                Step::Shot("l02-clicked"),
+            ]);
+            // `SEPTET_AUTOTEST_NOMENU`: Delete right after the click.
+            if std::env::var_os("SEPTET_AUTOTEST_NOMENU").is_none() {
+                steps.extend([
+                    Step::Click(kind, Target::At(p), PointerButton::Secondary),
+                    Step::Wait(1.0),
+                    Step::Shot("l03-menu"),
+                    Step::Press(kind, vec![Key::Escape]),
+                    Step::Wait(0.5),
+                ]);
+            }
+            steps.extend([
+                Step::Press(kind, vec![Key::Delete]),
+                Step::Wait(1.0),
+                Step::Report,
+                Step::Shot("l04-deleted"),
+                Step::Tool("app_inspect", json!({"app": app, "what": "history"})),
+                Step::Tool("app_inspect", json!({"app": app, "what": "document", "depth": 2})),
+                Step::ToolWait(10.0),
+            ]);
+        }
+        steps.extend([Step::Wait(1.0), Step::Exit]);
+        steps
     }
 
     /// The `assistant-apps` script for one app: make a document, change it with a few commands,
@@ -576,6 +681,8 @@ impl Autotest {
                     for l in lines {
                         at.note(l);
                     }
+                    let focus = shell.windows.iter().map(|w| ctx.memory(|m| m.focused()).map(|f| format!("{:?}:{f:?}", w.viewport))).collect::<Vec<_>>();
+                    at.note(format!("keyboard focus: {focus:?}"));
                 }
                 Step::Keys(kind, keys) => {
                     if let Some((wi, _)) = shell.find_app_tab(kind) {
@@ -626,6 +733,17 @@ impl Autotest {
                             at.input.push_back((v, vec![ev(true)]));
                             at.input.push_back((v, vec![ev(false)]));
                         }
+                    }
+                }
+                Step::Click(kind, target, button) => {
+                    if let Some(v) = window_of(shell, kind) {
+                        let p = resolve(shell, v, target);
+                        at.note(format!("{button:?} click at {p:?}"));
+                        at.pointer = p;
+                        let ev = |pressed| Event::PointerButton { pos: p, button, pressed, modifiers: Modifiers::NONE };
+                        at.input.push_back((v, vec![Event::PointerMoved(p)]));
+                        at.input.push_back((v, vec![ev(true)]));
+                        at.input.push_back((v, vec![ev(false)]));
                     }
                 }
                 Step::PointerDown(kind, target) => {

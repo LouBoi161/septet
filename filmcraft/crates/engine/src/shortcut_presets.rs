@@ -10,7 +10,12 @@ pub type Entry = (&'static str, &'static str, &'static str);
 
 /// FilmCraft additions to the per-command defaults: panel-specific shortcuts.
 pub const FILMCRAFT_PANEL: &[Entry] = &[
+    // Only in the Project panel: application-wide, Delete in the Timeline cleared the item still
+    // selected in the Project panel (and every clip of it) instead of the selected clips.
+    ("project.delete", "Delete", "Project"),
     ("project.delete", "Backspace", "Project"),
+    // Delete (forward delete, the only delete key on most PC keyboards) clears like Backspace.
+    ("edit.clear", "Delete", ""),
     ("file.newBin", "Cmd+B", "Project"),
     ("edit.undo", "Left", "History"),
     ("edit.redo", "Right", "History"),

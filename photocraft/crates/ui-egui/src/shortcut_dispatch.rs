@@ -188,7 +188,11 @@ pub fn dispatch_pressed(app: &mut PhotocraftApp, ctx: &egui::Context, focus: Foc
             i.events.remove(at);
             Some(id)
         });
-        let Some(id) = next else { break };
+        let Some(mut id) = next else { break };
+        // Delete with nothing selected deletes the layer, as in Photoshop (Clear empties a selection).
+        if id == "edit.clear" && app.session.active().is_some_and(|d| d.doc.selection.is_none()) {
+            id = "layer.delete".into();
+        }
         let owner = key_owner(app, ctx);
         dispatch(app, ctx, &id);
         ran = true;

@@ -1888,6 +1888,9 @@ pub fn shortcuts(app: &mut DesignApp, ctx: &egui::Context) {
     if ctx.text_edit_focused() || app.ui.dialog.is_some() || app.ui.palette.is_some() {
         return;
     }
+    if crate::panels::layers::delete_key(app, ctx) {
+        return;
+    }
     let typing = app.session.wants_text();
     let events = ctx.input(|i| i.events.clone());
     for e in events {

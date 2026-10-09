@@ -104,6 +104,29 @@ fn selection_square(
     .clicked()
 }
 
+fn focus_id() -> egui::Id {
+    egui::Id::new("layers-panel-focus")
+}
+
+/// Delete / Backspace while a Layers panel row was clicked last (the panel still showing, no
+/// text being typed): delete the active layer, ahead of the tool's Clear. Runs with the
+/// shortcuts, before the panels draw.
+pub fn delete_key(app: &mut DesignApp, ctx: &egui::Context) -> bool {
+    let shown: Option<u64> = ctx.data(|d| d.get_temp(focus_id().with("shown")));
+    let focus = ctx.data(|d| d.get_temp(focus_id())).unwrap_or(false) && shown.is_some_and(|f| f + 1 >= ctx.cumulative_pass_nr());
+    if !focus || app.session.wants_text() || ctx.text_edit_focused() {
+        return false;
+    }
+    let Some(active) = app.session.active().map(|d| d.active_layer) else { return false };
+    let pressed = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete) || i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace));
+    if pressed {
+        if let Err(e) = app.run("layer.delete", json!({"id": active.0})) {
+            app.status(e.to_string());
+        }
+    }
+    pressed
+}
+
 pub fn show(app: &mut DesignApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let Some(st) = app.session.active() else { return };
@@ -116,6 +139,8 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
     let spread_items: Vec<std::sync::Arc<Item>> =
         doc.page_loc(cur).and_then(|(si, _)| doc.spreads.get(si)).map(|sp| sp.items.iter().rev().cloned().collect()).unwrap_or_default();
     ui.spacing_mut().item_spacing.y = 0.0;
+    let top = ui.cursor().min;
+    let mut row_clicked = None;
     for l in doc.layers.iter().rev() {
         let open_id = egui::Id::new(("layer_open", l.id.0));
         let open: bool = ui.data(|d| d.get_temp(open_id)).unwrap_or(l.id == active);
@@ -162,6 +187,9 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
             let _ = app.run("selection.set", json!({"ids": ids}));
         } else if resp.clicked() {
             let _ = app.run("layer.activate", json!({"id": l.id.0}));
+        }
+        if resp.clicked() || resp.secondary_clicked() {
+            row_clicked = Some(true);
         }
         resp.context_menu(|ui| {
             if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete Layer"))).clicked() {
@@ -221,11 +249,21 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
             } else if lock {
                 let _ = app.run("object.setFlags", json!({"ids": [it.id.0], "locked": !it.locked}));
             } else if sq || resp.clicked() {
+                row_clicked = Some(false);
                 let add = ui.input(|i| i.modifiers.shift || i.modifiers.command);
                 let _ = app.run("selection.set", json!({"ids": [it.id.0], "add": add}));
             }
         }
     }
+    // Keyboard: Delete deletes the active layer while a layer row was clicked last (not the
+    // canvas or an object row); see `delete_key`.
+    let list = Rect::from_min_max(top, pos2(ui.max_rect().right(), ui.cursor().min.y));
+    let outside = ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !list.contains(p)));
+    let pass = ui.ctx().cumulative_pass_nr();
+    ui.data_mut(|d| {
+        d.insert_temp(focus_id(), row_clicked.unwrap_or(!outside && d.get_temp(focus_id()).unwrap_or(false)));
+        d.insert_temp(focus_id().with("shown"), pass);
+    });
     ui.add_space(6.0);
     ui.spacing_mut().item_spacing.y = 4.0;
     ui.horizontal(|ui| {

@@ -335,6 +335,10 @@ pub fn handle(app: &mut VectorcraftApp, ctx: &egui::Context) {
         }
         return;
     }
+    // Delete with a Layers panel row clicked last deletes the highlighted layers.
+    if crate::panels::layers::delete_key(app, ctx) {
+        return;
+    }
     // Keys the active tool claims ahead of their shortcuts (the Gradient tool's selected stop:
     // Delete/Backspace remove it, ←/→ nudge it; the loaded place cursor: the arrows cycle files).
     let m = ctx.input(|i| i.modifiers);
