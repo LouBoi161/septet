@@ -11,10 +11,11 @@
 //! items dragged out of it (or a frame of them when the other app doesn't take their format), and
 //! the Program monitor frame for "Send to".
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Once;
+use std::sync::mpsc::{Receiver, channel};
 
 use filmcraft_engine::export::{Format, encode_still};
 use filmcraft_engine::project::{ClipId, ItemId, ItemKind, TrackKind};
@@ -29,6 +30,13 @@ use crate::{audio, desktop};
 type OpenExternally = Rc<RefCell<Option<Box<dyn FnMut(&Path) -> bool>>>>;
 
 /// FilmCraft (one per process) for a host's tab.
+/// A picture for the host's agent, made on a worker thread ([`Embedded::agent_render`]).
+pub type AgentRender = Box<dyn FnOnce() -> Result<egui::ColorImage, String> + Send>;
+
+/// What the agent hears when there is no sequence to work on.
+const NO_SEQUENCE: &str =
+    "No sequence is open in Filmcraft: open a project with septet_open, or make a sequence with app_execute `sequence.new` (see its params).";
+
 pub struct Embedded {
     app: FilmcraftApp,
     /// The host's context: FilmCraft keeps its drag state in its `data` (swapped in by the host
@@ -314,6 +322,282 @@ impl Embedded {
             TrackKind::Audio => (seq.video_tracks.get(row.index).or(seq.video_tracks.first()).map(|t| t.id.0), Some(row.track.0)),
         };
         Some((video, audio, time))
+    }
+}
+
+impl Embedded {
+    /// The engine's commands for the host's agent, with their parameters and whether they can
+    /// run now.
+    pub fn agent_commands(&mut self, _ctx: &egui::Context) -> Vec<Value> {
+        let s = &self.app.session;
+        filmcraft_engine::command_specs()
+            .iter()
+            .map(|c| {
+                let mut v = json!({ "id": c.id, "label": c.label, "enabled": true });
+                if !c.menu.is_empty() {
+                    v["menu"] = json!(c.menu.join(" › "));
+                }
+                if let Some(sc) = s.shortcuts.primary(c.id) {
+                    v["shortcut"] = json!(sc);
+                }
+                if !matches!(c.params.trim(), "" | "{}") {
+                    v["params"] = json!(c.params);
+                }
+                if let Err(reason) = (c.enabled)(s) {
+                    v["enabled"] = json!(false);
+                    v["disabled_reason"] = json!(reason);
+                }
+                v
+            })
+            .collect()
+    }
+
+    /// Run a command for the host's agent as the control channel's `engine.execute` does (the
+    /// menus' dispatcher, so it is undoable like the menu item). A command that would open a
+    /// dialog or a file picker instead (it needs parameters), or open a file in another program,
+    /// fails and leaves nothing open: the agent can't answer it and the user didn't ask for it.
+    /// The reply is always there at once.
+    pub fn agent_execute(&mut self, ctx: &egui::Context, command: &str, params: Value) -> Receiver<Value> {
+        let (tx, rx) = channel();
+        let params = if params.is_null() { json!({}) } else { params };
+        let before = open_dialogs(&self.app);
+        let asked = Rc::new(Cell::new(None::<&'static str>));
+        let ask = |what: &'static str| {
+            let a = asked.clone();
+            move || a.set(Some(what))
+        };
+        // No file dialogs and no other programs for the agent: note that the command asked.
+        let h = &mut self.app.hooks;
+        let (files, save, save_as, project, file, folder, relink, open) = (
+            ask("pick files to import"),
+            ask("choose where to save"),
+            ask("choose where to save"),
+            ask("pick a project"),
+            ask("pick a file"),
+            ask("pick a folder"),
+            ask("pick a file"),
+            ask("open a file in another program"),
+        );
+        let saved = (
+            h.pick_files.replace(Box::new(move |_| {
+                files();
+                Vec::new()
+            })),
+            h.pick_save.replace(Box::new(move |_| {
+                save();
+                None
+            })),
+            h.pick_save_as.replace(Box::new(move |_, _, _| {
+                save_as();
+                None
+            })),
+            h.pick_open_project.replace(Box::new(move || {
+                project();
+                None
+            })),
+            h.pick_open_file.replace(Box::new(move |_, _| {
+                file();
+                None
+            })),
+            h.pick_folder.replace(Box::new(move || {
+                folder();
+                None
+            })),
+            h.pick_file_for_relink.replace(Box::new(move |_, _| {
+                relink();
+                None
+            })),
+            h.open_path.replace(Box::new(move |_, _| {
+                open();
+                Err("not for the agent".into())
+            })),
+        );
+        let app = &mut self.app;
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| filmcraft_ui_egui::menus::invoke(app, ctx, command, params)))
+            .unwrap_or_else(|_| Err("internal error (please report this bug); the project is unchanged".into()));
+        let h = &mut self.app.hooks;
+        (h.pick_files, h.pick_save, h.pick_save_as, h.pick_open_project, h.pick_open_file, h.pick_folder, h.pick_file_for_relink, h.open_path) = saved;
+        let opened = close_new_dialogs(&mut self.app, &before);
+        let reply = match (r, opened, asked.get()) {
+            (_, Some(dialog), _) => {
+                json!({ "ok": false, "error": format!("`{command}` opened the {dialog} dialog, which waits for the user, so it was closed again: run the command with the parameters it lists instead.") })
+            }
+            (_, None, Some(what)) => json!({ "ok": false, "error": format!("`{command}` asks the user to {what}: pass the path(s) it lists instead.") }),
+            (Ok(v), None, None) => json!({ "ok": true, "result": v }),
+            (Err(e), None, None) => json!({ "ok": false, "error": e }),
+        };
+        ctx.request_repaint();
+        // The receiver is ours until we return.
+        let _ = tx.send(reply);
+        rx
+    }
+
+    /// The project's state for the host's agent: `document` (the project's bins and items),
+    /// `sequence` (tracks and clips of the sequence `id`, else the active one), `clip` (one clip
+    /// of it by `id`), `selection` (the editor's state: selection, playhead, In/Out) and `history`.
+    pub fn agent_inspect(&mut self, _ctx: &egui::Context, what: &str, p: &Value) -> Result<Value, String> {
+        let session = &mut self.app.session;
+        let mut query = |id: &str, params: Value| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| session.execute(id, params).map_err(|e| e.to_string())))
+                .unwrap_or_else(|_| Err("internal error (please report this bug)".into()))
+        };
+        let id = p.get("id").filter(|v| !v.is_null()).cloned();
+        match what {
+            "document" | "project" => query("project.inspect", json!({})),
+            "sequence" => {
+                let mut v = query("sequence.inspect", json!({ "item": id }))?;
+                // Times in the answer are ticks; commands also take seconds, frames or timecode.
+                v["ticksPerSecond"] = json!(Tick::from_seconds_f64(1.0).0);
+                Ok(v)
+            }
+            "clip" | "object" | "layer" => {
+                let clip = id.and_then(|v| v.as_u64()).ok_or("give the clip's `id` (from `sequence`)")?;
+                let seq = query("sequence.inspect", json!({ "item": p.get("sequence") }))?;
+                find_id(&seq, clip).cloned().ok_or_else(|| "the sequence has no clip with that id".to_string())
+            }
+            "selection" | "state" => query("state.inspect", json!({})),
+            "history" => query("history.list", json!({})),
+            _ => Err(format!("Filmcraft has no view “{what}”: use document, sequence, clip, selection or history.")),
+        }
+    }
+
+    /// A picture for the host's agent: `frame` (alias `document`, `sequence`: the Program monitor's
+    /// picture of the sequence `id`, else the active one, at `time` seconds, else the playhead),
+    /// `clip` (one clip by `id` alone, at `time` or the playhead when it is in the clip, else its
+    /// middle), `selection` (the first selected clip, so) or `item` (a project item by `id`, at
+    /// `time` or its poster frame), fitted into
+    /// `max_side` pixels (never enlarged). The project is shared with the job.
+    pub fn agent_render(&mut self, _ctx: &egui::Context, t: &Value) -> Result<(String, AgentRender), String> {
+        let s = &self.app.session;
+        let max_side = t.get("max_side").and_then(Value::as_u64).unwrap_or(1024).clamp(16, 4096) as f32;
+        let time = t.get("time").and_then(Value::as_f64).filter(|v| v.is_finite()).map(Tick::from_seconds_f64);
+        let at = |t: Tick| format!("at {:.2} s", t.seconds());
+        let project = s.project.clone();
+        let provider = s.media.provider(s.project.clone(), s.services.clone());
+        let id = t.get("id").and_then(Value::as_u64);
+        let target = t.get("target").and_then(Value::as_str).unwrap_or("frame");
+        let (caption, job): (String, Box<dyn FnOnce() -> Option<Image> + Send>) = match target {
+            "frame" | "document" | "sequence" | "clip" | "object" | "layer" | "selection" => {
+                let seq_id = match (target, id) {
+                    ("sequence", Some(id)) => ItemId(id),
+                    _ => t.get("sequence").and_then(Value::as_u64).map(ItemId).or(s.state.active_sequence).ok_or(NO_SEQUENCE)?,
+                };
+                let seq = s.project.sequence(seq_id).ok_or(NO_SEQUENCE)?;
+                let name = s.project.item(seq_id).map(|i| i.name.clone()).unwrap_or_default();
+                let (w, h) = (seq.settings.width.max(1) as f32, seq.settings.height.max(1) as f32);
+                if matches!(target, "clip" | "object" | "layer" | "selection") {
+                    let clip = match target {
+                        "selection" => *s.state.selection.first().ok_or("no clip is selected")?,
+                        _ => ClipId(id.ok_or("give the clip's `id` (from app_inspect `sequence`)")?),
+                    };
+                    let (_, item) = seq.find_item(clip).ok_or("the sequence has no clip with that id")?;
+                    let inside = |t: Tick| t >= item.start && t < item.end();
+                    let t = time.or(Some(s.playhead()).filter(|t| inside(*t))).unwrap_or(Tick(item.start.0.saturating_add(item.duration.0 / 2)));
+                    // The clip is drawn where it sits in the frame, which the host crops to it: big
+                    // enough that the crop still fills `max_side`.
+                    let scale = (max_side.max(2048.0) / w.max(h)).min(1.0);
+                    let opts = filmcraft_engine::render::RenderOptions { scale, ..Default::default() };
+                    let caption = format!("Clip “{}” (id {}) of “{name}” {}", item.name, clip.0, at(t));
+                    (caption, Box::new(move || filmcraft_engine::render::render_clip(&project, seq_id, clip, t, opts, &provider)))
+                } else {
+                    let t = time.unwrap_or_else(|| s.playhead());
+                    let scale = (max_side / w.max(h)).min(1.0);
+                    let opts = filmcraft_engine::render::RenderOptions { scale, captions: true, ..Default::default() };
+                    let caption = format!("Sequence “{name}” {}, {} × {} px", at(t), seq.settings.width, seq.settings.height);
+                    (caption, Box::new(move || Some(filmcraft_engine::render::render_sequence(&project, seq_id, t, opts, &provider))))
+                }
+            }
+            "item" => {
+                let item = ItemId(id.ok_or("give the project item's `id` (from app_inspect `document`)")?);
+                let it = s.project.item(item).ok_or("the project has no item with that id")?;
+                let t = time.unwrap_or_else(|| filmcraft_engine::keyboard::poster_frame(it).unwrap_or(Tick(it.duration().0.saturating_mul(3) / 10)));
+                let scale = match it.kind {
+                    ItemKind::Sequence(ref q) => (max_side / (q.settings.width.max(q.settings.height).max(1) as f32)).min(1.0),
+                    _ => 1.0,
+                };
+                let caption = format!("{} “{}” (id {}) {}", kind_name(it), it.name, item.0, at(t));
+                (caption, Box::new(move || filmcraft_engine::render::render_item(&project, item, t, scale, &provider)))
+            }
+            other => return Err(format!("Filmcraft can't render “{other}”: use frame (with `time`), clip (with `id`), selection or item (with `id`).")),
+        };
+        // A frame is what the Program monitor shows: black where no clip is.
+        let on_black = matches!(target, "frame" | "document" | "sequence");
+        let job: AgentRender = Box::new(move || {
+            let img = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                .map_err(|_| "internal error while rendering".to_string())?
+                .ok_or("nothing to show there (no picture at that time)")?;
+            let mut px = img.to_rgba8();
+            if on_black {
+                for p in px.chunks_exact_mut(4) {
+                    let a = u32::from(p[3]);
+                    for c in &mut p[..3] {
+                        *c = ((u32::from(*c) * a + 127) / 255) as u8;
+                    }
+                    p[3] = 255;
+                }
+            }
+            Ok(egui::ColorImage::from_rgba_unmultiplied([img.w, img.h], &px))
+        });
+        Ok((caption, job))
+    }
+}
+
+/// The dialogs open in `app`: (name, open).
+fn open_dialogs(app: &FilmcraftApp) -> Vec<(&'static str, bool)> {
+    let u = &app.ui;
+    vec![
+        ("app", app.dialog.is_some()),
+        ("Settings", u.settings.is_some()),
+        ("Link Media", u.link_media.is_some()),
+        ("Create Proxies", u.create_proxies.is_some()),
+        ("Project Manager", u.project_manager.is_some()),
+        ("Make Offline", u.make_offline.is_some()),
+        ("colour", u.color_dialog.is_some()),
+        ("Save Preset", u.save_preset.is_some()),
+        ("Synchronize", u.sync_dialog.is_some()),
+        ("Edit Cameras", u.edit_cameras.is_some()),
+        ("guide", u.guide_dialog.is_some()),
+        ("Text Properties", u.text_props_dialog.is_some()),
+        ("Workspaces", u.workspace_dialog.is_some()),
+        ("clip", u.clip_dialog.is_some()),
+        ("menu", u.extras.dialog.is_some()),
+    ]
+}
+
+/// Close the dialogs that opened since `before` → the name of one of them.
+fn close_new_dialogs(app: &mut FilmcraftApp, before: &[(&'static str, bool)]) -> Option<String> {
+    let now = open_dialogs(app);
+    let opened: Vec<&str> = now.iter().zip(before).filter(|((_, n), (_, b))| *n && !*b).map(|((name, _), _)| *name).collect();
+    for name in &opened {
+        let u = &mut app.ui;
+        match *name {
+            "app" => app.dialog = None,
+            "Settings" => u.settings = None,
+            "Link Media" => u.link_media = None,
+            "Create Proxies" => u.create_proxies = None,
+            "Project Manager" => u.project_manager = None,
+            "Make Offline" => u.make_offline = None,
+            "colour" => u.color_dialog = None,
+            "Save Preset" => u.save_preset = None,
+            "Synchronize" => u.sync_dialog = None,
+            "Edit Cameras" => u.edit_cameras = None,
+            "guide" => u.guide_dialog = None,
+            "Text Properties" => u.text_props_dialog = None,
+            "Workspaces" => u.workspace_dialog = None,
+            "clip" => u.clip_dialog = None,
+            _ => u.extras.dialog = None,
+        }
+    }
+    opened.first().map(|n| format!("“{n}”"))
+}
+
+/// The clip `id` in `sequence.inspect`'s answer `v`.
+fn find_id(v: &Value, id: u64) -> Option<&Value> {
+    match v {
+        Value::Object(o) if o.get("clip").and_then(Value::as_u64) == Some(id) && o.contains_key("start") => Some(v),
+        Value::Object(o) => o.values().find_map(|c| find_id(c, id)),
+        Value::Array(a) => a.iter().find_map(|c| find_id(c, id)),
+        _ => None,
     }
 }
 

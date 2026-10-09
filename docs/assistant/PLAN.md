@@ -412,6 +412,13 @@ Speichern und Exportieren bleiben sonst Sache des Users.
    Kameras, Lichter bleiben; nie der Solo-Schalter). Septet schneidet transparente Ränder von Teil-Renders ab.
    Gefunden und behoben: Effectcrafts `path` ist ein Eigenschaftspfad (`transform/position`); Septets Pfadregel nimmt
    `path` jetzt nur als Datei, wenn er danach aussieht (absolut, `./`, `../`, `~`, Endung) oder der Befehl speichert.
+   **Filmcraft** fertig: 675 Engine-Befehle; ausgeführt über `menus::invoke` (wie `engine.execute` im
+   Steuerprotokoll, immer sofort fertig). Filmcraft hat ~15 einzelne Dialog-Felder statt einem: `open_dialogs` merkt
+   sich, welche offen waren, und schließt neu geöffnete wieder; alle Datei-Dialog-Hooks (`pick_*`) und `open_path`
+   werden für den Befehl durch Stubs ersetzt (Fehler „pass the path“). Ansichten `document`, `sequence` (mit
+   `ticksPerSecond`), `clip`, `selection`, `history`. Renders: Sequenz-Frame (auf Schwarz, wie der Program Monitor),
+   Clip allein (`render_clip`, Septet schneidet zu), Auswahl (erster ausgewählter Clip), Projekt-Item; der
+   `PoolProvider` ist `Send`, gerendert wird auf dem Worker. Prompt: Clips per `timeline.place` statt nur OTIO.
    Beobachtet, offen: Ein per Befehl angelegtes Dokument war im Chat-Test nicht ganz eingepasst (Zoom zu groß, links
    abgeschnitten); vermutlich eine Embedding-Frage von Vectorcrafts `canvas::fit`, nicht der Werkzeuge.
 3. **Photocraft, Designcraft, Effectcraft, Filmcraft**, dann **Lightcraft**, zuletzt **Pdfcraft** (Sonderweg).

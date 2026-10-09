@@ -285,6 +285,17 @@ impl Autotest {
                 2,
                 vec![run("file.quitNonsense", json!({}))],
             ),
+            AppKind::Filmcraft => (
+                run("file.newSequence", json!({"name": "Agent test", "width": 640, "height": 360, "fps": 25})),
+                "matte",
+                vec![
+                    run("file.newColorMatte", json!({"color": "#e8a33d", "seconds": 4})),
+                    run("timeline.place", json!({"item": "$id", "track": "V1", "seconds": 0})),
+                ],
+                "clip",
+                1,
+                vec![run("file.import", json!({}))],
+            ),
             _ => (Step::Report, "", vec![], "object", 1, vec![]),
         };
         let mut steps = vec![Step::Wait(2.0), new, Step::ToolWait(40.0), call("app_commands", json!({})), call("app_commands", json!({"filter": filter}))];
@@ -770,7 +781,11 @@ impl Autotest {
                                 // Ids of new things: Vectorcraft's objects, Photocraft's layers, Designcraft's items…
                                 let made = serde_json::from_str::<serde_json::Value>(text).ok();
                                 if let Some(id) = made.and_then(|v| {
-                                    ["id", "layer", "item", "clip"].iter().find_map(|k| v.get(*k).filter(|i| i.is_u64() || i.is_string()).cloned())
+                                    ["id", "layer", "item", "clip"]
+                                        .iter()
+                                        .find_map(|k| v.get(*k).filter(|i| i.is_u64() || i.is_string()).cloned())
+                                        // Filmcraft's placed clips
+                                        .or_else(|| v["clips"].get(0).cloned())
                                 }) {
                                     at.last_id = Some(id);
                                 }

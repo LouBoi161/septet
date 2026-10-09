@@ -134,7 +134,7 @@ hosted!(vectorcraft_embed::Embedded, agent);
 hosted!(lightcraft_embed::Embedded);
 hosted!(designcraft_embed::Embedded, agent);
 hosted!(pdfcraft_embed::Embedded);
-hosted!(filmcraft_embed::Embedded);
+hosted!(filmcraft_embed::Embedded, agent);
 hosted!(effectcraft_embed::Embedded, agent);
 
 /// Portable mode: keep `kind`'s settings and data under `root` (call before `create`).
