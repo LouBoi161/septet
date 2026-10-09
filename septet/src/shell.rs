@@ -146,6 +146,8 @@ pub struct Shell {
     quit_session: Option<crate::recent::Session>,
     /// Sibling apps an app asked to switch to (Effectcraft's "More ArtCraft apps").
     open_app: Rc<RefCell<Vec<AppKind>>>,
+    /// Launches handed to this Septet by later ones (see `instance.rs`).
+    pub instance: Option<crate::instance::Running>,
     quit_requested: bool,
 }
 
@@ -192,6 +194,7 @@ impl Shell {
             delivered: Vec::new(),
             quit_session: None,
             open_app: Rc::new(RefCell::new(Vec::new())),
+            instance: None,
             quit_requested: false,
         };
         let root = shell.new_window(ViewportId::ROOT, ViewportBuilder::default());
@@ -263,14 +266,16 @@ impl Shell {
         let mut any = false;
         for (wi, saved) in s.windows.into_iter().enumerate() {
             let active = saved.active;
-            let kinds: Vec<TabKind> = saved
-                .tabs
-                .into_iter()
-                .filter(|k| match k {
-                    TabKind::App(kind) => self.find_app_tab(*kind).is_none(),
-                    TabKind::Home => true,
-                })
-                .collect();
+            let mut kinds: Vec<TabKind> = Vec::new();
+            for k in saved.tabs {
+                // One tab per app, also across the windows restored before this one.
+                if let TabKind::App(kind) = k
+                    && (kinds.contains(&k) || self.find_app_tab(kind).is_some())
+                {
+                    continue;
+                }
+                kinds.push(k);
+            }
             let tabs: Vec<Tab> = kinds.into_iter().map(|kind| Tab { id: self.new_tab_id(), kind }).collect();
             if tabs.is_empty() {
                 continue;
@@ -380,6 +385,16 @@ impl Shell {
         for kind in wanted {
             let window = self.focused_window(ctx);
             self.actions.push(Action::NewTab { window, kind: TabKind::App(kind) });
+        }
+        // Septet started again: open its files here, or just come to the front.
+        for files in self.instance.as_ref().map(|i| i.take()).unwrap_or_default() {
+            if files.is_empty() {
+                let window = self.focused_window(ctx);
+                self.router.send(window, ViewportCommand::Minimized(false));
+                self.router.send(window, ViewportCommand::Focus);
+            } else {
+                self.opens.push(OpenRequest { paths: files, app: None, window: None, place: None });
+            }
         }
         // Files apps wanted opened elsewhere: open them here when one of our apps can.
         let external: Vec<PathBuf> = self.external.borrow_mut().drain(..).collect();
@@ -1112,6 +1127,9 @@ impl Shell {
     }
 
     pub fn exit(&mut self) {
+        if let Some(instance) = &self.instance {
+            instance.release();
+        }
         self.assistant.exit();
         for slot in self.apps.values() {
             if let Ok(mut s) = slot.try_borrow_mut() {

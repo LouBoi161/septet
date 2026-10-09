@@ -20,6 +20,7 @@ mod fonts;
 mod home;
 mod hosted;
 mod icon;
+mod instance;
 mod kinds;
 mod pointer;
 mod recent;
@@ -106,6 +107,9 @@ fn main() -> eframe::Result {
         }
     }
 
+    // Septet is already running: it opens the files (or comes to the front) instead.
+    let Some(primary) = instance::claim(&files) else { return Ok(()) };
+
     let mut options = eframe::NativeOptions {
         viewport: window_chrome(
             egui::ViewportBuilder::default()
@@ -150,7 +154,9 @@ fn main() -> eframe::Result {
             let router = router::Router::default();
             ctx.add_plugin(router.clone());
             let session = cc.storage.and_then(|s| eframe::get_value::<recent::Session>(s, "septet/session"));
-            Ok(Box::new(Septet { shell: shell::Shell::new(ctx, router, files, session) }))
+            let mut shell = shell::Shell::new(ctx, router, files, session);
+            shell.instance = primary.map(|p| p.serve(ctx.clone()));
+            Ok(Box::new(Septet { shell }))
         }),
     )
 }
