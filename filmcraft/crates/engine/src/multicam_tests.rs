@@ -609,7 +609,10 @@ fn camera_keys_cut_and_select() {
     let keys: Vec<(String, String)> =
         s.shortcuts.bindings.iter().filter(|b| b.command.starts_with("multicam.")).map(|b| (b.command.clone(), b.keys.clone())).collect();
     assert!(keys.contains(&("multicam.selectCamera1".into(), "1".into())), "{keys:?}");
-    assert!(keys.contains(&("multicam.cutToCamera9".into(), "Ctrl+9".into())), "{keys:?}");
+    assert!(keys.contains(&("multicam.cutToCamera8".into(), "Ctrl+8".into())), "{keys:?}");
+    // off macOS Ctrl+9 is Toggle All Audio Targets (⌘9)
+    let nine = keys.contains(&("multicam.cutToCamera9".into(), "Ctrl+9".into()));
+    assert_eq!(nine, crate::shortcuts::Platform::current().is_mac(), "{keys:?}");
 }
 
 /// Colour of camera `k` (0-based) in the many-angle tests: distinct reds and greens.

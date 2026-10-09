@@ -560,20 +560,24 @@ impl Shortcuts {
                 out.push(Binding::new(c, k, panel_opt(p)));
             }
         }
+        drop_control_clashes(&mut out, Platform::current());
         out
     }
 
     /// Premiere-default entries FilmCraft Default adopts: commands with no shortcut of their own
-    /// whose Premiere key is free in that context.
+    /// whose Premiere key is free in that context on this OS (off macOS `Ctrl` and `Cmd` are the
+    /// same key, so ⌃9 Cut to Camera 9 would shadow ⌘9 Toggle All Audio Targets there).
     pub fn audit(&self) -> Vec<Binding> {
         let base = self.base_defaults();
+        let os = Platform::current();
+        let eff = |b: &Binding| b.chord().map(|c| c.effective(os));
         let mut added: Vec<Binding> = Vec::new();
         for (c, k, p) in presets::PREMIERE {
             if !self.known(c) || base.iter().any(|b| b.command == *c) {
                 continue;
             }
             let b = Binding::new(c, k, panel_opt(p));
-            let taken = base.iter().chain(added.iter()).any(|o| o.context() == b.context() && o.chord() == b.chord());
+            let taken = base.iter().chain(added.iter()).any(|o| o.context() == b.context() && eff(o) == eff(&b));
             if !taken {
                 added.push(b);
             }
@@ -965,6 +969,26 @@ impl Shortcuts {
 
 fn panel_opt(p: &str) -> Option<&str> {
     if p.is_empty() { None } else { Some(p) }
+}
+
+/// Off macOS `Ctrl` (the Control key) and `Cmd` are the same key, so a default on ⌃ can land on
+/// another command's ⌘ default (⌃9 Cut to Camera 9 and ⌘9 Toggle All Audio Targets both become
+/// Ctrl+9). The ⌘ shortcut keeps the key; the ⌃ one is dropped on that OS.
+fn drop_control_clashes(b: &mut Vec<Binding>, p: Platform) {
+    if p.is_mac() {
+        return;
+    }
+    let clashes = |x: &Binding, all: &[Binding]| {
+        let Some(c) = x.chord().filter(|c| c.mods.ctrl) else { return false };
+        let eff = c.effective(p);
+        all.iter().any(|o| o.command != x.command && o.context() == x.context() && o.chord().is_some_and(|oc| !oc.mods.ctrl && oc.effective(p) == eff))
+    };
+    let keep: Vec<bool> = b.iter().map(|x| !clashes(x, b)).collect();
+    let mut i = 0;
+    b.retain(|_| {
+        i += 1;
+        keep.get(i - 1).copied().unwrap_or(true)
+    });
 }
 
 fn check_panel(panel: Option<&str>) -> std::result::Result<Option<&'static str>, String> {

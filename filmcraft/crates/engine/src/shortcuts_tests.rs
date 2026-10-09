@@ -65,6 +65,13 @@ fn defaults_follow_the_registry_and_the_premiere_audit() {
         t.shortcuts.load_preset(name).unwrap();
         assert!(t.shortcuts.conflicts(Platform::Mac).is_empty(), "{name}: {:?}", t.shortcuts.conflicts(Platform::Mac));
     }
+    // ... and none in FilmCraft Default on this OS (off macOS ⌃9 and ⌘9 are both Ctrl+9)
+    assert!(sc.conflicts(Platform::current()).is_empty(), "{:?}", sc.conflicts(Platform::current()));
+    if !Platform::current().is_mac() {
+        assert!(sc.primary("multicam.cutToCamera9").is_none());
+        assert_eq!(sc.primary("timeline.toggleAllAudioTargets").as_deref(), Some("Cmd+9"));
+        assert_eq!(sc.primary("multicam.cutToCamera8").as_deref(), Some("Ctrl+8"));
+    }
     // command.list reports the live bindings
     let list = s.execute("command.list", json!({})).unwrap();
     let ae = list.as_array().unwrap().iter().find(|c| c["id"] == "sequence.addEdit").unwrap();
