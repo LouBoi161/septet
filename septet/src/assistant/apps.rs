@@ -49,7 +49,7 @@ pub fn is_app_tool(name: &str) -> bool {
 
 pub fn definitions(apps: &[String]) -> Vec<Value> {
     let app = json!({"type": "string", "enum": apps});
-    let id = json!({"type": ["integer", "string"], "description": "An id from app_inspect (Vectorcraft: the object's number)."});
+    let id = json!({"type": ["integer", "string"], "description": "An id from app_inspect (Vectorcraft's objects and Photocraft's layers are numbers)."});
     vec![
         json!({
             "name": "app_commands",
@@ -72,7 +72,7 @@ pub fn definitions(apps: &[String]) -> Vec<Value> {
         }),
         json!({
             "name": "app_inspect",
-            "description": "Read an app's document as JSON. `what`: `document` (summary and object tree with ids; `depth` levels), `selection`, `object` or `layer` (one item by `id`), `history`; Vectorcraft also has `find` (params name/kind/text) and `documents`. An unknown `what` lists the app's views.",
+            "description": "Read an app's document as JSON. `what`: `document` (summary and object or layer tree with ids; `depth` levels), `selection`, `object` or `layer` (one item by `id`), `history`, `documents` (all open ones); Vectorcraft also has `find` (params name/kind/text). An unknown `what` lists the app's views.",
             "inputSchema": {"type": "object", "properties": {
                 "app": app,
                 "what": {"type": "string"},
@@ -251,13 +251,13 @@ pub fn call(shell: &mut Shell, ctx: &Context, call: ToolCall, approved: bool) {
             let text = match (undo, &done[..]) {
                 (false, [v]) if v.is_null() => "Done.".to_owned(),
                 (false, [v]) => text_of(v),
-                (true, _) => format!(
-                    "{} {} step{}. {}",
-                    if command == "edit.redo" { "Redid" } else { "Undid" },
-                    done.len(),
-                    if done.len() == 1 { "" } else { "s" },
-                    text_of(&json!(done))
-                ),
+                (true, _) => {
+                    // Say what was undone when the app tells (Vectorcraft names the step; others just say yes).
+                    let named: Vec<&Value> = done.iter().filter(|v| !v.is_boolean() && !v.is_null()).collect();
+                    let verb = if command == "edit.redo" { "Redid" } else { "Undid" };
+                    let steps = if done.len() == 1 { "1 step".to_owned() } else { format!("{} steps", done.len()) };
+                    if named.is_empty() { format!("{verb} {steps}.") } else { format!("{verb} {steps}: {}", text_of(&json!(named))) }
+                }
                 _ => text_of(&json!(done)),
             };
             reply(&call.reply, Ok(ToolReply::text(text)));
@@ -463,7 +463,7 @@ fn render((caption, job): (String, AgentRender), args: &Value, max_side: u32, wo
         let (nw, nh) = (((w as f32 * s).round() as u32).max(1), ((h as f32 * s).round() as u32).max(1));
         img = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
     }
-    let mut note = format!("{caption}. {} × {} px.", img.width(), img.height());
+    let mut note = format!("{caption}. Picture: {} × {} px.", img.width(), img.height());
     if let Some(out) = args["save_as"].as_str() {
         let workspace = workspace.ok_or("save_as needs a conversation's workspace.")?;
         let out = super::assets::in_workspace(workspace, out)?;

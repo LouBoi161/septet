@@ -9,11 +9,15 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::mpsc::Receiver;
 
+use photocraft_doc::{Document, LayerId};
 use photocraft_engine::Session;
 use photocraft_engine::prefs::{GpuBackend, RenderingMode};
 use photocraft_ui_egui::layer_transfer::{self, Outgoing};
-use photocraft_ui_egui::{OpenUrlFn, PhotocraftApp, gpu_status, monitor_status, notices};
+use photocraft_ui_egui::{ControlRequest, OpenUrlFn, PhotocraftApp, gpu_status, monitor_status, notices};
+use serde_json::{Value, json};
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use crate::tablet;
@@ -25,6 +29,12 @@ mod content;
 type OpenExternally = Rc<RefCell<Option<Box<dyn FnMut(&Path) -> bool>>>>;
 /// The host's "show this sibling app" hook ([`Embedded::set_open_app`]).
 type OpenApp = Rc<RefCell<Option<Box<dyn FnMut(&str)>>>>;
+
+/// A picture for the host's agent, made on a worker thread ([`Embedded::agent_render`]).
+pub type AgentRender = Box<dyn FnOnce() -> Result<egui::ColorImage, String> + Send>;
+
+/// What the agent hears when there is nothing to work on.
+const NO_DOCUMENT: &str = "No document is open in Photocraft: open one with septet_open, or make one with app_execute `file.new` {width, height}.";
 
 /// PhotoCraft as one tab of a host app (see the module docs).
 pub struct Embedded {
@@ -232,6 +242,137 @@ impl Embedded {
         content::write(&st.doc, &content::stem(&st.doc.name), accept, dir)
     }
 
+    /// The engine's commands for the host's agent, with their parameters and whether they can
+    /// run now (the menus' dialogs are not among them: the agent passes parameters instead).
+    pub fn agent_commands(&mut self, _ctx: &egui::Context) -> Vec<Value> {
+        let session = &self.app.session;
+        photocraft_engine::commands::command_specs()
+            .iter()
+            .map(|c| {
+                let mut v = json!({ "id": c.id, "label": c.label, "enabled": true });
+                if !c.menu.is_empty() {
+                    v["menu"] = json!(c.menu.join(" › "));
+                }
+                if let Some(sc) = c.shortcut {
+                    v["shortcut"] = json!(sc);
+                }
+                if !matches!(c.params.trim(), "" | "{}") {
+                    v["params"] = json!(c.params);
+                }
+                if let Err(reason) = (c.enabled)(session) {
+                    v["enabled"] = json!(false);
+                    v["disabled_reason"] = json!(reason);
+                }
+                v
+            })
+            .collect()
+    }
+
+    /// Run an engine command for the host's agent as the control channel's `engine.execute`
+    /// does: with its parameters, never a dialog, undoable like the menu item. A command that
+    /// runs as a background job replies once the job is done, on a later frame of the app.
+    pub fn agent_execute(&mut self, ctx: &egui::Context, command: &str, params: Value) -> Receiver<Value> {
+        let params = if params.is_null() { json!({}) } else { params };
+        let (req, rx) = ControlRequest::new("engine.execute", json!({ "command": command, "params": params }));
+        if photocraft_engine::commands::find(command).is_none() {
+            let _ = req.reply.send(json!({ "ok": false, "error": format!("Photocraft has no command `{command}`; app_commands lists them.") }));
+            return rx;
+        }
+        let reply = req.reply.clone();
+        let app = &mut self.app;
+        if let Err(e) = crate::crash_guard::guard(command, || {
+            app.control_now(ctx, req);
+            Ok(())
+        }) {
+            let _ = reply.send(json!({ "ok": false, "error": e }));
+        }
+        ctx.request_repaint();
+        rx
+    }
+
+    /// The document's state for the host's agent: `document` (summary and layer tree; `depth`
+    /// levels of groups), `layer` (one by `id`, else the active one), `selection` (the selected
+    /// layers and the pixel selection's bounds), `history` and `documents` (all open ones).
+    pub fn agent_inspect(&mut self, _ctx: &egui::Context, what: &str, p: &Value) -> Result<Value, String> {
+        let session = &self.app.session;
+        if what == "documents" {
+            return Ok(photocraft_engine::inspect::session(session));
+        }
+        let st = session.active().ok_or(NO_DOCUMENT)?;
+        let depth = p.get("depth").and_then(Value::as_u64).unwrap_or(3);
+        match what {
+            "document" => {
+                let mut v = photocraft_engine::inspect::document(st);
+                if let Some(layers) = v.get_mut("layers").and_then(Value::as_array_mut) {
+                    layers.iter_mut().for_each(|l| prune(l, depth));
+                }
+                // The undo history can be long: the latest ten steps tell what happened.
+                if let Some(list) = v.get_mut("history").and_then(Value::as_array_mut)
+                    && list.len() > 10
+                {
+                    let n = list.len();
+                    list.drain(..n - 10);
+                    v["historyCount"] = json!(n);
+                }
+                Ok(v)
+            }
+            "layer" | "object" | "group" => {
+                let id = layer_id(st, p)?;
+                let mut v = photocraft_engine::inspect::layer(st.doc.layer(id).ok_or("no layer has that id")?);
+                prune(&mut v, depth);
+                Ok(v)
+            }
+            "selection" => {
+                let doc = photocraft_engine::inspect::document(st);
+                let layers: Vec<Value> = st.selected_layers().iter().filter_map(|id| st.doc.layer(*id)).map(photocraft_engine::inspect::layer).collect();
+                Ok(
+                    json!({ "layers": layers, "activeLayer": doc["activeLayer"], "hasSelection": doc["hasSelection"], "selectionBounds": doc["selectionBounds"] }),
+                )
+            }
+            "history" => Ok(
+                json!({ "history": photocraft_engine::inspect::document(st)["history"], "canUndo": st.history.can_undo(), "canRedo": st.history.can_redo() }),
+            ),
+            _ => Err(format!("Photocraft has no view “{what}”: use document, layer, selection, history or documents.")),
+        }
+    }
+
+    /// A picture for the host's agent: `document` (the composite), `layer` (one by `id`, else the
+    /// active one, alone and trimmed to what it shows) or `selection` (the selected layers
+    /// together), at most `max_side` pixels (never enlarged). Only the document is snapshotted
+    /// here; the returned job renders it.
+    pub fn agent_render(&mut self, _ctx: &egui::Context, t: &Value) -> Result<(String, AgentRender), String> {
+        let st = self.app.session.active().ok_or(NO_DOCUMENT)?;
+        let max_side = t.get("max_side").and_then(Value::as_u64).unwrap_or(1024).clamp(16, 4096) as u32;
+        let doc: Arc<Document> = st.doc.clone();
+        let (caption, layers) = match t.get("target").and_then(Value::as_str).unwrap_or("document") {
+            "document" | "page" | "image" => (format!("“{}”, {} × {} px", st.doc.name, st.doc.size.width, st.doc.size.height), None),
+            target @ ("layer" | "object" | "group" | "selection") => {
+                let ids = if target == "selection" { st.selected_layers() } else { vec![layer_id(st, t)?] };
+                let first =
+                    ids.first().and_then(|id| st.doc.layer(*id)).ok_or(if target == "selection" { "no layer is selected" } else { "no layer has that id" })?;
+                let caption = match &ids[..] {
+                    [id] => format!("{} layer “{}” (id {})", first.content.kind_name(), first.name, id.0),
+                    _ => format!("{} selected layers", ids.len()),
+                };
+                (caption, Some(ids))
+            }
+            other => return Err(format!("Photocraft can't render “{other}”: use document, layer (with `id`) or selection.")),
+        };
+        let job: AgentRender = Box::new(move || {
+            crate::crash_guard::guard("Rendering", || {
+                let img = match layers {
+                    None => photocraft_compose::thumbnail(&doc, max_side),
+                    Some(ids) => {
+                        let alone = content::layers_alone(&doc, &ids).ok_or("the layers are gone")?;
+                        photocraft_compose::thumbnail(&content::trimmed(alone), max_side)
+                    }
+                };
+                Ok(egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels))
+            })
+        });
+        Ok((caption, job))
+    }
+
     /// Before the app's frame: a layer drag that went out to the host and ended there (released
     /// outside the app's area, or while the app was hidden) does nothing in PhotoCraft.
     fn end_outgoing(&mut self, ctx: &egui::Context) {
@@ -259,6 +400,28 @@ impl Embedded {
             self.outgoing = None;
         }
     }
+}
+
+/// The layer `p.id` names, else the active one.
+fn layer_id(st: &photocraft_engine::DocState, p: &Value) -> Result<LayerId, String> {
+    match p.get("id").filter(|v| !v.is_null()) {
+        Some(v) => v.as_u64().map(LayerId).ok_or_else(|| "a layer `id` is a number (from app_inspect)".into()),
+        None => st.active_layer.ok_or_else(|| "no layer is active: give its `id`".into()),
+    }
+}
+
+/// Cut a layer tree below `depth` levels of groups, saying how many layers were left out.
+fn prune(layer: &mut Value, depth: u64) {
+    let Some(children) = layer.get_mut("children").and_then(Value::as_array_mut) else { return };
+    if depth == 0 {
+        let n = children.len();
+        layer["childCount"] = json!(n);
+        if let Some(o) = layer.as_object_mut() {
+            o.remove("children");
+        }
+        return;
+    }
+    children.iter_mut().for_each(|c| prune(c, depth - 1));
 }
 
 impl eframe::App for Embedded {

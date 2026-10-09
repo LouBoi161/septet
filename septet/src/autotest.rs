@@ -158,54 +158,12 @@ impl Autotest {
                 Step::Wait(1.0),
                 Step::Exit,
             ],
-            // Claude's app tools against Vectorcraft, called directly: commands, inspecting and rendering
-            // (also while the tab is hidden), a dialog that must not stay open, a blocked command, undo.
+            // Claude's app tools against one app (`SEPTET_AUTOTEST_APP`, default Vectorcraft), called directly:
+            // commands, inspecting and rendering (also while the tab is hidden), a blocked command, undo.
             Ok("assistant-apps") => {
-                use serde_json::json;
-                let vc = |what: serde_json::Value| {
-                    let mut v = json!({"app": "vectorcraft"});
-                    v.as_object_mut().expect("object").extend(what.as_object().cloned().unwrap_or_default());
-                    v
-                };
-                vec![
-                    Step::Wait(2.0),
-                    Step::Tool("app_execute", vc(json!({"command": "file.new", "params": {"width": 400, "height": 300}}))),
-                    Step::ToolWait(40.0),
-                    Step::Tool("app_commands", vc(json!({}))),
-                    Step::Tool("app_commands", vc(json!({"filter": "rectangle"}))),
-                    Step::Tool("app_execute", vc(json!({"command": "shape.ellipse", "params": {"x": 40, "y": 40, "width": 200, "height": 140}}))),
-                    Step::Tool("app_execute", vc(json!({"command": "paint.setFill", "params": {"color": "#e8a33d"}}))),
-                    Step::ToolWait(10.0),
-                    Step::Tool("app_execute", vc(json!({"command": "shape.rectangle", "params": {"x": 180, "y": 120, "width": 160, "height": 120}}))),
-                    Step::ToolWait(10.0),
-                    Step::Tool("app_execute", vc(json!({"command": "paint.setFill", "params": {"color": "#2f6fd6"}}))),
-                    Step::ToolWait(10.0),
-                    Step::Wait(1.0),
-                    Step::Shot("x01-drawn"),
-                    Step::Home,
-                    Step::Wait(1.5),
-                    Step::Tool("app_inspect", vc(json!({"what": "document", "depth": 2}))),
-                    Step::Tool("app_inspect", vc(json!({"what": "object", "id": "$id"}))),
-                    Step::Tool("app_inspect", vc(json!({"what": "nonsense"}))),
-                    Step::Tool("app_render", vc(json!({"target": "document"}))),
-                    Step::Tool("app_render", vc(json!({"target": "object", "id": "$id", "max_side": 400}))),
-                    Step::Tool("app_render", vc(json!({"target": "selection", "background": "transparent"}))),
-                    Step::ToolWait(20.0),
-                    Step::Report,
-                    Step::Shot("x02-hidden"),
-                    Step::Tool("app_execute", vc(json!({"command": "file.newDialog"}))),
-                    Step::Tool("app_execute", vc(json!({"command": "app.quit"}))),
-                    Step::Tool("app_undo", vc(json!({"steps": 2}))),
-                    Step::ToolWait(10.0),
-                    Step::Wait(1.5),
-                    Step::Report,
-                    Step::Tool("app_inspect", vc(json!({"what": "history"}))),
-                    Step::Tool("app_render", vc(json!({"target": "document", "max_side": 600}))),
-                    Step::ToolWait(10.0),
-                    Step::Shot("x03-undone"),
-                    Step::Wait(1.0),
-                    Step::Exit,
-                ]
+                let name = std::env::var("SEPTET_AUTOTEST_APP").unwrap_or_else(|_| "vectorcraft".into());
+                let kind = AppKind::ALL.into_iter().find(|k| k.name().eq_ignore_ascii_case(&name))?;
+                Self::app_tools(kind)
             }
             // Run 1 of 2: a few tabs and a torn-off window, then quit (the layout is saved).
             Ok("session-save") => vec![
@@ -256,6 +214,87 @@ impl Autotest {
             tool_answers: 0,
             last_id: None,
         })
+    }
+
+    /// The `assistant-apps` script for one app: make a document, change it with a few commands,
+    /// look at it (whole and one part) while the tab is hidden, undo.
+    fn app_tools(kind: AppKind) -> Vec<Step> {
+        use serde_json::json;
+        let app = kind.name().to_ascii_lowercase();
+        let call = |tool: &'static str, more: serde_json::Value| {
+            let mut v = json!({"app": app});
+            if let (Some(v), Some(more)) = (v.as_object_mut(), more.as_object()) {
+                v.extend(more.clone());
+            }
+            Step::Tool(tool, v)
+        };
+        let run = |command: &str, params: serde_json::Value| call("app_execute", json!({"command": command, "params": params}));
+        // (document, filter, changes, the part to look at, undo steps, steps of its own)
+        let (new, filter, changes, part, undo, extra): (Step, &str, Vec<Step>, &str, u64, Vec<Step>) = match kind {
+            AppKind::Vectorcraft => (
+                run("file.new", json!({"width": 400, "height": 300})),
+                "rectangle",
+                vec![
+                    run("shape.ellipse", json!({"x": 40, "y": 40, "width": 200, "height": 140})),
+                    run("paint.setFill", json!({"color": "#e8a33d"})),
+                    run("shape.rectangle", json!({"x": 180, "y": 120, "width": 160, "height": 120})),
+                    run("paint.setFill", json!({"color": "#2f6fd6"})),
+                ],
+                "object",
+                2,
+                vec![run("file.newDialog", json!({}))],
+            ),
+            AppKind::Photocraft => (
+                run("file.new", json!({"width": 400, "height": 300})),
+                "fill",
+                vec![
+                    run("select.rect", json!({"x": 30, "y": 30, "width": 200, "height": 140})),
+                    run("edit.fill", json!({"color": "#e8a33d"})),
+                    run("layer.new.layer", json!({"name": "Blue box"})),
+                    run("select.rect", json!({"x": 180, "y": 120, "width": 160, "height": 120})),
+                    run("edit.fill", json!({"color": "#2f6fd6"})),
+                    run("select.deselect", json!({})),
+                ],
+                "layer",
+                3,
+                vec![run("filter.nonsense", json!({}))],
+            ),
+            _ => (Step::Report, "", vec![], "object", 1, vec![]),
+        };
+        let mut steps = vec![Step::Wait(2.0), new, Step::ToolWait(40.0), call("app_commands", json!({})), call("app_commands", json!({"filter": filter}))];
+        for change in changes {
+            steps.extend([change, Step::ToolWait(10.0)]);
+        }
+        steps.extend([
+            Step::Wait(1.0),
+            Step::Shot("x01-changed"),
+            Step::Home,
+            Step::Wait(1.5),
+            call("app_inspect", json!({"what": "document", "depth": 2})),
+            call("app_inspect", json!({"what": part, "id": "$id"})),
+            call("app_inspect", json!({"what": "nonsense"})),
+            call("app_render", json!({"target": "document"})),
+            call("app_render", json!({"target": part, "id": "$id", "max_side": 400})),
+            call("app_render", json!({"target": "selection", "background": "transparent"})),
+            Step::ToolWait(30.0),
+            Step::Report,
+            Step::Shot("x02-hidden"),
+        ]);
+        steps.extend(extra);
+        steps.extend([
+            run("app.quit", json!({})),
+            call("app_undo", json!({"steps": undo})),
+            Step::ToolWait(20.0),
+            Step::Wait(1.5),
+            Step::Report,
+            call("app_inspect", json!({"what": "history"})),
+            call("app_render", json!({"target": "document", "max_side": 600})),
+            Step::ToolWait(20.0),
+            Step::Shot("x03-undone"),
+            Step::Wait(1.0),
+            Step::Exit,
+        ]);
+        steps
     }
 
     /// Every app once, a torn-off window, a closed tab, quit.
@@ -699,7 +738,11 @@ impl Autotest {
                         let mut parts = Vec::new();
                         for c in &r.content {
                             if let Some(text) = c["text"].as_str() {
-                                if let Some(id) = serde_json::from_str::<serde_json::Value>(text).ok().and_then(|v| v.get("id").cloned()) {
+                                // Ids of new things: Vectorcraft's objects, Photocraft's layers, Designcraft's items…
+                                let made = serde_json::from_str::<serde_json::Value>(text).ok();
+                                if let Some(id) = made.and_then(|v| {
+                                    ["id", "layer", "item", "clip"].iter().find_map(|k| v.get(*k).filter(|i| i.is_u64() || i.is_string()).cloned())
+                                }) {
                                     at.last_id = Some(id);
                                 }
                                 parts.push(text.chars().take(700).collect::<String>());

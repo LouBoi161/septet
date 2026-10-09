@@ -391,6 +391,11 @@ Speichern und Exportieren bleiben sonst Sache des Users.
    Werkzeuge direkt auf, ohne Claude, kein Login nötig): App starten per `file.new`, Formen, Abfragen und Renders bei
    verstecktem Tab, Dialog-Schutz, Sperrliste, Undo. Echter Chat mit Haiku: neues Dokument, Kreis und Quadrat, Farben,
    Prüf-Render, in 10 s ohne Fehlversuch.
+   **Photocraft** fertig: Registry aus `command_specs()` (817 Befehle, mit Grund für „nicht verfügbar“), nur
+   Engine-Befehle (öffnen nie einen Dialog), über `PhotocraftApp::control_now` (neu, auch `drain_control` nutzt es),
+   damit Hintergrund-Jobs ihre Antwort später schicken; Ansichten `document`/`layer`/`selection`/`history`/`documents`;
+   Renders: Komposit per `compose::thumbnail`, Ebenen allein und beschnitten über `content::layers_alone` + `trimmed`
+   (wie beim Rausziehen). Autotest: `SEPTET_AUTOTEST_APP=photocraft` (Szenario jetzt pro App).
    Beobachtet, offen: Ein per Befehl angelegtes Dokument war im Chat-Test nicht ganz eingepasst (Zoom zu groß, links
    abgeschnitten); vermutlich eine Embedding-Frage von Vectorcrafts `canvas::fit`, nicht der Werkzeuge.
 3. **Photocraft, Designcraft, Effectcraft, Filmcraft**, dann **Lightcraft**, zuletzt **Pdfcraft** (Sonderweg).

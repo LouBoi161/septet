@@ -129,7 +129,7 @@ macro_rules! hosted {
     };
 }
 
-hosted!(photocraft_embed::Embedded);
+hosted!(photocraft_embed::Embedded, agent);
 hosted!(vectorcraft_embed::Embedded, agent);
 hosted!(lightcraft_embed::Embedded);
 hosted!(designcraft_embed::Embedded);

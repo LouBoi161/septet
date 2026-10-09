@@ -903,22 +903,29 @@ impl PhotocraftApp {
     fn drain_control(&mut self, ctx: &egui::Context) {
         let Some(rx) = self.control_rx.take() else { return };
         while let Ok(req) = rx.try_recv() {
-            let reply = req.reply.clone();
-            match control::handle(self, ctx, &req) {
-                control::Outcome::Done(v) => {
-                    let _ = reply.send(v);
-                }
-                control::Outcome::AfterInput => self.input_waiters.push(reply),
-                control::Outcome::AfterJob(job) => self.jobs.waiters.push((job, reply)),
-                control::Outcome::Screenshot { token, path } => {
-                    // Wait out egui's fade animations (~83 ms) and a few rendered frames first.
-                    let settle = ctx.global_style().animation_time as f64 * 2000.0 + 60.0;
-                    self.queued_screenshots.push((token, gpu_canvas::now_ms() + settle, 0));
-                    self.pending_screenshots.push((token, path, reply));
-                }
-            }
+            self.control_now(ctx, req);
         }
         self.control_rx = Some(rx);
+    }
+
+    /// Handle one control request now, as the control channel does between frames, for a host
+    /// that drives the app in-process. The reply goes out at once, or on a later frame once the
+    /// input, background job or screenshot it waits for is done.
+    pub fn control_now(&mut self, ctx: &egui::Context, req: ControlRequest) {
+        let reply = req.reply.clone();
+        match control::handle(self, ctx, &req) {
+            control::Outcome::Done(v) => {
+                let _ = reply.send(v);
+            }
+            control::Outcome::AfterInput => self.input_waiters.push(reply),
+            control::Outcome::AfterJob(job) => self.jobs.waiters.push((job, reply)),
+            control::Outcome::Screenshot { token, path } => {
+                // Wait out egui's fade animations (~83 ms) and a few rendered frames first.
+                let settle = ctx.global_style().animation_time as f64 * 2000.0 + 60.0;
+                self.queued_screenshots.push((token, gpu_canvas::now_ms() + settle, 0));
+                self.pending_screenshots.push((token, path, reply));
+            }
+        }
     }
 
     fn issue_screenshots(&mut self, ctx: &egui::Context) {
