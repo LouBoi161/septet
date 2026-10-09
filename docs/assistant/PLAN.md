@@ -396,6 +396,13 @@ Speichern und Exportieren bleiben sonst Sache des Users.
    damit Hintergrund-Jobs ihre Antwort später schicken; Ansichten `document`/`layer`/`selection`/`history`/`documents`;
    Renders: Komposit per `compose::thumbnail`, Ebenen allein und beschnitten über `content::layers_alone` + `trimmed`
    (wie beim Rausziehen). Autotest: `SEPTET_AUTOTEST_APP=photocraft` (Szenario jetzt pro App).
+   **Designcraft** fertig: wie Vectorcraft über `app.run` (550 Befehle) mit Dialog-Schutz; zusätzlich wird ein Befehl,
+   der einen Dateiauswahl-Dialog öffnen würde (`UiRequest::Pick`, z. B. `file.place` ohne `path`), abgefangen
+   (`services.pick_open` vorübergehend ersetzt). Ansichten `document` (Seiten mit Top-Level-Items, `page` filtert,
+   `depth`), `page`, `object`, `story` (ganzer Text), `selection`, `history`, `documents`. Renders: Seite (mit Papier),
+   Objekt/Auswahl freigestellt (`objects_image`, auch für das Rausziehen), Ebene = Seite nur mit deren Items. Dokument
+   und Satz-Cache sind `Arc`s, der Job rendert auf dem Worker. Claude kann jetzt Designcraft-Dokumente selbst anlegen
+   (System-Prompt angepasst).
    Beobachtet, offen: Ein per Befehl angelegtes Dokument war im Chat-Test nicht ganz eingepasst (Zoom zu groß, links
    abgeschnitten); vermutlich eine Embedding-Frage von Vectorcrafts `canvas::fit`, nicht der Werkzeuge.
 3. **Photocraft, Designcraft, Effectcraft, Filmcraft**, dann **Lightcraft**, zuletzt **Pdfcraft** (Sonderweg).

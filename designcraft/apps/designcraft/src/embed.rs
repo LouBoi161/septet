@@ -2,9 +2,12 @@
 //! fonts and the UI zoom ([`designcraft_ui_egui::hosted`]) and calls `logic` / `ui` only while the
 //! tab is visible.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, channel};
 use std::time::SystemTime;
 
 use designcraft_engine::DocState;
@@ -21,6 +24,12 @@ const DROP_STEP: f64 = 18.0;
 const EXPORT_PPI: f64 = 300.0;
 /// …up to this many pixels on the longer side.
 const EXPORT_MAX_SIDE: f64 = 4096.0;
+
+/// A picture for the host's agent, made on a worker thread ([`Embedded::agent_render`]).
+pub type AgentRender = Box<dyn FnOnce() -> Result<egui::ColorImage, String> + Send>;
+
+/// What the agent hears when there is nothing to work on.
+const NO_DOCUMENT: &str = "No document is open in Designcraft: open a .designcraft or .idml file with septet_open, or make one with app_execute `file.new` (see its params).";
 
 pub struct Embedded {
     app: DesignApp,
@@ -279,6 +288,257 @@ impl Embedded {
     }
 }
 
+impl Embedded {
+    /// The commands the host's agent may run: the engine's and the UI's, as the command palette
+    /// lists them, with their parameters and whether they can run now.
+    pub fn agent_commands(&mut self, _ctx: &egui::Context) -> Vec<Value> {
+        let all = designcraft_ui_egui::control::all_commands(&self.app);
+        all.as_array().into_iter().flatten().map(agent_command).collect()
+    }
+
+    /// Run a command for the host's agent as its menu item does (undoable like it). A command
+    /// that opens a dialog or asks for a file instead (it needs parameters) fails, and the dialog
+    /// is closed again: the agent can't answer it and the user didn't ask for it. The reply is
+    /// always there at once.
+    pub fn agent_execute(&mut self, ctx: &egui::Context, command: &str, params: Value) -> Receiver<Value> {
+        let (tx, rx) = channel();
+        let before = self.app.ui.dialog.as_ref().map(|d| d.id.clone());
+        let params = if params.is_null() { json!({}) } else { params };
+        // No file picker for the agent: note that the command asked for one.
+        let picked: Rc<RefCell<Option<String>>> = Rc::default();
+        let asked = picked.clone();
+        let pick = self.app.services.pick_open.replace(Box::new(move |purpose: &str| {
+            *asked.borrow_mut() = Some(purpose.to_string());
+            None
+        }));
+        let open_async = self.app.services.open_async.take();
+        let app = &mut self.app;
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.run(command, params)))
+            .unwrap_or_else(|_| Err("internal error (please report this bug); the document is unchanged".into()));
+        self.app.services.pick_open = pick;
+        self.app.services.open_async = open_async;
+        let opened = self.app.ui.dialog.as_ref().map(|d| d.id.clone()).filter(|id| before.as_ref() != Some(id));
+        let reply = match (r, opened, picked.take()) {
+            (_, Some(dialog), _) => {
+                self.app.ui.dialog = None;
+                json!({ "ok": false, "error": format!("`{command}` opened the “{dialog}” dialog, which waits for the user, so it was closed again: run the command with the parameters it lists instead.") })
+            }
+            (_, None, Some(purpose)) => {
+                json!({ "ok": false, "error": format!("`{command}` asks the user for a file to {purpose}: pass its `path` instead.") })
+            }
+            (Ok(v), None, None) => json!({ "ok": true, "result": v }),
+            (Err(e), None, None) => json!({ "ok": false, "error": e }),
+        };
+        ctx.request_repaint();
+        // The receiver is ours until we return.
+        let _ = tx.send(reply);
+        rx
+    }
+
+    /// The document's state for the host's agent: `document` (pages, layers, stories and each
+    /// page's top-level items; `page` for one page, `depth` levels of groups), `page` (a page's
+    /// items in full), `object` (one item by `id`), `story` (a story's text by `id`), `selection`,
+    /// `history` and `documents` (all open ones).
+    pub fn agent_inspect(&mut self, _ctx: &egui::Context, what: &str, p: &Value) -> Result<Value, String> {
+        if what == "documents" {
+            return query(&mut self.app.session, "document.list");
+        }
+        if self.app.session.active().is_none() {
+            return Err(NO_DOCUMENT.into());
+        }
+        let depth = p.get("depth").and_then(Value::as_u64).unwrap_or(1);
+        match what {
+            "document" | "page" => {
+                let mut v = query(&mut self.app.session, "document.inspect")?;
+                let page = match p.get("page").and_then(Value::as_u64) {
+                    Some(n) => Some((n as usize).checked_sub(1).ok_or("pages count from 1")?),
+                    None if what == "page" => Some(canvas::current_page(&self.app).unwrap_or(0)),
+                    None => None,
+                };
+                let st = self.app.session.active().ok_or(NO_DOCUMENT)?;
+                let spread = match page {
+                    Some(abs) => Some(st.doc.page_loc(abs).ok_or_else(|| format!("the document has {} pages", st.doc.page_count()))?.0),
+                    None => None,
+                };
+                let depth = if what == "page" { p.get("depth").and_then(Value::as_u64).unwrap_or(u64::MAX) } else { depth };
+                if let Some(spreads) = v.get_mut("spreads").and_then(Value::as_array_mut) {
+                    if let Some(si) = spread {
+                        spreads.retain(|sp| sp["index"].as_u64() == Some(si as u64));
+                    }
+                    for sp in spreads {
+                        for item in sp.get_mut("items").and_then(Value::as_array_mut).into_iter().flatten() {
+                            prune(item, depth);
+                        }
+                    }
+                }
+                // Long documents list many stories: the first 50 are enough to find one.
+                if let Some(stories) = v.get_mut("stories").and_then(Value::as_array_mut)
+                    && stories.len() > 50
+                {
+                    let n = stories.len();
+                    stories.truncate(50);
+                    v["storyCount"] = json!(n);
+                }
+                Ok(v)
+            }
+            "object" | "item" | "group" | "frame" => {
+                let id = p.get("id").and_then(Value::as_u64).ok_or("give the item's `id` (from `document`, `page` or `selection`)")?;
+                let v = query(&mut self.app.session, "document.inspect")?;
+                let mut item = find_item(&v["spreads"], id).cloned().ok_or("no item on a page has that id")?;
+                prune(&mut item, p.get("depth").and_then(Value::as_u64).unwrap_or(u64::MAX));
+                Ok(item)
+            }
+            "selection" => {
+                let v = query(&mut self.app.session, "document.inspect")?;
+                let ids: Vec<u64> = v["selection"]["items"].as_array().into_iter().flatten().filter_map(Value::as_u64).collect();
+                let items: Vec<Value> = ids.iter().filter_map(|id| find_item(&v["spreads"], *id).cloned()).collect();
+                Ok(json!({ "items": items, "content": v["selection"]["content"] }))
+            }
+            "story" => {
+                let id = p.get("id").and_then(Value::as_u64).ok_or("give the story's `id` (from `document`)")?;
+                let st = self.app.session.active().ok_or(NO_DOCUMENT)?;
+                let story = st.doc.stories.values().find(|s| u64::from(s.id.0) == id).ok_or("no story has that id")?;
+                Ok(
+                    json!({ "id": id, "frames": story.frames.iter().map(|f| f.0).collect::<Vec<_>>(), "paragraphs": story.paras.len(), "text": story.text }),
+                )
+            }
+            "history" => query(&mut self.app.session, "document.history"),
+            _ => Err(format!("Designcraft has no view “{what}”: use document, page, object, story, selection, history or documents.")),
+        }
+    }
+
+    /// A picture for the host's agent: `page` (alias `document`: the page `page`, 1-based, else
+    /// the one in view, on its paper), `object` (one item by `id`, alone and cropped) or
+    /// `selection`, or `layer` (that page with only the layer `id`'s items, transparent), fitted
+    /// into `max_side` pixels. The document and the text layout cache are shared, not copied; the
+    /// returned job renders them.
+    pub fn agent_render(&mut self, _ctx: &egui::Context, t: &Value) -> Result<(String, AgentRender), String> {
+        let st = self.app.session.active().ok_or(NO_DOCUMENT)?;
+        let doc = st.doc.clone();
+        let cache = self.app.session.cache.clone();
+        let max_side = t.get("max_side").and_then(Value::as_u64).unwrap_or(1024).clamp(16, 4096) as f64;
+        let opts = render_options(&self.app);
+        let page = match t.get("page").and_then(Value::as_u64) {
+            Some(n) => (n as usize).checked_sub(1).ok_or("pages count from 1")?,
+            None => canvas::current_page(&self.app).unwrap_or(0),
+        };
+        let fit = |w: f64, h: f64| max_side / w.max(h).max(1e-6);
+        let page_size = |abs: usize| doc.page_loc(abs).and_then(|(si, pi)| doc.spreads.get(si)?.pages.get(pi)).map(|p| (p.width, p.height));
+        let job: AgentRender;
+        let caption = match t.get("target").and_then(Value::as_str).unwrap_or("page") {
+            "page" | "document" | "spread" => {
+                let (w, h) = page_size(page).ok_or_else(|| format!("the document has {} pages", doc.page_count()))?;
+                let caption = format!("Page {} of {}, {w:.0} × {h:.0} pt", self.app.session.page_label(page), doc.page_count());
+                let scale = fit(w, h);
+                job = Box::new(move || page_job(&doc, &cache, page, scale, &opts));
+                caption
+            }
+            "layer" => {
+                let id = t.get("id").and_then(Value::as_u64).ok_or("give the layer's `id` (from app_inspect `document`)")?;
+                let layer = doc.layers.iter().find(|l| u64::from(l.id.0) == id).ok_or("no layer has that id")?;
+                let (w, h) = page_size(page).ok_or_else(|| format!("the document has {} pages", doc.page_count()))?;
+                let (si, _) = doc.page_loc(page).ok_or("no such page")?;
+                let others = doc.spreads.get(si).into_iter().flat_map(|sp| sp.items.iter()).chain(doc.parents.iter().flat_map(|p| p.items.iter()));
+                let hidden = others.filter(|it| it.layer != layer.id).map(|it| it.id).collect();
+                let caption = format!("Layer “{}” (id {id}) on page {}, {w:.0} × {h:.0} pt", layer.name, self.app.session.page_label(page));
+                let opts = RenderOptions { paper: false, hidden, ..opts };
+                let scale = fit(w, h);
+                job = Box::new(move || page_job(&doc, &cache, page, scale, &opts));
+                caption
+            }
+            target @ ("object" | "item" | "group" | "frame" | "selection") => {
+                let ids = if target == "selection" {
+                    st.selection.items.clone()
+                } else {
+                    vec![ItemId(t.get("id").and_then(Value::as_u64).ok_or("give the item's `id` (from app_inspect)")?)]
+                };
+                if ids.is_empty() {
+                    return Err("nothing is selected".into());
+                }
+                let caption = match &ids[..] {
+                    [id] => format!("{} (id {})", objects_label(&doc, &ids), id.0),
+                    _ => objects_label(&doc, &ids),
+                };
+                job = Box::new(move || {
+                    let img = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| objects_image(&doc, &cache, &ids, max_side, &opts)))
+                        .map_err(|_| "internal error while rendering".to_string())?
+                        .ok_or("the objects draw nothing (hidden, empty or on a parent page)")?;
+                    Ok(color_image(&img))
+                });
+                caption
+            }
+            other => {
+                return Err(format!(
+                    "Designcraft can't render “{other}”: use page (with `page`), object (with `id`), selection or layer (with `id`)."
+                ));
+            }
+        };
+        Ok((caption, job))
+    }
+}
+
+/// A registry entry from `control::all_commands` in the shape the host's agent reads.
+fn agent_command(c: &Value) -> Value {
+    let text = |k: &str| c.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty() && *s != "{}");
+    let mut out = json!({ "id": c["id"], "label": c["label"], "enabled": c["enabled"].as_bool().unwrap_or(true) });
+    let menu: Vec<&str> = c["menu"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if !menu.is_empty() {
+        out["menu"] = json!(menu.join(" › "));
+    }
+    for key in ["params", "shortcut", "disabled_reason"] {
+        if let Some(s) = text(key) {
+            out[key] = json!(s);
+        }
+    }
+    out
+}
+
+/// Cut an item tree below `depth` levels of groups, saying how many items were left out.
+fn prune(item: &mut Value, depth: u64) {
+    let Some(children) = item.get_mut("children").and_then(Value::as_array_mut) else { return };
+    if depth == 0 {
+        let n = children.len();
+        item["childCount"] = json!(n);
+        if let Some(o) = item.as_object_mut() {
+            o.remove("children");
+        }
+        return;
+    }
+    children.iter_mut().for_each(|c| prune(c, depth - 1));
+}
+
+/// The item `id` in `document.inspect`'s spreads (also inside groups).
+fn find_item(spreads: &Value, id: u64) -> Option<&Value> {
+    fn find(items: &Value, id: u64) -> Option<&Value> {
+        items.as_array()?.iter().find_map(|it| if it["id"].as_u64() == Some(id) { Some(it) } else { find(&it["children"], id) })
+    }
+    spreads.as_array()?.iter().find_map(|sp| find(&sp["items"], id))
+}
+
+/// A query command's answer (no changes, no UI).
+fn query(session: &mut designcraft_engine::Session, id: &str) -> Result<Value, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| session.execute(id, &json!({})).map_err(|e| e.to_string())))
+        .unwrap_or_else(|_| Err("internal error (please report this bug)".into()))
+}
+
+/// Page `abs` at `scale`, for a render job.
+fn page_job(
+    doc: &Document,
+    cache: &designcraft_engine::compose::Cache,
+    abs: usize,
+    scale: f64,
+    opts: &RenderOptions,
+) -> Result<egui::ColorImage, String> {
+    let img = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Renderer::new().render_page(doc, cache, abs, scale, false, opts)))
+        .map_err(|_| "internal error while rendering".to_string())?
+        .ok_or("the page can't be rendered")?;
+    Ok(color_image(&img))
+}
+
+fn color_image(img: &Rendered) -> egui::ColorImage {
+    egui::ColorImage::from_rgba_premultiplied([img.width as usize, img.height as usize], &img.pixels)
+}
+
 /// The content dragged out of the app this frame: a Pages panel page, or objects the Selection
 /// tool is moving (or duplicating) with the pointer off the canvas.
 fn outgoing(app: &DesignApp, ctx: &egui::Context) -> Option<Outgoing> {
@@ -377,6 +637,17 @@ fn render_page(app: &DesignApp, abs: usize) -> Option<Rendered> {
 /// The objects (their top-level objects, on the first one's spread) alone on a transparent
 /// background, cropped to their visible bounds.
 fn render_objects(app: &DesignApp, doc: &Document, ids: &[ItemId]) -> Option<Rendered> {
+    objects_image(doc, &app.session.cache, ids, EXPORT_MAX_SIDE, &render_options(app))
+}
+
+/// [`render_objects`] at most `max_side` pixels on the longer side (and [`EXPORT_PPI`]).
+fn objects_image(
+    doc: &Document,
+    cache: &designcraft_engine::compose::Cache,
+    ids: &[ItemId],
+    max_side: f64,
+    opts: &RenderOptions,
+) -> Option<Rendered> {
     let mut spread = None;
     let mut tops: Vec<ItemId> = Vec::new();
     let mut bounds: Option<Rect> = None;
@@ -396,11 +667,11 @@ fn render_objects(app: &DesignApp, doc: &Document, ids: &[ItemId]) -> Option<Ren
     let (spread, r) = (spread?, bounds?.inflate(2.0, 2.0));
     let others = doc.spread(spread)?.items.iter().chain(doc.parents.iter().flat_map(|p| p.items.iter()));
     let hidden: Vec<ItemId> = others.map(|it| it.id).filter(|id| !tops.contains(id)).collect();
-    let scale = export_scale(r.width(), r.height());
+    let scale = (EXPORT_PPI / 72.0).min(max_side / r.width().max(r.height()).max(1.0));
     let (w, h) = ((r.width() * scale).ceil().max(1.0) as u32, (r.height() * scale).ceil().max(1.0) as u32);
     let view = Affine::scale(scale) * Affine::translate(-r.origin().to_vec2());
-    let opts = RenderOptions { paper: false, hidden, ..render_options(app) };
-    Some(Renderer::new().render(doc, &app.session.cache, &[Placed { spread, xf: Affine::IDENTITY }], w, h, view, &opts))
+    let opts = RenderOptions { paper: false, hidden, ..opts.clone() };
+    Some(Renderer::new().render(doc, cache, &[Placed { spread, xf: Affine::IDENTITY }], w, h, view, &opts))
 }
 
 fn encode(img: &Rendered, ext: &str) -> Vec<u8> {

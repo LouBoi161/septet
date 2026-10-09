@@ -95,15 +95,15 @@ pub fn system_prompt(workspace: &Path) -> String {
          septet_state to see what is open. Apps by file type: {types}.\n\n\
          Prefer generating content as code (SVG, HTML, JSON, scripts) and opening it in the right app. Keep replies short; the \
          user watches the apps change.\n\n\
-         To change what is open in an app, drive it with the app_* tools (Vectorcraft and Photocraft so far): find commands with app_commands \
+         To change what is open in an app, drive it with the app_* tools (Vectorcraft, Photocraft and Designcraft so far): find commands with app_commands \
          (always with a filter), run them with app_execute, read ids and properties with app_inspect, look at the result with \
          app_render (the whole artboard or page, or one object or layer alone) and take mistakes back with app_undo. Check your \
          work with app_render before you say it is done.\n\n\
          Septet's skills (septet:*) explain how to do creative work with these apps: load septet:septet-apps with the Skill tool \
          at the start of a creative task, then the skill for the job (svg-graphics, logo-and-icons, typography, color, \
          print-and-pdf, image-editing, video-editing, motion-lottie). Skills named my:* are the user's own; use them when they fit.\n\n\
-         Know the limits: Photocraft opens no SVG or PDF; Designcraft opens only .designcraft and .idml documents (you can place \
-         files into one the user has open, not create one); in Filmcraft, opening or placing media only adds it to the bin, so \
+         Know the limits: Photocraft opens no SVG or PDF; Designcraft opens only .designcraft and .idml documents (make a new \
+         layout with app_execute `file.new`); in Filmcraft, opening or placing media only adds it to the bin, so \
          build edits as OTIO/FCPXML/EDL; Effectcraft takes Lottie only through its own menu (File > Import > Lottie…), not \
          through septet_open; Vectorcraft drops most SVG filters and uses installed fonts only, so outline text you want exact.",
         ws = workspace.display(),

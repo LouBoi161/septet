@@ -259,6 +259,19 @@ impl Autotest {
                 3,
                 vec![run("filter.nonsense", json!({}))],
             ),
+            AppKind::Designcraft => (
+                run("file.new", json!({"width": 420, "height": 300, "pages": 1})),
+                "frame",
+                vec![
+                    run("swatch.create", json!({"name": "Orange", "color": "#e8a33d"})),
+                    run("frame.create", json!({"rect": [40, 40, 260, 180], "shape": "ellipse", "content": "unassigned"})),
+                    run("object.fill", json!({"swatch": "Orange"})),
+                    run("frame.create", json!({"rect": [180, 120, 390, 260], "content": "text", "text": "Hello from Septet"})),
+                ],
+                "object",
+                2,
+                vec![run("file.place", json!({}))],
+            ),
             _ => (Step::Report, "", vec![], "object", 1, vec![]),
         };
         let mut steps = vec![Step::Wait(2.0), new, Step::ToolWait(40.0), call("app_commands", json!({})), call("app_commands", json!({"filter": filter}))];
