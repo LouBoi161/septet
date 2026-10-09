@@ -105,6 +105,28 @@ def main() -> None:
     fonts = os.environ.get("CRAFT_FONTS_DIR")
     if fonts:
         write_fonts(out, fonts)
+    write_assistant_skills(out)
+
+
+def write_assistant_skills(out) -> None:
+    """Anthropic's skills in septet/assistant-plugin (Apache-2.0) and the OFL fonts that come with canvas-design."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    skills = os.path.join(here, "..", "septet", "assistant-plugin", "skills")
+    anthropic = [n for n in sorted(os.listdir(skills)) if os.path.isfile(os.path.join(skills, n, "LICENSE.txt"))]
+    if not anthropic:
+        return
+    out.write("# Claude skills\n\n")
+    out.write("Septet gives Claude Code these skills from <https://github.com/anthropics/skills>, unmodified, under the Apache License 2.0: ")
+    out.write(", ".join(anthropic) + ".\n\n")
+    with open(os.path.join(skills, anthropic[0], "LICENSE.txt"), encoding="utf-8") as f:
+        out.write("```text\n" + f.read().strip() + "\n```\n\n")
+    fonts = os.path.join(skills, "canvas-design", "canvas-fonts")
+    if os.path.isdir(fonts):
+        out.write("## Fonts of the canvas-design skill (SIL Open Font License 1.1)\n\n")
+        for name in sorted(os.listdir(fonts)):
+            if name.endswith("-OFL.txt"):
+                with open(os.path.join(fonts, name), encoding="utf-8") as f:
+                    out.write(f"### {name[: -len('-OFL.txt')]}\n\n```text\n{f.read().strip()}\n```\n\n")
 
 
 def write_fonts(out, root: str) -> None:

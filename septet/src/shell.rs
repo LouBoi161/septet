@@ -130,6 +130,7 @@ pub struct Shell {
     /// The About dialog, in this window.
     pub about: Option<ViewportId>,
     pub home: HomeState,
+    pub assistant: crate::assistant::Assistant,
     pub recent: Recent,
     pub bridge: Bridge,
     /// Files an app wanted to open in another program (e.g. Lightcraft's "Edit in"), shared with the
@@ -182,6 +183,7 @@ impl Shell {
             confirm: None,
             about: None,
             home: HomeState::default(),
+            assistant: crate::assistant::Assistant::new(ctx),
             recent: Recent::load(),
             bridge: Bridge::new(ctx),
             external: Rc::new(RefCell::new(Vec::new())),
@@ -385,6 +387,14 @@ impl Shell {
             self.opens.push(OpenRequest { paths: external, app: None, window: None, place: None });
         }
         self.bridge.logic(ctx);
+        self.assistant.logic(ctx);
+        crate::assistant::tools::drain(self, ctx);
+        // Claude is waiting for an answer: make sure the panel that asks is on screen.
+        if self.assistant.panel.is_none_or(|v| self.window_index(v).is_none_or(|wi| self.windows[wi].hidden))
+            && self.assistant.conversation.as_ref().is_some_and(|c| !c.approvals.is_empty())
+        {
+            self.assistant.panel = Some(self.focused_window(ctx));
+        }
         crate::autotest::Autotest::tick(self, ctx);
     }
 
@@ -432,7 +442,29 @@ impl Shell {
         let full = ui.max_rect();
         crate::tabstrip::strip(self, wi, &ctx, full);
         self.strip_drops(&ctx, wi);
-        let content = Rect::from_min_max(egui::pos2(full.left(), self.windows[wi].strip.bottom()), full.max);
+        let mut content = Rect::from_min_max(egui::pos2(full.left(), self.windows[wi].strip.bottom()), full.max);
+        // The Claude panel takes the right side; the app keeps at least 420 points.
+        let panel = (self.assistant.panel == Some(viewport)).then(|| {
+            let w = self.assistant.panel_width.clamp(crate::assistant::panel::MIN_WIDTH, (content.width() - 420.0).max(crate::assistant::panel::MIN_WIDTH));
+            let r = Rect::from_min_max(egui::pos2(content.right() - w, content.top()), content.max);
+            content.max.x = r.left();
+            r
+        });
+        // While the chat field has the keyboard, the app must not see the keys.
+        let held: Vec<egui::Event> = if crate::assistant::panel::has_keyboard(&self.assistant, &ctx, viewport) {
+            ctx.input_mut(|i| {
+                let (keys, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut i.events).into_iter().partition(|e| {
+                    matches!(
+                        e,
+                        egui::Event::Key { .. } | egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Ime(_)
+                    )
+                });
+                i.events = rest;
+                keys
+            })
+        } else {
+            Vec::new()
+        };
         let tab = self.windows[wi].active_tab();
         match tab.map(|t| t.kind) {
             Some(TabKind::App(kind)) if self.apps.contains_key(&kind) => {
@@ -469,6 +501,14 @@ impl Shell {
                 crate::home::show(self, wi, &mut child);
             }
         }
+        if !held.is_empty() {
+            ctx.input_mut(|i| i.events.extend(held));
+        }
+        if let Some(r) = panel {
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::top_down(egui::Align::Min)));
+            child.set_clip_rect(r);
+            crate::assistant::panel::show(&mut self.assistant, &mut child, r, viewport);
+        }
         // Home and empty windows take OS file drops; apps take their own.
         if !matches!(tab.map(|t| t.kind), Some(TabKind::App(_))) {
             let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
@@ -490,6 +530,9 @@ impl Shell {
             if !open {
                 self.about = None;
             }
+        }
+        if self.assistant.dialog == Some(viewport) {
+            crate::assistant::settings::dialog(&mut self.assistant, &ctx);
         }
         self.bridge.window_ui(&ctx, viewport);
     }
@@ -546,6 +589,9 @@ impl Shell {
             let i = if next { (active + 1) % n } else { (active + n - 1) % n };
             let tab = self.windows[wi].tabs[i].id;
             self.actions.push(Action::Activate { tab });
+        }
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL | Modifiers::SHIFT, Key::K))) {
+            self.assistant.toggle_panel(ctx, viewport);
         }
         if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL | Modifiers::SHIFT, Key::T))) {
             self.actions.push(Action::NewTab { window: viewport, kind: TabKind::Home });
@@ -1066,6 +1112,7 @@ impl Shell {
     }
 
     pub fn exit(&mut self) {
+        self.assistant.exit();
         for slot in self.apps.values() {
             if let Ok(mut s) = slot.try_borrow_mut() {
                 s.app.app().on_exit();

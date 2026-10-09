@@ -112,8 +112,20 @@ fn sidebar_ui(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellCol
             shell.actions.push(Action::NewTab { window: viewport, kind: TabKind::App(kind) });
         }
     }
-    // About and Open file, pinned to the bottom.
+    // Claude, About and Open file, pinned to the bottom.
     let bottom = ui.max_rect().bottom();
+    let claude = egui::Rect::from_min_max(pos2(ui.max_rect().left(), bottom - 96.0), pos2(ui.max_rect().right(), bottom - 74.0));
+    let resp = ui.interact(claude, Id::new(("septet-home-claude", viewport)), Sense::click());
+    ui.painter().text(
+        claude.left_center() + vec2(4.0, 0.0),
+        Align2::LEFT_CENTER,
+        "Claude",
+        theme::medium(12.5),
+        if resp.hovered() { c.text } else { c.text_dim },
+    );
+    if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
+        shell.assistant.toggle_panel(ui.ctx(), viewport);
+    }
     let about = egui::Rect::from_min_max(pos2(ui.max_rect().left(), bottom - 70.0), pos2(ui.max_rect().right(), bottom - 48.0));
     let resp = ui.interact(about, Id::new(("septet-home-about", viewport)), Sense::click());
     ui.painter().text(

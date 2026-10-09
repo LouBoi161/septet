@@ -158,8 +158,12 @@ fn strip_ui(shell: &mut Shell, wi: usize, ui: &mut Ui, strip: Rect) {
     painter.line_segment([c - vec2(0.0, 6.0), c + vec2(0.0, 6.0)], s);
     egui::Popup::menu(&plus_resp).show(|ui| new_tab_menu(shell, viewport, ui));
 
+    // Claude, left of the window buttons.
+    let claude = Rect::from_min_size(pos2(strip.right() - captions - 42.0, strip.top() + TAB_TOP + 2.0), vec2(34.0, TAB_H - 4.0));
+    claude_button(shell, viewport, ui, claude, &colors);
+
     // The rest of the strip is the title bar: drag to move, double-click to maximize.
-    let bar = Rect::from_min_max(pos2(plus.right() + 4.0, strip.top()), pos2(strip.right() - captions, strip.bottom()));
+    let bar = Rect::from_min_max(pos2(plus.right() + 4.0, strip.top()), pos2(claude.left() - 4.0, strip.bottom()));
     if bar.width() > 0.0 {
         let resp = ui.interact(bar, Id::new(("septet-titlebar", viewport)), Sense::click_and_drag());
         if resp.drag_started_by(egui::PointerButton::Primary) {
@@ -301,6 +305,36 @@ fn logo_button(shell: &mut Shell, wi: usize, ui: &mut Ui, rect: Rect, colors: &S
             Some(tab) => shell.actions.push(Action::Activate { tab }),
             None => shell.actions.push(Action::NewTab { window: viewport, kind: TabKind::Home }),
         }
+    }
+}
+
+/// Shows and hides the Claude panel (a speech bubble; Ctrl+Shift+K).
+fn claude_button(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, rect: Rect, colors: &ShellColors) {
+    let resp = ui.interact(rect, Id::new(("septet-claude-button", viewport)), Sense::click()).on_hover_text("Claude (Ctrl+Shift+K)");
+    let open = shell.assistant.panel == Some(viewport);
+    let painter = ui.painter();
+    if open || resp.hovered() {
+        painter.rect_filled(rect, 6.0, colors.tab_hover);
+    }
+    let fg = if open {
+        colors.accent
+    } else if resp.hovered() {
+        colors.text
+    } else {
+        colors.text_dim
+    };
+    let c = rect.center();
+    let bubble = Rect::from_center_size(c - vec2(0.0, 1.5), vec2(16.0, 11.0));
+    painter.rect_stroke(bubble, 3.5, Stroke::new(1.5, fg), egui::StrokeKind::Middle);
+    let tail = [pos2(bubble.left() + 4.0, bubble.bottom()), pos2(bubble.left() + 3.0, bubble.bottom() + 4.0), pos2(bubble.left() + 8.0, bubble.bottom())];
+    painter.line_segment([tail[0], tail[1]], Stroke::new(1.5, fg));
+    painter.line_segment([tail[1], tail[2]], Stroke::new(1.5, fg));
+    for dx in [-4.0, 0.0, 4.0] {
+        painter.circle_filled(bubble.center() + vec2(dx, 0.0), 1.1, fg);
+    }
+    if resp.clicked() {
+        let ctx = ui.ctx().clone();
+        shell.assistant.toggle_panel(&ctx, viewport);
     }
 }
 

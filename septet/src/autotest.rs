@@ -36,6 +36,22 @@ enum Step {
     PointerUp(AppKind),
     /// Plain key presses (no modifiers).
     Press(AppKind, Vec<Key>),
+    /// Open the Claude settings dialog in the first window.
+    ClaudeSettings,
+    /// Press "Test connection" there.
+    ClaudeTest,
+    /// Log what the dialog shows: Claude Code found, signed in, test outcome.
+    ClaudeReport,
+    /// Start a conversation (model from `SEPTET_AUTOTEST_MODEL`) and send this message.
+    ClaudeAsk(&'static str),
+    /// Wait until Claude's turn ends (at most this many seconds), declining any approval it asks for.
+    ClaudeWait(f64),
+    /// Log the conversation so far.
+    ClaudeTranscript,
+    /// Show the Claude panel in the first window and put the keyboard in its chat field.
+    ClaudePanel,
+    /// Type into the focused widget of the first window (Enter: `\n`).
+    TypeText(&'static str),
     Exit,
 }
 
@@ -61,6 +77,9 @@ pub struct Autotest {
     input: VecDeque<(ViewportId, Vec<Event>)>,
     /// Where the synthetic pointer is.
     pointer: Pos2,
+    /// When the last message went to Claude.
+    claude_since: f64,
+    approval_shot: bool,
 }
 
 impl Autotest {
@@ -72,6 +91,62 @@ impl Autotest {
         let mut steps = match std::env::var("SEPTET_AUTOTEST_SCENARIO").as_deref() {
             Ok("interop") => Self::interop(file, pdf),
             Ok("content") => Self::content(file, pdf),
+            // The Claude settings dialog against the Claude Code installed here (needs it signed in).
+            Ok("assistant") => vec![
+                Step::Wait(2.0),
+                Step::ClaudeSettings,
+                Step::Wait(5.0),
+                Step::ClaudeReport,
+                Step::Shot("a01-settings"),
+                Step::ClaudeTest,
+                Step::Wait(25.0),
+                Step::ClaudeReport,
+                Step::Shot("a02-tested"),
+                Step::Wait(1.0),
+                Step::Exit,
+            ],
+            // The Claude panel beside Vectorcraft: type a request (keys must not reach the app), let Claude work.
+            Ok("assistant-panel") => vec![
+                Step::Wait(2.0),
+                Step::Open(AppKind::Vectorcraft),
+                Step::Wait(5.0),
+                Step::ClaudePanel,
+                Step::Wait(3.0),
+                Step::Shot("p01-panel"),
+                Step::TypeText(Box::leak(
+                    std::env::var("SEPTET_AUTOTEST_PROMPT")
+                        .unwrap_or_else(|_| "Make a 400x400 SVG of a blue star on a yellow background, save it as star.svg and open it in Vectorcraft.".into())
+                        .into_boxed_str(),
+                )),
+                Step::Wait(1.0),
+                Step::Report,
+                Step::Shot("p02-typed"),
+                Step::TypeText("\n"),
+                Step::Wait(3.0),
+                Step::Shot("p03-working"),
+                Step::ClaudeWait(240.0),
+                Step::Wait(3.0),
+                Step::ClaudeTranscript,
+                Step::Report,
+                Step::Shot("p04-done"),
+                Step::Wait(1.0),
+                Step::Exit,
+            ],
+            // A conversation with Septet's tools: Claude writes an SVG and opens it in Vectorcraft.
+            Ok("assistant-tools") => vec![
+                Step::Wait(2.0),
+                Step::ClaudeAsk(
+                    "Write a simple logo as logo.svg in the workspace: a red circle with a white letter S in the middle, 512x512. \
+                     Then open it in Vectorcraft and check with septet_state that it is open. Answer in one sentence.",
+                ),
+                Step::ClaudeWait(240.0),
+                Step::ClaudeTranscript,
+                Step::Report,
+                Step::Wait(3.0),
+                Step::Shot("t01-vectorcraft"),
+                Step::Wait(1.0),
+                Step::Exit,
+            ],
             // Run 1 of 2: a few tabs and a torn-off window, then quit (the layout is saved).
             Ok("session-save") => vec![
                 Step::Wait(1.0),
@@ -107,7 +182,17 @@ impl Autotest {
             _ => Self::tour(file),
         };
         steps.reverse();
-        Some(Autotest { dir, steps, next_at: 0.0, started: Instant::now(), log: Vec::new(), input: VecDeque::new(), pointer: Pos2::ZERO })
+        Some(Autotest {
+            dir,
+            steps,
+            next_at: 0.0,
+            started: Instant::now(),
+            log: Vec::new(),
+            input: VecDeque::new(),
+            pointer: Pos2::ZERO,
+            claude_since: 0.0,
+            approval_shot: false,
+        })
     }
 
     /// Every app once, a torn-off window, a closed tab, quit.
@@ -407,6 +492,123 @@ impl Autotest {
                             vec![Event::PointerButton { pos: at.pointer, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }],
                         ));
                     }
+                }
+                Step::ClaudeSettings => {
+                    at.note("open Claude settings".into());
+                    shell.assistant.dialog = Some(shell.windows[0].viewport);
+                    shell.assistant.recheck(ctx);
+                }
+                Step::ClaudePanel => {
+                    let v = shell.windows[0].viewport;
+                    if let Ok(m) = std::env::var("SEPTET_AUTOTEST_MODEL") {
+                        shell.assistant.settings.model = Some(m);
+                    }
+                    shell.assistant.settings.enabled = true;
+                    shell.assistant.toggle_panel(ctx, v);
+                    at.note("Claude panel shown".into());
+                }
+                Step::TypeText(text) => {
+                    let v = shell.windows[0].viewport;
+                    let events = text
+                        .split('\n')
+                        .enumerate()
+                        .flat_map(|(i, part)| {
+                            let enter = (i > 0).then(|| {
+                                [true, false].map(|pressed| Event::Key {
+                                    key: Key::Enter,
+                                    physical_key: None,
+                                    pressed,
+                                    repeat: false,
+                                    modifiers: Modifiers::NONE,
+                                })
+                            });
+                            enter.into_iter().flatten().chain((!part.is_empty()).then(|| Event::Text(part.to_owned())))
+                        })
+                        .collect();
+                    at.input.push_back((v, events));
+                    at.claude_since = now;
+                }
+                Step::ClaudeTest => {
+                    at.note("test Claude connection".into());
+                    shell.assistant.start_test(ctx);
+                }
+                Step::ClaudeReport => {
+                    let a = &shell.assistant;
+                    let probe = match &a.probe {
+                        crate::assistant::ProbeState::Checking(_) => "checking".to_owned(),
+                        crate::assistant::ProbeState::Done(p) => format!("{p:?}"),
+                    };
+                    let test = a.test.as_ref().map(|t| format!("{:?} reply={:?} took={:.1}s", t.outcome, t.reply, t.took));
+                    at.note(format!("claude: {probe}; test: {test:?}; error: {:?}", a.login_error));
+                }
+                Step::ClaudeAsk(text) => {
+                    at.note(format!("ask Claude: {text}"));
+                    if let Ok(m) = std::env::var("SEPTET_AUTOTEST_MODEL") {
+                        shell.assistant.settings.model = Some(m);
+                    }
+                    shell.assistant.recheck(ctx);
+                    // The probe runs on a thread; wait for it here (tests only).
+                    let deadline = Instant::now() + std::time::Duration::from_secs(20);
+                    while matches!(shell.assistant.probe, crate::assistant::ProbeState::Checking(_)) && Instant::now() < deadline {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        shell.assistant.logic(ctx);
+                    }
+                    match shell.assistant.start_conversation(ctx, None) {
+                        Ok(()) => shell.assistant.conversation.as_mut().expect("started").send(text),
+                        Err(e) => at.note(format!("could not start: {e}")),
+                    }
+                    at.claude_since = now;
+                }
+                Step::ClaudeWait(limit) => {
+                    let Some(conv) = shell.assistant.conversation.as_mut() else { continue };
+                    if !conv.approvals.is_empty() {
+                        // First time: let the card show for a screenshot, then answer.
+                        if !at.approval_shot {
+                            at.approval_shot = true;
+                            at.steps.extend([Step::ClaudeWait(limit), Step::Shot("approval"), Step::Wait(1.5)]);
+                            continue;
+                        }
+                        let a = &conv.approvals[0];
+                        let allow = std::env::var("SEPTET_AUTOTEST_APPROVE").is_ok_and(|v| v == "allow");
+                        at.note(format!("{} approval for {} {}", if allow { "allowing" } else { "declining" }, a.tool, a.input));
+                        conv.answer(0, if allow { crate::assistant::Choice::Once } else { crate::assistant::Choice::Deny });
+                    }
+                    if conv.busy && now - at.claude_since < limit {
+                        at.steps.push(Step::ClaudeWait(limit));
+                        at.next_at = now + 0.25;
+                        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+                        break;
+                    }
+                    at.note(format!("Claude done after {:.1}s (busy={})", now - at.claude_since, conv.busy));
+                }
+                Step::ClaudeTranscript => {
+                    let lines: Vec<String> = shell
+                        .assistant
+                        .conversation
+                        .as_ref()
+                        .map(|c| {
+                            c.entries
+                                .iter()
+                                .map(|e| match e {
+                                    crate::assistant::conversation::Entry::Tool { name, input, result, .. } => {
+                                        let r = result.as_ref().map(|(parts, err)| {
+                                            format!(
+                                                "err={err} {:?}",
+                                                parts.iter().map(|p| format!("{p:?}").chars().take(200).collect::<String>()).collect::<Vec<_>>()
+                                            )
+                                        });
+                                        format!("tool {name} {} -> {r:?}", input.to_string().chars().take(300).collect::<String>())
+                                    }
+                                    other => format!("{other:?}"),
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    for l in lines {
+                        at.note(format!("transcript: {l}"));
+                    }
+                    let limit = shell.assistant.conversation.as_ref().and_then(|c| c.rate_limit.clone());
+                    at.note(format!("rate limit: {limit:?}"));
                 }
                 Step::Exit => {
                     at.note("exit".into());

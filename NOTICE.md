@@ -39,3 +39,9 @@ BIZ UDMincho, Noto Sans CJK SC and Noto Sans Arabic from
 License 1.1; their license texts are at the end of `THIRD-PARTY-LICENSES.md`. The audio decoders
 from the Symphonia project are under the Mozilla Public License 2.0; their source is available at
 <https://github.com/pdeljanov/Symphonia> and on crates.io.
+
+The Claude assistant ships the skills `canvas-design`, `algorithmic-art`, `theme-factory` and
+`frontend-design` from <https://github.com/anthropics/skills>, unmodified, under the Apache License 2.0
+(see `septet/assistant-plugin/NOTICE.md`); the fonts that come with `canvas-design` are under the SIL
+Open Font License 1.1. Both license texts are in `THIRD-PARTY-LICENSES.md`. Septet's own skills in that
+folder are licensed like Septet.

@@ -12,6 +12,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod about;
+mod assistant;
 mod autotest;
 mod bridge;
 mod content;

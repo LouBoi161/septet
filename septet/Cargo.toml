@@ -17,6 +17,13 @@ resvg = "0.45"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ron = "0.12"
+# Conversation ids for Claude Code (assistant/).
+uuid = { version = "1", features = ["v4"] }
+# Images in tool results (assistant/panel.rs).
+base64 = "0.22"
+# septet_fetch: icons and fonts for Claude, over rustls with the OS's trusted roots (as Pdfcraft does).
+ureq = { version = "3.4", default-features = false, features = ["rustls-no-provider", "_ring"] }
+rustls-native-certs = "0.8"
 photocraft-ui-egui = { path = "../photocraft/crates/ui-egui" }
 vectorcraft-ui-egui = { path = "../vectorcraft/crates/ui-egui" }
 lightcraft-ui-egui = { path = "../lightcraft/crates/ui-egui" }
@@ -38,6 +45,10 @@ effectcraft = { path = "../effectcraft/apps/effectcraft" }
 winit = { version = "0.30", default-features = false, features = ["x11"] }
 # The pointer position for file drops (pointer.rs).
 x11rb = { version = "0.13", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+# Ending Claude Code's process group (assistant/session.rs).
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 # GetCursorPos for file drops (pointer.rs).
