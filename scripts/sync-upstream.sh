@@ -21,8 +21,13 @@
 # time. They write logs and screenshots to $SYNC_OUT (default /tmp/septet-sync/<date>); the script fails on
 # a non-zero exit, a panic or a failed screenshot, the screenshots themselves are for a person to look at.
 # CRAFT_FONTS_DIR is passed through to the builds when set.
+# Builds and tests run at the lowest CPU and IO priority, so the desktop stays usable; SYNC_JOBS limits
+# cargo's parallel jobs (default: all cores).
 # Exit status: 0 everything passed, 1 a build, test or autotest failed, 2 a merge conflict.
 set -euo pipefail
+renice -n 19 -p $$ >/dev/null 2>&1 || true
+ionice -c 3 -p $$ 2>/dev/null || true
+[ -z "${SYNC_JOBS:-}" ] || export CARGO_BUILD_JOBS=$SYNC_JOBS
 
 apps=(designcraft effectcraft pdfcraft filmcraft vectorcraft lightcraft photocraft)
 root=$(git rev-parse --show-toplevel)
@@ -188,8 +193,12 @@ for app in "${selected[@]}"; do
         echo "  merging $(git rev-list --count "$commit" --not HEAD) upstream commits"
         if ! git subtree merge -q --prefix="$app" "$commit" -m "$app: merge upstream $tag" >"$out/$app-merge.log" 2>&1; then
             if merge_in_progress; then
-                echo "  CONFLICTS (resolve, keep our Septet changes, git commit, run again):"
-                git diff --name-only --diff-filter=U | sed 's/^/    /'
+                if [ -z "$(git diff --name-only --diff-filter=U)" ]; then
+                    echo "  CONFLICTS, all resolved again by git rerere: review git diff --cached, git commit, run again"
+                else
+                    echo "  CONFLICTS (resolve, keep our Septet changes, git commit, run again):"
+                    git diff --name-only --diff-filter=U | sed 's/^/    /'
+                fi
                 exit 2
             fi
             cat "$out/$app-merge.log" >&2
