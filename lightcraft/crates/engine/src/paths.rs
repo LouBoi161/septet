@@ -1,10 +1,11 @@
 //! Where LightCraft keeps its per-user state: the OS's per-user folders, or — when a host runs
 //! LightCraft from a portable install — one folder of the host's choosing ([`set_data_root`]).
 //!
-//! With a data root, [`crate::camera_profiles::config_dir`] (settings, camera profiles, the SAM 3
-//! model, the GPU init marker) is the root itself, and the default library is `<root>/Library`
-//! ([`crate::library::default_dir`]). Explicit overrides (`LIGHTCRAFT_LIBRARY`,
-//! `LIGHTCRAFT_CAMERA_PROFILES`, `LIGHTCRAFT_SAM3_DIR`) still win.
+//! With a data root, [`crate::config::config_dir`] (settings, logs, camera profiles, the SAM 3,
+//! face and denoise models, the GPU init marker) is the root itself, and the default library is
+//! `<root>/Library` ([`crate::library::default_dir`]). Explicit overrides (`LIGHTCRAFT_LIBRARY`,
+//! `LIGHTCRAFT_CAMERA_PROFILES`, `LIGHTCRAFT_SAM3_DIR`, `LIGHTCRAFT_FACE_MODELS`,
+//! `LIGHTCRAFT_DENOISE_MODELS`) still win.
 
 use std::path::PathBuf;
 use std::sync::{PoisonError, RwLock};

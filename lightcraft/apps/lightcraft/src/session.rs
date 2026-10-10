@@ -5,27 +5,34 @@ use lightcraft_ui_egui::panels::library_problem::LibraryProblem;
 
 use crate::prefs::config_dir;
 
+/// The library session with the folder face models are kept in (`<config>/models`).
+pub fn open_session(in_memory: bool, dir: Option<std::path::PathBuf>, seed_demo: bool) -> (Session, Option<LibraryProblem>) {
+    let (mut s, problem) = open_library_session(in_memory, dir, seed_demo);
+    s.face_models_dir = lightcraft_engine::config::default_face_models_dir();
+    (s, problem)
+}
+
 /// The persistent library session, or with `--memory` an in-memory one (demo photos).
 ///
 /// If the library can't be opened the session is empty and in memory — never seeded with the
 /// demo photos, never written anywhere — and the problem is returned: the window then says so
 /// and offers Try Again / Choose Another Library… / Continue Without Saving / Quit (issue #100).
-pub fn open_session(in_memory: bool, dir: Option<std::path::PathBuf>, seed_demo: bool) -> (Session, Option<LibraryProblem>) {
+fn open_library_session(in_memory: bool, dir: Option<std::path::PathBuf>, seed_demo: bool) -> (Session, Option<LibraryProblem>) {
     if in_memory {
-        return (if seed_demo { Session::with_demo() } else { Session::new() }.with_fs().with_system_clock(), None);
+        return (if seed_demo { Session::with_demo() } else { Session::new() }.with_fs().with_default_denoise_models().with_system_clock(), None);
     }
-    let unopened = || Session::new().with_fs().with_system_clock();
+    let unopened = || Session::new().with_fs().with_default_denoise_models().with_system_clock();
     let Some(dir) = dir else {
-        eprintln!("lightcraft: no library location (set --library or LIGHTCRAFT_LIBRARY)");
+        log::warn!("no library location (set --library or LIGHTCRAFT_LIBRARY)");
         return (unopened(), Some(LibraryProblem::new("", "There is no home folder to keep the library in. Choose a folder for it.")));
     };
     let t0 = std::time::Instant::now();
-    let mut s = Session::new().with_fs().with_system_clock();
+    let mut s = Session::new().with_fs().with_default_denoise_models().with_system_clock();
     match s.open_library(&dir, seed_demo) {
         Ok(r) => {
             let (replayed, torn) = (r.replayed, r.torn_bytes);
-            eprintln!(
-                "lightcraft: library {}: {} photos, {replayed} log records replayed{} ({:.1} ms)",
+            log::info!(
+                "library {}: {} photos, {replayed} log records replayed{} ({:.1} ms)",
                 dir.display(),
                 s.catalog.len(),
                 if torn > 0 { ", torn tail repaired" } else { "" },
@@ -34,7 +41,7 @@ pub fn open_session(in_memory: bool, dir: Option<std::path::PathBuf>, seed_demo:
             (s, None)
         }
         Err(e) => {
-            eprintln!("lightcraft: can't open library {}: {e}", dir.display());
+            log::error!("can't open library {}: {e}", dir.display());
             (unopened(), Some(LibraryProblem::new(dir.to_string_lossy(), e.to_string())))
         }
     }
