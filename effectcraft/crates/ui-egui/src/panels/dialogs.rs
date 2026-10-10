@@ -270,7 +270,7 @@ fn about_main(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, cmd: &mut
     ui.label(tr("A clean-room, open-source compositor for motion graphics and visual effects: native on macOS, Windows and Linux, and in the browser."));
     // A modified version: no ArtCraft branding, only the plain-text origin (docs/brand/LICENSE-brand.txt).
     ui.add_space(6.0);
-    ui.label(egui::RichText::new("Based on EffectCraft by the ArtCraft team (MIT OR Apache-2.0).").color(t.text_dim));
+    ui.label(egui::RichText::new(tr("Based on EffectCraft by the ArtCraft team (MIT OR Apache-2.0).")).color(t.text_dim));
     ui.add_space(14.0);
     let links: [(Icon, &str, &str, &'static str); 4] = [
         (Icon::Chat, "Join the community on Discord", effectcraft_engine::links::DISCORD, "help.discord"),
