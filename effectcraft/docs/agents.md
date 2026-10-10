@@ -46,13 +46,42 @@ Desktop, Cursor and the like) take the same `command` and `args`.
 The server speaks JSON-RPC 2.0 over stdio, one message per line, and supports MCP protocol versions
 2025-06-18, 2025-03-26 and 2024-11-05 (`initialize`, `ping`, `tools/list`, `tools/call`).
 
+### Keeping headless work across restarts
+
+Start `effectcraft-cli mcp --autosave` (MCP args `["mcp", "--autosave"]`) to preserve
+unsaved headless work. Each tool call that changes a dirty project writes a checkpoint before
+its reply is sent, so even killing the server after that reply leaves the work on disk. EOF
+and transport errors also flush outstanding changes. Queries do not rotate the saved versions.
+A failed checkpoint adds a warning to the tool reply; the edit remains in memory and the next
+call retries. Use `save_project {path}` to a writable location before disconnecting if warned.
+
+Each server has its own folder under `<config directory>/EffectCraft Auto-Save/MCP/` (or
+`<custom Auto-Save folder>/MCP/`). The maximum-version setting applies within that folder.
+`--autosave` enables these checkpoints regardless of the desktop's Auto-Save toggle and interval;
+it reads settings without writing desktop preferences, shortcuts or crash-recovery state.
+`EFFECTCRAFT_CONFIG_DIR` overrides the platform config directory. Session folders are retained
+for recovery; remove old folders once their work is saved elsewhere.
+
+`initialize` instructions and `_meta.effectcraftAutoSave` list the current folder and up to five
+previous dirty sessions; `get_project.autosave` also reports the latest checkpoint and errors.
+Recover explicitly with `open_project {"path":"<checkpoint .ecproj>"}`, then
+`save_project {"path":"Recovered.ecproj"}`. Prior sessions may still be running and are never
+opened automatically. Replacing a dirty project with `open_project` or `file.newProject` discards
+it intentionally; save it first. The metadata describes the current project in each session.
+
+Without `--autosave`, headless work is in memory until explicitly saved. The flag is headless
+only; a bridged desktop app owns its auto-saves. An edit interrupted before its reply is received
+may be absent from the last checkpoint.
+
+See [MCP conventions](mcp.md) for core tools, resources, strict arguments, and render progress/cancellation.
+
 ### Tools
 
 | Tool | What it does |
 |---|---|
 | `list_commands {filter?, enabled_only?, schemas?}` | Discover command ids, their param docs (and, with `schemas`, a JSON Schema each), and whether each can run now. |
-| `describe_command {command}` | One command in full: label, menu, shortcut, params doc, JSON `schema`, enabled / `why`. |
-| `execute_command {command, params?}` | Run any command (undoable). Unknown parameter keys are rejected with the accepted list. |
+| `describe_command {command \| id}` | One command in full: label, menu, shortcut, params doc, JSON `schema`, enabled / `why`. |
+| `execute_command {command \| id, params?}` | Run any command (undoable). Unknown parameter keys are rejected with the accepted list. |
 | `get_state` | Editor state (active comp, time, selections, tool) plus `app`: version, command and effect counts, export formats, parity summary. |
 | `run_script {code, name?}` | Run JavaScript with the After Effects-style scripting object model (`app.project`, `comp.layers.addText(…)`, `layer.property("ADBE Transform Group").property("ADBE Position").setValueAtTime(…)`…). Returns `{ok, result, output, error: {message, line, column}}`; edits are undoable. |
 | `get_project` / `get_comp {comp?}` | Project items, comp settings and layers. |
@@ -70,6 +99,11 @@ The server speaks JSON-RPC 2.0 over stdio, one message per line, and supports MC
 | `script_ui {action?, window?, widget?, value?, result?}` | Drive ScriptUI windows that scripts opened: `list` (default) the open windows, `get` a window's control tree, `click` a button / checkbox / radio button, `set` text, a slider or a list item, `close` a window (`result`: what a dialog's `show()` returns, default 2 = Cancel). |
 | `batch {steps: [{command, params}], label?, atomic?}` | Several commands in one call and one undo step (`engine.batch`); `"$N.key"` in a param is step N's result (`"$1.layer"`). A failing step rolls the batch back and names the step. |
 | *(bridge)* `screenshot {panel?, id?, max_side?, path?}`, `ui_inspect`, `ui_elements {prefix?}`, `ui_click`, `ui_drag`, `ui_key`, `ui_type`, `ui_set`, `control {method, params}` | Look at and operate the live window. |
+| `command_list` | List commands (same arguments as `list_commands`). |
+| `command_run {id, params?}` | Run a command. |
+| `command_batch {steps, stop_on_error?}` | Run commands in order with per-step results; each edit has its own undo step. |
+| `doc_inspect` | Project overview and active composition. |
+| `render_preview` | Render a PNG without writing a file (`comp`, `time`, `max_side`, `transparent`). |
 
 Layers are referenced by id (from `get_comp`), `"#n"` (1-based index from the top) or name. Comps are
 referenced by id or name, and default to the active comp. Property paths come from `get_layer`, for
@@ -110,6 +144,31 @@ Short recipes; every step is one tool call.
 
 The desktop app checks footage in the background after every open (a "Checking footage" job in
 the Progress panel, `jobs.list`); headless sessions run `footage.check` when they want it.
+
+### Pitfalls
+
+Things that tripped up a long agent-driven session (a multi-scene 3D piece built entirely over MCP).
+
+- **Layer time vs comp time.** `add_keyframe`, `set_property` with `time`, `prop.addKey`,
+  `keys.select` and `keys.set` take layer time; `get_property` and `render_frame` take comp time;
+  `run_script`'s `setValueAtTime` and `keyTime` use comp time, as in After Effects. On a layer that
+  doesn't start at 0, such as a nested comp placed later, subtract the layer's start time from the
+  comp time before keying (unstretched layers), or set the keys from `run_script`
+  ([#257](https://github.com/storytold/effectcraft/issues/257)).
+- **Moving a layer in time.** `execute_command layer.timing {"layers":["Scene 2"],"start":5.1}` sets
+  the start time in comp seconds and moves the in and out points with it.
+- **Loops in scripts.** `run_script` can call any engine command with `app.run(id, params)`, for
+  example `app.run("layer.new3dPrimitive", {kind: "cube", position: [x, y, z]})` inside a loop. A
+  script that throws keeps the edits it already made: wrap it in `app.beginUndoGroup()` /
+  `app.endUndoGroup()` so one `undo {}` removes them all. (`batch` rolls back on its own.)
+- **Save early in headless mode.** Without `--autosave` the headless server keeps the project in
+  memory only, so a server restart loses unsaved work: start it with `mcp --autosave` (see above)
+  or call `save_project {"path": …}` after each milestone.
+- **Environment light.** `layer.newLight` also accepts `"kind":"Environment"`: an equirectangular
+  image that metallic surfaces reflect. Set its `lightOptions/source` to a footage, comp or solid
+  layer by layer id; with no source it uses the comp's Environment Layer (`layer.environment`)
+  ([#261](https://github.com/storytold/effectcraft/issues/261)).
+
 ### Cookbook (from end-to-end QA)
 
 The scenarios in `crates/automation/tests/qa/` and `apps/effectcraft-cli/tests/qa_template.rs`
@@ -153,8 +212,25 @@ build real projects through these interfaces; they are worked examples of everyt
   then `keys.velocity {"outSpeed":0,"outInfluence":33.33}`.
 * **Gradients**: `set_property {"path":"contents/gfill/colors","value":["#0080ff","#ffff00"]}` or
   `{"colors":[[0,"#0080ff"],[1,[1,1,0]]],"opacities":[[0,1],[1,0.5]]}`.
-* **Image sequences** import at 30 fps (Settings ▸ Import); `file.interpretFootage {"items":[id],
-  "frameRate":12}` conforms them (the item and layers that ran to its end get the new length).
+* **Image sequences**: `file.import {"paths":["/r/shot_0001.png"]}` imports the file's whole
+  numbered run as one item (several picked frames: that range; a folder: each run in it;
+  `"sequence": false`: one still; `"alphabetical": true`: Force Alphabetical Order, the files
+  play one after another) at `frameRate` or 30 fps (Settings ▸ Import). Missing frames show
+  colour bars, as in After Effects. `file.interpretFootage {"items":[id], "frameRate":12,
+  "startTimecode":1001}` conforms them and sets Override Start (the item and layers that ran to its end get the new
+  length). See [footage.md](footage.md).
+* **Colour of footage**: `file.interpretFootage {"items":[id], "preserveRgb":true}` is Interpret
+  Footage ▸ Preserve RGB: the file's values unconverted (float EXRs stay linear), for a
+  per-layer OCIO conversion or data passes.
+* **OCIO effects**: with Configuration ▸ Custom, `configFile` is a `.ocio` path or the config's
+  text; `effect.warning {layer, effect}` says what Effect Controls warns about (a config it
+  can't read, a colour space it lacks, transforms that pass colours through) or `null`.
+* **Multi-layer OpenEXR**: the footage shows the beauty pass (an unnamed RGBA layer, else
+  Combined / Beauty / Image / RGBA…, never Cryptomatte or depth). `layer.channels {layer}`
+  lists a footage layer's EXR layers and
+  channels (`{"layers":[{"name":"diffuse","rgba":["diffuse.R","diffuse.G","diffuse.B",""]}]}`);
+  EXtractoR shows them when its `red` / `green` / `blue` / `alpha` are set to those names
+  (`prop.set {"path":"effects/#1/red","value":"depth.Z"}`). Effect Controls offers them as popups.
 * **Masks**: `layer.addMask {layer, shape: rect|ellipse, rect}` first, then `layer.mask.set
   {field: feather|expansion|opacity, value}`.
 * **Renders**: `renderQueue.add {comp, format: h264|prores|webm|png…, channels: rgba,
@@ -173,6 +249,15 @@ build real projects through these interfaces; they are worked examples of everyt
   `file.newProject`, `file.closeProject`, `file.revert`…) and the window's close button show the
   Save / Don't Save / Cancel prompt (`ui_click` on `dialog.unsaved.save` / `dontSave` / `cancel`;
   `dialog.unsaved.revert` for Revert); the control channel's `app.quit {"force": true}` skips it.
+
+### Effect positions
+
+Effect points, Puppet pins (`puppet.addPin`, `puppet.recordPin`), Paint, Liquify and Roto Brush
+strokes and `effect.pickColor` are in **effect space**: layer pixels from the top-left of the
+layer's effect bounds. For footage, solids and precomps that is the layer's own pixel grid. Shape
+and text layers have comp-sized bounds centred on their content's origin, so in a `w` × `h` comp
+the point `[w / 2, h / 2]` is that origin (a new effect's default point). `prop.get` / `prop.set`
+read and write these values as they are.
 
 ### Motion tracking
 
@@ -304,7 +389,7 @@ effectcraft-cli run shot.ecproj camera.createFromSolve '{"kind":"solid","points"
 
 The Roto Brush tool (Alt+W cycles Roto Brush / Refine Edge) paints in the Layer panel; agents use
 `roto.stroke {layer, kind: fg|bg|refine|refineErase, points: [[x, y], …], frame?, radius?}`
-(layer pixels, layer frames). The first foreground stroke applies the Roto Brush & Refine Edge
+(effect space, layer frames). The first foreground stroke applies the Roto Brush & Refine Edge
 effect and sets the base frame with a span of 20 frames each side. `roto.propagate {layer,
 direction?: forward|backward|both, to?, wait?}` segments the span (in the background unless
 `wait`); strokes on any other frame correct it and propagation restarts from there.
@@ -383,7 +468,10 @@ Scripts that build ScriptUI windows publish them to the session; agents drive th
 A dialog's `show()` waits for the user: the `script.run` / `file.runScript` reply carries
 `"waiting": true`, and the script continues (its final output arrives in the reply of the click
 that closes the dialog). File ▸ Scripts: `file.scripts.list`, `file.runScript {"name": …}`,
-`file.installScript` / `file.installScriptUIPanel {"path": …}`, `window.scriptPanel {"name": …}`.
+`file.installScript` / `file.installScriptUIPanel {"path": …}`, `window.scriptPanel {"name": …}`,
+`window.restoreScriptPanels` (the panels open when the app last quit). Scripts' `app.settings`:
+`script.settings.get {"section": …, "key": …}` and `script.settings.save {…, "value": …}`.
+Extension points and the bundled extensions: [plugins.md](plugins.md).
 
 ### Timeline: layer order, properties and shortcuts
 
@@ -402,6 +490,22 @@ that closes the dialog). File ▸ Scripts: `file.scripts.list`, `file.runScript 
   step (separated X/Y/Z Position; Orientation and X/Y/Z Rotation on 3D layers).
 * Rename a layer with Enter (or double-click a name): the whole name is selected, Enter or a
   click elsewhere commits, Escape cancels; `layer.rename {layer, name}` does it directly.
+* Ctrl/Cmd-click on the current-time display (Timeline or Composition panel) toggles the Time
+  Display Style between Timecode and Frames: `file.projectSettings {"timeDisplay": "frames"}`.
+* `prop.pickWhip {layer, prop, target: {layer, prop, dimension?}}` links a property as its
+  expression pick whip does; `dimension` picks one of the target's values (`position[0]`), as a
+  drop on that value field does.
+* Every property row has a property pick whip in the Parent & Link column
+  (`timeline.prop.<uid>.propertyPickWhip`; the expression row's is `timeline.prop.<uid>.pickWhip`).
+  Dragged onto another property's name or value, in the Timeline or Effect Controls
+  (`effectControls.prop.<uid>.value[.<d>]`), it runs `prop.pickWhip`: the reference replaces the
+  property's expression, or is added as one, and the expression is enabled.
+* A property's menu (right-click its name; entries `timeline.prop.<uid>.menu.<entry>`): Reset
+  (`prop.reset`: no keyframes or expression, and the property's default value, an effect
+  parameter's or a Transform property's), Edit Value… (`prop.set {layer, prop}` without `value`
+  opens the value dialog), Separate Dimensions (Position: `prop.separateDimensions {layer,
+  value}`), Add / Remove Expression (`prop.setExpression {layer, prop}`) and Add Property to
+  Essential Graphics (`essential.addProperty`).
 
 ### History, puppet recording, plug-ins
 
@@ -409,7 +513,7 @@ that closes the dialog). File ▸ Scripts: `file.scripts.list`, `file.runScript 
   states as a branch); `edit.history.goto {"index": n}` (or `id`, or `steps`) jumps to any of
   them. MCP: the `history` tool.
 * `puppet.recordPin {"layer": "#1", "pin": "Puppet Pin 1", "samples": [[t, x, y]…]}` records a
-  drag (t = seconds since it began, layer space) into Position keys at the comp frame rate from the
+  drag (t = seconds since it began, effect space) into Position keys at the comp frame rate from the
   current time; `puppet.recordOptions {speed, smoothing, useDraftDeformation, showMesh}`.
 * `puppet.selectPins {"layer": "#1", "pins": ["Puppet Pin 1"], "add"?, "toggle"?}` selects pins
   like the viewer's click / Shift-click (`pins: []` deselects); Edit ▸ Clear (Delete) then removes

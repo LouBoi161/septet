@@ -82,13 +82,46 @@ a file that a newer EffectCraft saved shows a warning: fields this version doesn
 dropped if it saves the project. Save, Save As, Save a Copy and Increment and Save keep the
 file's format (`.ecprojx` stays XML).
 
+`schema` changes when a saved value changes meaning; a project from an older schema is converted
+when it is opened (`effectcraft_engine::upgrade_effects`, which also refreshes effect instances
+from the registry) and saved with the current one, which older versions refuse to open rather than
+render wrongly. Schema 2 put effect positions on shape and text layers in effect space (§4,
+#227). Opening a schema 1 project moves what an effect on a shape or text layer (not an adjustment
+layer, whose effects see the comp below as before) holds as a position by half the comp size,
+so points that were set keep their place in the comp: point parameters with their keyframes, Paint
+stroke paths and clone positions, Puppet mesh seeds, pin rest points and positions, and Liquify
+and Roto Brush strokes. A point parameter still at its default and not animated is left alone:
+the old default sat at the comp's bottom-right corner, where most effects did nothing, and the
+same value is now the layer centre, as in After Effects. Expression controls (Point Control…)
+keep their values, because their meaning is up to the expressions that read them, and expressions
+are not rewritten, so an expression that computes an effect point on a shape or text layer from
+other values may need `+ [thisComp.width / 2, thisComp.height / 2]`. Effects that use the layer
+bounds (edge pinning, wipes, Offset, generators) now cover the whole comp-sized bounds instead of
+their bottom-right quarter. Tracking data of effects that analyse footage (Warp Stabilizer, 3D
+Camera Tracker, Mocha shape) is left as it is: footage has a source rectangle, whose effect space
+did not change.
+
 ## 4. Rendering
 
 `Renderer::comp_frame(comp, t)` walks the layers bottom to top. For each visible layer it renders
 the **source** (solid, footage frame, text, shape contents, or a nested comp), applies **masks**,
 then **effects** in order, then **layer styles**, then the **transform** into comp space (with motion blur sub-samples
 when enabled), the **track matte**, and finally **blends** into the accumulator. Adjustment layers
-apply their effects to the accumulator. Runs of 3D layers are composited per pixel through the
+apply their effects to the accumulator.
+
+Effects run in **effect space** (`effectcraft_render::effect_bounds`): layer pixels measured from
+the top-left of the layer's effect bounds, which are the source rectangle, or for layers without
+one (shape, text) a comp-sized rectangle centred on the layer's origin that their content
+surrounds. A shape layer's default effect point (the bounds' centre) is therefore its content's
+origin, as in After Effects. The renderer moves the layer buffer into effect space for the whole
+stack (`Buf::rebase`, on the CPU and the GPU alike) and hands effects everything else in it too:
+masks, other layers' pixels for layer parameters (each in its own effect space), the layer's own
+frames at other times (`Renderer::layer_input`, also what Puppet, Roto Brush and the Layer panel
+read) and the comp camera. Effect point handles, Puppet pins and the Layer panel map effect space
+to the comp with `EvalCtx::effect_to_comp`. Adjustment layers run their effects on the comp below
+as it is.
+
+Runs of 3D layers are composited per pixel through the
 active camera, with lights, shadows and depth of field (Classic 3D), or rasterised as meshes by
 the Advanced 3D renderer (below).
 
@@ -128,7 +161,8 @@ collapsed 3D precomps (drawn flattened), morph targets, extruded strokes.
 
 A **layer cache** keeps each layer's finished pixels (source, masks and effects) keyed by a hash of
 its evaluated inputs, excluding the transform. Static and transform-only layers render once;
-editing one layer re-renders only that layer. Effects that read the clock directly are declared in
+editing one layer re-renders only that layer. Each Render Queue job keeps its own layer cache
+for its frames. Effects that read the clock directly are declared in
 `effects::TIME_DEPENDENT`, and a test checks every registered effect against that list.
 
 The viewer's **RAM preview** (`ui-egui/src/frames.rs`) keeps finished frames keyed by project
@@ -137,6 +171,11 @@ options (Draft / Fast Previews, shadows, nested switches), so frames rendered un
 options are never shown. When the budget (Settings ▸ Memory & CPU) is full the least recently
 shown frames go first, and frames of an older revision are dropped as soon as the project
 changes. The timeline's green bar counts the frames of exactly what the viewer shows.
+Resolution Auto renders the pixels the magnification needs, as in After Effects (Full above
+50 %, Half down to 33.3 %, Third down to 25 %, then Quarter). Below 100 % the viewer averages
+instead of skipping pixels (Viewer Zoom Quality More Accurate): GPU frames carry a mip chain
+sampled trilinearly, CPU frames go up averaged down by the whole factor that leaves about one
+texel per screen pixel.
 
 A persistent **disk cache** (`render::disk_cache`, Settings ▸ Media & Disk Cache) backs both
 the layer cache and the viewer's RAM preview: layer buffers that were slow to render and every
@@ -173,8 +212,9 @@ switches that don't change pixels (Audio, Lock, Shy, Hide Shy Layers: `Switches:
 **Layer styles** (Layer ▸ Layer Styles; `crates/render/src/styles.rs`) render in layer space and
 may grow the layer's bounds. Drop Shadow and Outer Glow become separate passes composited below the
 layer with their own blend modes; the interior styles, Stroke and Bevel and Emboss are baked into
-the layer body. Layer opacity fades the whole stack; Knockout and the R/G/B channel switches apply
-at composite time. Styled pixels are cached separately from the layer content, so editing a style
+the layer body. Interior styles are clipped to the layer: they blend onto its colour inside its
+shape and keep its alpha, so an anti-aliased edge mixes the style and the background only. Layer
+opacity fades the whole stack; Knockout and the R/G/B channel switches apply at composite time. Styled pixels are cached separately from the layer content, so editing a style
 reuses the cached source/masks/effects. Global Light is one setting per comp, mirrored into every
 layer's Blending Options and kept in step after each edit.
 
@@ -202,6 +242,8 @@ whichever compositor measured faster for it (`render::auto::AutoPick`, kept by t
 per comp, output scale and path (readback or viewer display) it averages CPU and GPU frame times
 (warm-up on both sides, the fastest warm-up frame starting the average, single stalls capped),
 picks the GPU unless the CPU is clearly faster, and re-measures the other side every 48 frames.
+Render Queue jobs don't use Auto: every frame of a job renders on the project's renderer (the
+GPU compositor with Mercury GPU Acceleration), so runs of a render don't differ by timing.
 Light comps (a few small layers, which the CPU composites only within their bounds) then stay on
 the CPU instead of paying for full-frame passes and a readback. A GPU frame walks the comp like
 `draw_comp`: cached layer buffers are uploaded once per buffer, then transformed with the CPU's
@@ -318,8 +360,9 @@ hierarchical block-matching optical flow and a bidirectional warp (Pixel Motion,
 its nested layers straight into the parent with concatenated transforms (one resample), so
 nested blend modes and adjustment layers act on the parent's layers; nested 3D layers use the
 parent's camera and lights and, when the precomp layer is 3D, are depth-sorted with the parent's
-3D run. Masks, effects or styles force a flattened render. On text and shape layers the switch is
-Continuously Rasterize: the source is rasterised at its on-screen scale. Quality: Draft samples
+3D run. Masks, effects or styles force a flattened render. Text layers are always rasterised at
+their on-screen scale, as text is vector in After Effects; on shape layers and vector footage the
+switch is Continuously Rasterize and does the same. Quality: Draft samples
 nearest-neighbour, Wireframe draws the layer bounds. Slip edit (`layer.slip`, Alt+PageUp/Down,
 dragging the source bar in the timeline) moves the source under fixed in/out points.
 

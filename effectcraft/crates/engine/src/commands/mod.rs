@@ -74,8 +74,6 @@ pub(crate) mod watch_folder;
 pub(crate) use app_more::report_text as report_text_for_tests;
 pub(crate) use app_more::view_command;
 #[cfg(test)]
-pub(crate) use file::missing_frames as missing_frames_for_tests;
-#[cfg(test)]
 pub(crate) use keys_more::amplitudes as amplitudes_for_tests;
 #[cfg(test)]
 pub(crate) use mask::split_segment as split_segment_for_tests;
@@ -206,7 +204,6 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(crate::storage::specs());
         v.extend(crate::learn::specs());
         v.extend(crate::templates::specs());
-        v.extend(crate::ease_presets::specs());
         v.extend(crate::preview::specs());
         v
     })

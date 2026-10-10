@@ -225,8 +225,9 @@ pub(crate) fn rulers(app: &mut EffectcraftApp, ui: &mut egui::Ui, map: &ViewerMa
     // Zero point: drag the corner, double-click to reset.
     p.line_segment([corner.center() - vec2(4.0, 0.0), corner.center() + vec2(4.0, 0.0)], tick);
     p.line_segment([corner.center() - vec2(0.0, 4.0), corner.center() + vec2(0.0, 4.0)], tick);
-    let cr =
-        ui.interact(corner, egui::Id::new("vw-ruler-origin"), Sense::click_and_drag()).on_hover_text("Ruler zero point (drag to move, double-click to reset)");
+    let cr = ui
+        .interact(corner, egui::Id::new("vw-ruler-origin"), Sense::click_and_drag())
+        .on_hover_text(crate::i18n::tr("Ruler zero point (drag to move, double-click to reset)"));
     app.auto.add("viewer.ruler.origin", corner, "Ruler zero point");
     let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("vw-ruler-fg")));
     if cr.dragged()
@@ -247,7 +248,7 @@ pub(crate) fn rulers(app: &mut EffectcraftApp, ui: &mut egui::Ui, map: &ViewerMa
     // Guides dragged out of the rulers: the top ruler makes horizontal guides, the left one
     // vertical guides.
     for (r, vertical, id) in [(top, false, "top"), (left, true, "left")] {
-        let resp = ui.interact(r, egui::Id::new(("vw-ruler", id)), Sense::drag()).on_hover_text("Drag to create a guide");
+        let resp = ui.interact(r, egui::Id::new(("vw-ruler", id)), Sense::drag()).on_hover_text(crate::i18n::tr("Drag to create a guide"));
         app.auto.add(&format!("viewer.ruler.{id}"), r, if vertical { "Vertical ruler" } else { "Horizontal ruler" });
         if resp.hovered() {
             ui.ctx().set_cursor_icon(if vertical { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
@@ -325,6 +326,12 @@ fn texture_roi(ctx: &egui::Context) -> Option<[f64; 4]> {
     ctx.data(|d| d.get_temp::<Option<[f64; 4]>>(egui::Id::new("viewer-tex-roi"))).flatten()
 }
 
+/// The comp area ([x, y, w, h], comp pixels) the shown frame covers: its region of interest or
+/// Extended Viewer area, else the whole `comp` (width, height).
+pub(crate) fn shown_region(ctx: &egui::Context, comp: [f32; 2]) -> [f64; 4] {
+    texture_roi(ctx).unwrap_or([0.0, 0.0, comp[0] as f64, comp[1] as f64])
+}
+
 /// Show Snapshot: the stored snapshot is on screen (button or F5 held).
 pub(crate) fn showing_snapshot(app: &EffectcraftApp, ctx: &egui::Context) -> bool {
     let f5 = ctx.input(|i| i.key_down(egui::Key::F5)) && !ctx.egui_wants_keyboard_input();
@@ -350,7 +357,7 @@ pub(crate) fn draw_frame(app: &mut EffectcraftApp, ctx: &egui::Context, painter:
     let snap = showing_snapshot(app, ctx);
     // Settings ▸ Video ▸ Mirror on Computer Monitor off: playback goes to Video Preview only.
     if crate::prefs_live::main_viewer_hidden(app) && !snap {
-        painter.text(comp_rect.center(), Align2::CENTER_CENTER, "Playing on Video Preview", Tokens::ui(13.0), Color32::from_gray(150));
+        painter.text(comp_rect.center(), Align2::CENTER_CENTER, crate::i18n::tr("Playing on Video Preview"), Tokens::ui(13.0), Color32::from_gray(150));
         return;
     }
     if opts.fast_previews == FastPreviews::Wireframe && !snap {
@@ -397,7 +404,7 @@ pub(crate) fn draw_frame(app: &mut EffectcraftApp, ctx: &egui::Context, painter:
             }
         };
         painter.image(tex.id(), comp_rect, uv, Color32::WHITE);
-        painter.text(comp_rect.left_top() + vec2(6.0, 6.0), Align2::LEFT_TOP, "Snapshot", Tokens::ui(11.0), SNAP_COLOR);
+        painter.text(comp_rect.left_top() + vec2(6.0, 6.0), Align2::LEFT_TOP, crate::i18n::tr("Snapshot"), Tokens::ui(11.0), SNAP_COLOR);
         return;
     }
     // A GPU frame (the web viewer): drawn straight from its texture; Show Channel / exposure
@@ -414,7 +421,7 @@ pub(crate) fn draw_frame(app: &mut EffectcraftApp, ctx: &egui::Context, painter:
         }
         comp_rect
     } else {
-        let Some((tex, k)) = app.viewer_tex.clone() else { return };
+        let Some((tex, k, minify)) = app.viewer_tex.clone() else { return };
         if k.comp != cid.0 {
             return;
         }
@@ -424,29 +431,40 @@ pub(crate) fn draw_frame(app: &mut EffectcraftApp, ctx: &egui::Context, painter:
             None => comp_rect,
         };
         if plain {
+            let uv = app.viewer_image.as_ref().map_or(uv, |src| fitted_uv(ctx, src.size, minify));
             painter.image(tex.id(), rect, uv, Color32::WHITE);
             return;
         }
         rect
     };
     let Some(src) = app.viewer_image.clone() else { return };
-    let zoom_opts = super::viewer::zoom_texture_options(app.session.prefs.viewer_zoom_smooth());
+    let smooth = app.session.prefs.viewer_zoom_smooth();
+    // Averaged down for the magnification, as the frame's own texture is (#417).
+    let minify = super::viewer::minify_factor(smooth, src.size[0] as f64, (rect.width() * ctx.pixels_per_point()) as f64);
     let key = {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (std::sync::Arc::as_ptr(&src) as usize, opts.channel.id(), opts.colorized, opts.exposure.to_bits(), &dc_key).hash(&mut h);
+        (std::sync::Arc::as_ptr(&src) as usize, opts.channel.id(), opts.colorized, opts.exposure.to_bits(), &dc_key, minify).hash(&mut h);
         h.finish()
     };
     let id = egui::Id::new("viewer-display-tex");
     let tex = match ctx.data(|d| d.get_temp::<(u64, egui::TextureHandle)>(id)) {
         Some((k, tex)) if k == key => tex,
         _ => {
-            let tex = crate::frames::load_fitted(ctx, "viewer-display", transformed(&src, opts.channel, opts.colorized, opts.exposure, dc), zoom_opts);
+            let img =
+                crate::frames::fit_texture_by(transformed(&src, opts.channel, opts.colorized, opts.exposure, dc), crate::frames::max_texture_side(ctx), minify);
+            let tex = ctx.load_texture("viewer-display", img, super::viewer::zoom_texture_options(smooth));
             ctx.data_mut(|d| d.insert_temp(id, (key, tex.clone())));
             tex
         }
     };
-    painter.image(tex.id(), rect, uv, Color32::WHITE);
+    painter.image(tex.id(), rect, fitted_uv(ctx, src.size, minify), Color32::WHITE);
+}
+
+/// The texture coordinates of a frame of `size` in its texture, fitted with at least `minify`
+/// (see [`crate::frames::fitted_uv`]).
+fn fitted_uv(ctx: &egui::Context, size: [usize; 2], minify: usize) -> Rect {
+    crate::frames::fitted_uv(size, crate::frames::fit_factor(size, crate::frames::max_texture_side(ctx), minify))
 }
 
 // ---------------------------------------------------------------- bottom bar
@@ -524,7 +542,10 @@ pub(crate) fn bottom_bar(app: &mut EffectcraftApp, ui: &mut egui::Ui, bar: Rect,
 
     // Magnification.
     let r = Rect::from_min_size(pos2(x, cy - 10.0), vec2(80.0, 20.0));
-    if widgets::dropdown(ui, r, &magnification_label(zoom * ppp * 100.0), &t, egui::Id::new("vw-mag")).on_hover_text("Magnification ratio popup").clicked() {
+    if widgets::dropdown(ui, r, &magnification_label(zoom * ppp * 100.0), &t, egui::Id::new("vw-mag"))
+        .on_hover_text(crate::i18n::tr("Magnification ratio popup"))
+        .clicked()
+    {
         toggle_popup(ui, "vw-mag-pop");
     }
     app.auto.add("viewer.magnification", r, "Magnification");
@@ -554,7 +575,7 @@ pub(crate) fn bottom_bar(app: &mut EffectcraftApp, ui: &mut egui::Ui, bar: Rect,
     let r = Rect::from_min_size(pos2(x, cy - 10.0), vec2(84.0, 20.0));
     let scale = app.viewer_scale(zoom, ppp);
     if widgets::dropdown(ui, r, &resolution_label(app.ui.viewer.res, scale), &t, egui::Id::new("vw-res"))
-        .on_hover_text("Resolution/Down Sample Factor Popup")
+        .on_hover_text(crate::i18n::tr("Resolution/Down Sample Factor Popup"))
         .clicked()
     {
         toggle_popup(ui, "vw-res-pop");
@@ -660,7 +681,7 @@ pub(crate) fn bottom_bar(app: &mut EffectcraftApp, ui: &mut egui::Ui, bar: Rect,
             .fixed_decimals(1)
             .custom_formatter(|v, _| if v == 0.0 { "0.0".into() } else { format!("{v:+.1}") }),
     );
-    let resp = resp.on_hover_text("Adjust Exposure (stops)");
+    let resp = resp.on_hover_text(crate::i18n::tr("Adjust Exposure (stops)"));
     app.auto.add("viewer.exposure", er, "Adjust Exposure");
     if resp.changed() {
         let _ = app.session.execute("view.exposure", json!({"stops": ev}));
@@ -723,7 +744,9 @@ pub(crate) fn bottom_bar(app: &mut EffectcraftApp, ui: &mut egui::Ui, bar: Rect,
     let g = p.layout_no_wrap(tc, Tokens::mono(12.0), t.timecode);
     let tr = Rect::from_min_size(pos2(x + 4.0, cy - 9.0), g.size() + vec2(8.0, 4.0));
     p.galley(pos2(tr.min.x + 4.0, tr.min.y + 2.0), g, t.timecode);
+    let resp = ui.interact(tr, egui::Id::new("vw-timecode"), Sense::click());
     app.auto.add("viewer.timecode", tr, "Current time");
+    crate::panels::toggle_time_display(app, &resp);
     // Right: render time.
     let ms = app.frames.last_ms.lock().map(|v| *v).unwrap_or(0.0);
     if tr.max.x + 50.0 < bar.max.x {
@@ -744,5 +767,49 @@ mod tests {
         assert_eq!(resolution_label(Resolution::Auto, 0.5), "(Half)");
         assert_eq!(resolution_label(Resolution::Quarter, 0.25), "Quarter");
         assert_eq!(resolution_label(Resolution::Custom(5), 0.2), "Custom (5)");
+    }
+
+    /// Auto renders the pixels the magnification needs, as in After Effects: Full above 50 %,
+    /// Half down to 33.3 %, Third down to 25 %, Quarter below — never fewer pixels than the
+    /// screen shows (#417: 60 % rendered at Half).
+    #[test]
+    fn auto_resolution_follows_the_magnification() {
+        let auto = |zoom: f32, ppp: f32| resolution_label(Resolution::Auto, Resolution::Auto.scale(zoom, ppp));
+        for (zoom, want) in [(2.0, "(Full)"), (1.0, "(Full)"), (0.6, "(Full)"), (0.51, "(Full)"), (0.5, "(Half)"), (0.46, "(Half)"), (0.34, "(Half)")] {
+            assert_eq!(auto(zoom, 1.0), want, "{zoom}");
+        }
+        for (zoom, want) in [(1.0 / 3.0, "(Third)"), (0.26, "(Third)"), (0.25, "(Quarter)"), (0.1, "(Quarter)"), (0.0, "(Quarter)")] {
+            assert_eq!(auto(zoom, 1.0), want, "{zoom}");
+        }
+        // Magnification in points on a 150 % display: 40 % shows 60 % of the comp's pixels.
+        assert_eq!(auto(0.4, 1.5), "(Full)");
+        assert_eq!(auto(f32::NAN, 1.0), "(Full)");
+        assert_eq!(Resolution::Full.scale(0.1, 1.0), 1.0);
+    }
+
+    /// CPU frames go up averaged down to about one texel per screen pixel (More Accurate only),
+    /// drawn with texture coordinates that keep each texel over its pixels (#417).
+    #[test]
+    fn minified_frames_keep_their_texels_in_place() {
+        use crate::panels::viewer::minify_factor;
+        assert_eq!(minify_factor(true, 1.0, 0.46), 2);
+        assert_eq!(minify_factor(true, 1.0, 0.5), 2);
+        assert_eq!(minify_factor(true, 1.0, 0.51), 1);
+        assert_eq!(minify_factor(true, 0.5, 0.46), 1, "a Half frame at 46 %");
+        assert_eq!(minify_factor(true, 1.0, 1.0 / 3.0), 3);
+        assert_eq!(minify_factor(true, 1.0, 2.0), 1);
+        assert_eq!(minify_factor(false, 1.0, 0.1), 1, "Faster keeps every pixel");
+        assert_eq!(minify_factor(true, 1.0, 0.0), 256);
+        assert_eq!(minify_factor(true, f64::NAN, 1.0), 1);
+        // 2560 px by 3: 854 texels hold 2562 px, the image is 2560 / 2562 of them.
+        let uv = crate::frames::fitted_uv([2560, 1440], 3);
+        assert!((uv.max.x - 2560.0 / 2562.0).abs() < 1e-6 && uv.max.y == 1.0, "{uv:?}");
+        assert_eq!(crate::frames::fitted_uv([7, 5], 1).max, egui::pos2(1.0, 1.0));
+        let img =
+            egui::ColorImage::new([5, 1], vec![egui::Color32::WHITE, egui::Color32::BLACK, egui::Color32::WHITE, egui::Color32::BLACK, egui::Color32::WHITE]);
+        let out = crate::frames::fit_texture_by(img, 4096, 2);
+        assert_eq!(out.size, [3, 1]);
+        assert_eq!(out.pixels[1], egui::Color32::from_gray(128), "texels average their pixels");
+        assert_eq!(out.pixels[2], egui::Color32::WHITE, "the last one only the pixels it holds");
     }
 }

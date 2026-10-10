@@ -132,7 +132,10 @@ fn preview_with_audio_shows_every_frame_and_sounds_once_cached() {
     assert!(h.state().playback.audio_held && h.state().audio.is_none(), "nothing is cached: no sound yet");
     let mut last = frame(&h);
     let mut shown = 0;
-    for _ in 0..2000 {
+    // Wait on the clock, not a step count: under a loaded machine (parallel test binaries) the
+    // background cache can take far longer than 2000 short steps to get ahead.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline {
         h.step();
         if h.state().audio.is_some() {
             break;

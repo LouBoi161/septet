@@ -6,7 +6,49 @@ use crate::automation::Registry;
 use crate::icons::{self, Icon};
 use crate::theme::Tokens;
 
-/// "Hot text": a blue number you drag horizontally to scrub, click to type.
+/// The [`egui::UiStackInfo`] tag of a dock panel's `Ui`: Tab moves between the hot-text fields
+/// of one panel.
+pub const PANEL_TAG: &str = "effectcraft.panel";
+
+/// A panel's hot-text fields in drawing order (this pass's and the last one's), and a Tab
+/// pressed while typing in one: (that field, Shift held, the pass).
+#[derive(Clone, Default)]
+struct TabOrder {
+    pass: u64,
+    current: Vec<egui::Id>,
+    last: Vec<egui::Id>,
+    pending: Option<(egui::Id, bool, u64)>,
+}
+
+fn tab_order_id(ui: &Ui) -> egui::Id {
+    let panel = ui.stack().iter().find(|s| s.tags().contains(PANEL_TAG)).map_or(egui::Id::NULL, |s| s.id);
+    egui::Id::new(("hot-tab-order", panel))
+}
+
+/// Puts hot-text field `id` in its panel's Tab order. True when a Tab in the field before it
+/// (Shift+Tab: after it) moves the typing here.
+fn tab_stop(ui: &Ui, id: egui::Id) -> bool {
+    let key = tab_order_id(ui);
+    let pass = ui.ctx().cumulative_pass_nr();
+    ui.data_mut(|d| {
+        let o = d.get_temp_mut_or_default::<TabOrder>(key);
+        if o.pass != pass {
+            o.last = std::mem::take(&mut o.current);
+            o.pass = pass;
+        }
+        o.current.push(id);
+        let Some((from, back, at)) = o.pending else { return false };
+        let i = o.last.iter().position(|f| *f == from);
+        let next = i.and_then(|i| if back { i.checked_sub(1) } else { i.checked_add(1) }).and_then(|i| o.last.get(i)).copied();
+        if next == Some(id) || next.is_none() || pass > at.saturating_add(2) {
+            o.pending = None;
+        }
+        next == Some(id)
+    })
+}
+
+/// "Hot text": a blue number you drag horizontally to scrub, click to type. Tab / Shift+Tab
+/// while typing commits and types in the panel's next / previous one, as in After Effects.
 /// Returns (response, Some(new value) when changed, drag finished).
 pub fn hot_number_at(
     ui: &mut Ui,
@@ -20,16 +62,28 @@ pub fn hot_number_at(
     t: &Tokens,
 ) -> (Rect, Option<f64>, bool) {
     let editing_id = id.with("editing");
-    let editing: Option<String> = ui.data(|d| d.get_temp(editing_id));
+    let mut editing: Option<String> = ui.data(|d| d.get_temp(editing_id));
+    if tab_stop(ui, id) && editing.is_none() {
+        editing = Some(format!("{value:.decimals$}"));
+    }
     let text = format!("{value:.decimals$}{suffix}");
     let galley = ui.painter().layout_no_wrap(text, Tokens::ui(12.0), t.hot_text);
     let rect = Rect::from_min_size(rect_min, galley.size() + vec2(4.0, 4.0));
     if let Some(mut buf) = editing {
         let er = Rect::from_min_size(rect_min - vec2(2.0, 1.0), vec2((galley.size().x + 24.0).max(54.0), 18.0));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(er));
-        let r = child.add(egui::TextEdit::singleline(&mut buf).desired_width(er.width()).font(Tokens::ui(12.0)).margin(egui::Margin::symmetric(2, 1)));
+        // (Tab stays with the field: it moves to the next hot-text field, not the next widget.)
+        let r = child.add(
+            egui::TextEdit::singleline(&mut buf)
+                .id(id.with("text"))
+                .desired_width(er.width())
+                .font(Tokens::ui(12.0))
+                .margin(egui::Margin::symmetric(2, 1))
+                .lock_focus(true),
+        );
+        let tab = r.has_focus().then(|| ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab).then_some(i.modifiers.shift))).flatten();
         let mut out = None;
-        if r.lost_focus() {
+        if r.lost_focus() || tab.is_some() {
             let txt = buf.trim().trim_end_matches(suffix).trim().replace(',', ".");
             if !ui.input(|i| i.key_pressed(egui::Key::Escape))
                 && let Ok(v) = txt.parse::<f64>()
@@ -38,6 +92,11 @@ pub fn hot_number_at(
                 out = Some(v.clamp(range.0, range.1));
             }
             ui.data_mut(|d| d.remove::<String>(editing_id));
+            if let Some(back) = tab {
+                r.surrender_focus();
+                let (key, pass) = (tab_order_id(ui), ui.ctx().cumulative_pass_nr());
+                ui.data_mut(|d| d.get_temp_mut_or_default::<TabOrder>(key).pending = Some((id, back, pass)));
+            }
         } else {
             keep_focus(ui.ctx(), &r, &buf);
             ui.data_mut(|d| d.insert_temp(editing_id, buf));
@@ -97,11 +156,13 @@ pub fn hot_int_at(ui: &mut Ui, rect_min: egui::Pos2, id: egui::Id, value: i64, s
 
 /// Keep the keyboard on an inline editor that is open until it loses the focus. The frame it
 /// opens (it has no focus yet) its whole `text` is selected, so typing replaces the value.
+/// (Only then is the focus requested: a request resets what keys the field keeps for itself,
+/// such as Tab with [`egui::TextEdit::lock_focus`].)
 pub fn keep_focus(ctx: &egui::Context, field: &Response, text: &str) {
     if !ctx.memory(|m| m.has_focus(field.id)) {
         select_all(ctx, field.id, text);
+        field.request_focus();
     }
-    field.request_focus();
 }
 
 /// Select all of the text field `id`'s `text`, so typing replaces it.
@@ -365,6 +426,61 @@ pub fn check_label(on: bool, label: &str) -> String {
     if on { format!("✓ {label}") } else { format!("   {label}") }
 }
 
+fn label_swatch_id() -> egui::Id {
+    egui::Id::new("label-swatch")
+}
+
+/// The colour swatch of a Label menu row, as an atom for its button: Label menus show each
+/// label's colour before its name (After Effects), so a label is picked by its colour. Paint it
+/// with [`paint_label_swatch`] once the button is laid out.
+pub fn label_swatch() -> egui::Atom<'static> {
+    egui::Atom::custom(label_swatch_id(), vec2(12.0, 12.0))
+}
+
+/// Paint the [`label_swatch`] of a laid-out button: label `l`'s colour, an empty box for None.
+pub fn paint_label_swatch(ui: &Ui, out: &egui::AtomLayoutResponse, l: effectcraft_engine::color::Label, t: &Tokens) {
+    let Some(r) = out.rect(label_swatch_id()) else { return };
+    let r = Rect::from_center_size(r.center(), vec2(11.0, 11.0));
+    if l == effectcraft_engine::color::Label::None {
+        ui.painter().rect_stroke(r, 2.0, Stroke::new(1.0, t.text_dim), StrokeKind::Inside);
+    } else {
+        ui.painter().rect_filled(r, 2.0, t.label(l));
+    }
+}
+
+/// A Label menu row: label `l`'s swatch then `name`, highlighted when it is the `current` label.
+pub fn label_entry(ui: &mut Ui, l: effectcraft_engine::color::Label, name: &str, current: bool, t: &Tokens) -> Response {
+    let out = egui::Button::selectable(current, (label_swatch(), name)).atom_ui(ui);
+    paint_label_swatch(ui, &out, l, t);
+    out.response
+}
+
+/// The open label menu `id` at `pos` (open it with [`open_popup`]): every label's swatch and its
+/// name from Settings ▸ Labels (`name`). Returns the chosen label.
+pub fn label_popup(
+    ui: &mut Ui,
+    id: egui::Id,
+    pos: egui::Pos2,
+    current: effectcraft_engine::color::Label,
+    name: impl Fn(effectcraft_engine::color::Label) -> String,
+    t: &Tokens,
+) -> Option<effectcraft_engine::color::Label> {
+    if !popup_is_open(ui, id) {
+        return None;
+    }
+    let labels = effectcraft_engine::color::Label::ALL;
+    popup_list(ui, id, pos, Rect::NOTHING, labels.len(), 0, |ui| {
+        ui.set_min_width(160.0);
+        let mut chosen = None;
+        for l in labels {
+            if label_entry(ui, l, &name(l), l == current, t).clicked() {
+                chosen = Some(l);
+            }
+        }
+        chosen
+    })
+}
+
 /// Show a popup menu anchored at `pos` with string options; returns the chosen index.
 pub fn popup_menu(ui: &mut Ui, id: egui::Id, pos: egui::Pos2, options: &[String], current: Option<usize>) -> Option<usize> {
     if !popup_is_open(ui, id) {
@@ -404,11 +520,25 @@ pub fn popup_list<R>(ui: &mut Ui, id: egui::Id, pos: egui::Pos2, anchor: Rect, r
             egui::ScrollArea::vertical().max_height(max_h).min_scrolled_height((est - 16.0).min(max_h)).show(ui, |ui| chosen = body(ui));
         });
     });
+    let pass = ui.ctx().cumulative_pass_nr();
+    ui.ctx().data_mut(|d| d.insert_temp(popup_list_pass_id(), pass));
     let outside = pressed_outside(ui.ctx(), &area.response) && !ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| anchor.contains(p));
     if chosen.is_some() || outside || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         ui.data_mut(|d| d.insert_temp(id.with("open"), false));
     }
     chosen
+}
+
+/// The pass a [`popup_list`] was last drawn in.
+fn popup_list_pass_id() -> egui::Id {
+    egui::Id::new("popup-list-pass")
+}
+
+/// Whether a menu, context menu or popup list is open, or the menu bar has the keyboard (as of
+/// the last frame): the app's keyboard shortcuts wait until it closes (#279).
+pub fn any_menu_open(ctx: &egui::Context) -> bool {
+    let list_pass: Option<u64> = ctx.data(|d| d.get_temp(popup_list_pass_id()));
+    egui::Popup::is_any_open(ctx) || crate::menu_keys::active(ctx) || list_pass.is_some_and(|p| p + 1 >= ctx.cumulative_pass_nr())
 }
 
 /// A menu's (or submenu's) entries, scrolling with a scroll bar when they are taller than the
