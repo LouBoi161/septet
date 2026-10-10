@@ -12,6 +12,7 @@
 #   --branch NAME    branch to merge on (default upstream/<today>; created from main if missing)
 #   --no-tests       skip the cargo tests and the autotests (merge and build only)
 #   --no-autotests   skip the autotests
+#   --no-cargo-tests skip the cargo tests, still build and run the autotests
 #
 # Conflicts: the merge stays in progress and the conflicting files are listed (exit 2). Resolve them so our
 # Septet changes survive, `git commit`, then run the same command again: an app already at the tag is not
@@ -34,13 +35,14 @@ root=$(git rev-parse --show-toplevel)
 cd "$root"
 today=$(date +%F)
 branch=upstream/$today
-check=0 tests=1 autotests=1
+check=0 tests=1 autotests=1 cargo_tests=1
 while [ $# -gt 0 ]; do
     case $1 in
         --check) check=1 ;;
         --branch) branch=$2; shift ;;
         --no-tests) tests=0 autotests=0 ;;
         --no-autotests) autotests=0 ;;
+        --no-cargo-tests) cargo_tests=0 ;;
         -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
         -*) echo "unknown option $1" >&2; exit 64 ;;
         *) break ;;
@@ -169,6 +171,7 @@ verify() {
     step "build septet" "$out/$app-build.log" cargo build -p septet || return 1
     commit_lockfiles "$app" "$tag"
     [ $tests = 1 ] || return 0
+    [ $cargo_tests = 1 ] || { verify_autotests; return; }
     step "septet tests" "$out/$app-septet-test.log" cargo test -p septet || return 1
     # Known environment failures (scripts/sync-upstream-skips.txt); only passed when the app has some,
     # because a custom test harness may not take --skip.
@@ -176,6 +179,10 @@ verify() {
     skips=$(sed -n "s/^$app \([^ ]*\).*/--skip \1/p" "$root/scripts/sync-upstream-skips.txt" | tr '\n' ' ')
     step "$app tests" "$out/$app-test.log" bash -c "cd '$app' && cargo test --workspace --no-fail-fast ${skips:+-- $skips}" || return 1
     commit_lockfiles "$app" "$tag"
+    verify_autotests
+}
+
+verify_autotests() {
     [ $autotests = 1 ] || return 0
     start_xvfb && make_samples || return 1
     local failed=0
