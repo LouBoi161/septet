@@ -967,6 +967,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "bp256"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46f98c2d9e8e0796b24f84b7ae14159b91ae6ae4b85f74f7655a678a56ad5e1e"
+dependencies = [
+ "ecdsa 0.17.0",
+ "elliptic-curve 0.14.1",
+ "primefield",
+ "primeorder 0.14.0",
+]
+
+[[package]]
+name = "bp384"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc61f3a96b44a33fbb971e9917b81f4207d6dae9a6b0715845c785a48e73d9c2"
+dependencies = [
+ "ecdsa 0.17.0",
+ "elliptic-curve 0.14.1",
+ "primefield",
+ "primeorder 0.14.0",
+]
+
+[[package]]
 name = "brotli"
 version = "8.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1721,6 +1745,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "curve25519-dalek"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5eed333089e2e1c1ac8c6c0398e5e2497b4c9926ca6d0365ed1e099afa5bc23"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.1",
+ "curve25519-dalek-derive",
+ "digest 0.11.3",
+ "fiat-crypto 0.3.0",
+ "rustc_version",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "curve25519-dalek-derive"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2255,15 +2295,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "ed25519"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29fcf32e6c73d1079f83ab4d782de2d81620346a5f38c6237a86a22f8368980a"
+dependencies = [
+ "signature 3.0.0",
+]
+
+[[package]]
 name = "ed25519-dalek"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
 dependencies = [
- "curve25519-dalek",
- "ed25519",
+ "curve25519-dalek 4.1.3",
+ "ed25519 2.2.3",
  "serde",
  "sha2 0.10.9",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "ed25519-dalek"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ebaa1a2bf1290ab3bfe5a7b771d050ebffab2711c19a81691c683a5144a25de"
+dependencies = [
+ "curve25519-dalek 5.0.0",
+ "ed25519 3.0.0",
+ "sha2 0.11.0",
  "subtle",
  "zeroize",
 ]
@@ -5022,6 +5084,7 @@ dependencies = [
  "hayro-interpret",
  "image",
  "kurbo 0.13.1",
+ "log",
  "pic-scale",
  "vello_cpu 0.0.8",
 ]
@@ -5830,6 +5893,16 @@ dependencies = [
  "jxl-oxide-common",
  "jxl-threadpool",
  "tracing",
+]
+
+[[package]]
+name = "keccak"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8f198d1db720e4940b5a493201d199d9f24f568f8f746bd13706243a2f71598"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.1",
 ]
 
 [[package]]
@@ -7422,6 +7495,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "p521"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ad64cc32c2dc466317c12ee5853e61f159f9eab1fe7efade0395dc2e7b43449"
+dependencies = [
+ "base16ct 1.0.0",
+ "ecdsa 0.17.0",
+ "elliptic-curve 0.14.1",
+ "primefield",
+ "primeorder 0.14.0",
+ "sha2 0.11.0",
+]
+
+[[package]]
 name = "pango"
 version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7550,7 +7637,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "eframe",
  "egui",
@@ -7564,11 +7651,12 @@ dependencies = [
  "serde_json",
  "ureq",
  "winresource",
+ "winsafe",
 ]
 
 [[package]]
 name = "pdfcraft-a11y"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
@@ -7578,19 +7666,21 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-annot"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "pdfcraft-cos",
  "pdfcraft-fonts",
+ "pdfcraft-model",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "pdfcraft-automation"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "pdfcraft-engine",
  "pdfcraft-organize",
+ "pdfcraft-platform",
  "pdfcraft-render",
  "png 0.18.1",
  "serde_json",
@@ -7598,18 +7688,18 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-compare"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "pdfcraft-content"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "pdfcraft-cos",
 ]
 
 [[package]]
 name = "pdfcraft-cos"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "pdfcraft-crypt",
  "pdfcraft-filters",
@@ -7618,7 +7708,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-create"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "image",
  "pdfcraft-cos",
@@ -7631,7 +7721,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-crypt"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "aes 0.9.3",
  "md-5 0.11.0",
@@ -7642,20 +7732,24 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-edit"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
+ "pdfcraft-annot",
  "pdfcraft-content",
  "pdfcraft-cos",
  "pdfcraft-fonts",
  "pdfcraft-model",
  "thiserror 2.0.21",
+ "unicode-bidi",
 ]
 
 [[package]]
 name = "pdfcraft-engine"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
+ "icu_properties",
+ "idna",
  "image",
  "pdfcraft-a11y",
  "pdfcraft-annot",
@@ -7681,18 +7775,19 @@ dependencies = [
  "pdfcraft-xfdf",
  "png 0.18.1",
  "thiserror 2.0.21",
+ "url",
 ]
 
 [[package]]
 name = "pdfcraft-export"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "flate2",
 ]
 
 [[package]]
 name = "pdfcraft-filters"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "flate2",
  "thiserror 2.0.21",
@@ -7700,15 +7795,16 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-fonts"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
+ "harfrust 0.12.0",
  "pdfcraft-cos",
  "skrifa 0.44.0",
 ]
 
 [[package]]
 name = "pdfcraft-forms"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
@@ -7719,14 +7815,14 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-js"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "boa_engine",
 ]
 
 [[package]]
 name = "pdfcraft-measure"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "pdfcraft-annot",
  "pdfcraft-content",
@@ -7738,14 +7834,14 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-model"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "pdfcraft-cos",
 ]
 
 [[package]]
 name = "pdfcraft-ocr"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "ocrs",
  "pdfcraft-fonts",
@@ -7755,7 +7851,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-optimize"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "image",
  "pdfcraft-annot",
@@ -7767,7 +7863,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-organize"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
@@ -7775,8 +7871,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdfcraft-platform"
+version = "0.5.0"
+
+[[package]]
 name = "pdfcraft-preflight"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "pdfcraft-cos",
  "pdfcraft-model",
@@ -7784,7 +7884,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-print"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
@@ -7794,7 +7894,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-redact"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "pdfcraft-annot",
  "pdfcraft-content",
@@ -7808,57 +7908,74 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-render"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
+ "bytemuck",
  "getrandom 0.4.3",
  "hayro",
  "hayro-syntax",
  "kurbo 0.13.1",
  "log",
  "lopdf",
+ "pdfcraft-cos",
+ "pdfcraft-fonts",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "pdfcraft-sign"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "aes 0.9.3",
  "aws-lc-rs",
  "base64 0.22.1",
+ "bp256",
+ "bp384",
  "cbc",
+ "crypto-bigint 0.7.5",
  "des",
+ "ecdsa 0.17.0",
+ "ed25519-dalek 3.0.0",
  "getrandom 0.4.3",
  "hmac 0.13.0",
  "p256 0.14.0",
  "p384 0.14.0",
+ "p521",
  "pbkdf2",
  "pdfcraft-annot",
  "pdfcraft-cos",
  "pdfcraft-fonts",
  "rc2",
+ "ripemd",
  "rsa 0.10.0-rc.18",
  "rustls-cng",
  "security-framework",
  "sha1",
  "sha2 0.11.0",
+ "sha3",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "pdfcraft-ui-egui"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
+ "bytemuck",
  "eframe",
  "egui",
  "egui_extras",
  "getrandom 0.4.3",
  "js-sys",
  "log",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "pdfcraft-engine",
  "pdfcraft-fonts",
+ "pdfcraft-model",
+ "pdfcraft-platform",
  "pdfcraft-render",
  "png 0.18.1",
  "pollster 1.0.1",
@@ -7876,18 +7993,21 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-xfa"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "base64 0.22.1",
+ "image",
  "pdfcraft-cos",
  "pdfcraft-fonts",
+ "png 0.18.1",
  "roxmltree 0.20.0",
+ "sha2 0.11.0",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "pdfcraft-xfdf"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "pdfcraft-annot",
  "pdfcraft-cos",
@@ -9300,6 +9420,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ripemd"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dd4211456b4172d7e44261920c25acf07367c4f04bb5f5d54fc21b090d9b159"
+dependencies = [
+ "digest 0.11.3",
+]
+
+[[package]]
 name = "rmcp"
 version = "3.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9634,7 +9763,7 @@ dependencies = [
  "der 0.7.10",
  "digest 0.10.7",
  "ecdsa 0.16.9",
- "ed25519-dalek",
+ "ed25519-dalek 2.2.0",
  "hmac 0.12.1",
  "p256 0.13.2",
  "p384 0.13.1",
@@ -10030,6 +10159,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha3"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc9bad02c26382724b2d2692c6f179285e4b54eeecd7968f52a50059c3c11759"
+dependencies = [
+ "digest 0.11.3",
+ "keccak",
+ "sponge-cursor",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10290,6 +10430,12 @@ dependencies = [
  "base64ct",
  "der 0.8.2",
 ]
+
+[[package]]
+name = "sponge-cursor"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a0219bd7d979d58245a4f41f695e1ac9f8befdffadd7f61f1bae9e39abc6620"
 
 [[package]]
 name = "stable_deref_trait"
@@ -13000,7 +13146,7 @@ version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7e468321c81fb07fa7f4c636c3972b9100f0346e5b6a9f2bd0603a52f7ed277"
 dependencies = [
- "curve25519-dalek",
+ "curve25519-dalek 4.1.3",
  "rand_core 0.6.4",
  "zeroize",
 ]
