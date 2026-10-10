@@ -1841,7 +1841,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "designcraft-engine",
  "designcraft-render",
@@ -1859,7 +1859,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-color"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "kurbo 0.13.1",
  "moxcms 0.8.1",
@@ -1869,7 +1869,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-compose"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "designcraft-color",
  "designcraft-doc",
@@ -1884,7 +1884,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-doc"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "designcraft-color",
  "designcraft-geom",
@@ -1895,7 +1895,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-engine"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "designcraft-color",
  "designcraft-compose",
@@ -1920,7 +1920,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-epub"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "designcraft-color",
  "designcraft-doc",
@@ -1929,7 +1929,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-fonts"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "harfrust 0.13.3",
  "kurbo 0.13.1",
@@ -1941,7 +1941,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-format"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "designcraft-doc",
  "serde",
@@ -1952,7 +1952,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-geom"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "flo_curves",
  "kurbo 0.13.1",
@@ -1963,7 +1963,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-idml"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "designcraft-color",
  "designcraft-doc",
@@ -1975,7 +1975,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-images"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "designcraft-color",
  "designcraft-fonts",
@@ -1986,7 +1986,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-pdf"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "designcraft-color",
  "designcraft-compose",
@@ -2004,7 +2004,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-render"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "designcraft-color",
  "designcraft-compose",
@@ -2022,7 +2022,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-textimport"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "designcraft-doc",
  "quick-xml 0.38.4",
@@ -2031,7 +2031,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-tools"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "designcraft-color",
  "designcraft-compose",
@@ -2043,7 +2043,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-ui-egui"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "designcraft-color",
  "designcraft-compose",
