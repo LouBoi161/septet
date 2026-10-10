@@ -170,7 +170,7 @@ verify() {
     commit_lockfiles "$app" "$tag"
     [ $tests = 1 ] || return 0
     step "septet tests" "$out/$app-septet-test.log" cargo test -p septet || return 1
-    step "$app tests" "$out/$app-test.log" bash -c "cd '$app' && cargo test --workspace" || return 1
+    step "$app tests" "$out/$app-test.log" bash -c "cd '$app' && cargo test --workspace --no-fail-fast" || return 1
     commit_lockfiles "$app" "$tag"
     [ $autotests = 1 ] || return 0
     start_xvfb && make_samples || return 1
