@@ -124,7 +124,7 @@ make_samples() {
     magick -size 800x600 gradient:'#2f6fd6-#e8a33d' -fill white -pointsize 64 -gravity center \
         -annotate 0 'Septet sync' "$out/sample.png"
     magick -size 595x842 xc:white -fill '#2f6fd6' -draw 'rectangle 60,60 535,300' -fill black -pointsize 36 \
-        -annotate +80,380 'Septet sync test' "$out/sample.pdf"
+        -annotate +80+380 'Septet sync test' "$out/sample.pdf"
 }
 
 # One autotest scenario on Xvfb with a throwaway HOME: scenario, label, extra env.
