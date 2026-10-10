@@ -167,6 +167,30 @@ fn effect_preview_is_kept_as_one_undo_step() {
 }
 
 #[test]
+fn raster_filter_dialogs_preview_and_apply() {
+    for (effect, key, value) in [("blur.radial", "method", "zoom"), ("blur.smart", "quality", "high"), ("sharpen.unsharpMask", "amount", "120")] {
+        let mut app = app();
+        let id = app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 50, "height": 50})).unwrap()["id"].as_u64().unwrap();
+        app.run("select.all", json!({})).unwrap();
+        app.run("effect.dialog", json!({"effect": effect})).unwrap();
+        let d = app.ui.dialog.as_mut().unwrap();
+        let v: serde_json::Value = value.parse::<f64>().map_or_else(|_| json!(value), |n| json!(n));
+        d.fields.insert(key.into(), v.clone());
+        frame(&mut app, Default::default());
+        assert!(app.session.in_interaction(), "{effect}: previews");
+        confirm(&mut app).unwrap();
+        let n = app.session.doc().unwrap().doc.node(vectorcraft_doc::NodeId(id)).unwrap().clone();
+        assert_eq!(n.appearance.effects.len(), 1, "{effect}");
+        assert_eq!(n.appearance.effects[0].params[key], v, "{effect}");
+    }
+    // Fields follow the effect's documented order (its dialog's), not the alphabet.
+    let doc = vectorcraft_effects::effect_info("blur.smart").unwrap().params;
+    let ranks: Vec<usize> = ["radius", "threshold", "quality"].iter().map(|k| super::effect::doc_rank(doc, k)).collect();
+    assert!(ranks.windows(2).all(|w| w[0] < w[1]), "{ranks:?}");
+    assert_eq!(super::effect::doc_rank(doc, "nope"), usize::MAX);
+}
+
+#[test]
 fn effect_dialog_applies_to_its_appearance_item() {
     let mut app = app();
     let id = app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 50, "height": 50})).unwrap()["id"].as_u64().unwrap();
@@ -345,4 +369,15 @@ fn a_dialog_opens_with_its_first_field_focused_so_typing_and_enter_apply() {
     assert!(app.ui.dialog.is_none());
     let after = bounds(&app);
     assert!((after.x0 - before.x0 - 15.0).abs() < 1e-6 && (after.y0 - before.y0).abs() < 1e-6, "{before:?} → {after:?}");
+}
+
+/// #793: Artboard Options lists its fields as Name, Width, Height, not by key.
+#[test]
+fn artboard_options_lists_name_then_width_and_height() {
+    let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), Default::default());
+    app.session.execute("file.new", &json!({"width": 612, "height": 792})).unwrap();
+    open(&mut app, "artboardOptions", json!({"index": 0, "name": "Artboard 1", "width": 612, "height": 792, "x": 0, "y": 0}));
+    let text = crate::tests_labels::painted_text(&mut app, |app, ui| show(app, ui.ctx()));
+    let at = |s: &str| text.find(s).unwrap_or_else(|| panic!("{s} in {text}"));
+    assert!(at("Name") < at("Width") && at("Width") < at("Height"), "{text}");
 }

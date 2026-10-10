@@ -19,6 +19,7 @@
 //! [`FORMATS`] is the single list of formats (append-only); open dialogs use [`open_filters`],
 //! agents query `document.formats`.
 
+mod affinity;
 mod batch;
 pub mod dxf;
 pub mod dxfimport;
@@ -46,17 +47,20 @@ pub use encode::{ARTBOARD_PARAMS, ArtboardPick, Encoded, encode, encode_all, enc
 pub(crate) use encode::{anti_alias, background, with_single_artboard};
 pub(crate) use export::isolated;
 pub use export::{export_source, objects_document};
+pub(crate) use load::check_not_lossy_overwrite;
 use load::err;
 pub(crate) use load::import_svg;
 pub(crate) use load::native_file;
 pub(crate) use load::source;
 pub use load::{Loaded, RasterImage, detect, file_name, load, load_with, open_bytes, open_bytes_with, open_template, raster_image};
+pub use load::{losses_summary, overwrite_losses};
+pub(crate) use native::preview_png;
 pub use native::with_compression_pref;
 pub use pdfimport::{LoadOptions, page_document};
 pub(crate) use save::job_for;
 pub use save::{
     SAVE_FORMATS, SaveJob, SaveMode, SavePlan, export_folder, save_filters, save_format, save_job, save_plan, save_with, stamp_save_dates,
-    templates_folder,
+    templates_dialog_folder, templates_folder,
 };
 pub use screens::{PRESETS as SCREEN_PRESETS, ScreenSize, preset_rows as screen_preset_rows};
 pub(crate) use screens::{
@@ -78,7 +82,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Open Document",
             [],
             None,
-            "{path} or {name, dataBase64}, PDF/.ai: pages?: \"2-3, 5\" (1-based, default all; one artboard each) | page?: n, cropTo?: bounding|art|crop (default)|trim|bleed|media (the box each artboard gets; bounding: the art's bounds), password? (encrypted PDFs; see document.pdfInfo), textAs?: text (default: point type per line, lines wrapped in a frame as area type where they lay out the same, in the file's fonts by name; missing ones are listed in warnings) | outlines (glyph paths), layers?: true (default: optional content groups become layers with their visibility, print state and lock — art that is off comes in as a hidden layer; other art goes to a layer per page) | false (one layer per page, without the art that is off; Save then asks for a name), colorMode?: rgb|cmyk (the mode the document opens in, its colours converted as file.documentColorMode does, grays? as there; default: the file's — a PDF keeps CMYK, Gray and spot inks (spot swatches at a tint) and opens in CMYK when painted mostly in CMYK), DXF: dxf?: {layout?: \"Model\" (default) | a paper layout's name (document.dxfInfo lists them), unit?, scale? (the ratio: 1 unit of the art = scale drawing units; default: the drawing at 1:1 in its own unit), fit?: false (scale to fit an artboard of fitTo?: [612, 792], turned to the art's orientation), scaleLineweights?: false (lineweights scale with the art), center?: true (false: the drawing's origin on the artboard's bottom-left corner; fitted art's bottom-left corner), mergeLayers?: false (all art on one layer)} → {index, title, format, warnings, restored, missingLinks, modifiedLinks, updatedLinks: [{name, path, ids}]}; any readable format (see document.formats): .vectorcraft/.drawcraft, .svg/.svgz, .pdf/.ai, .ait, ASCII .dxf (each DXF layer with art a layer; blocks symbols; what can't come in is listed in warnings), PNG/JPEG/GIF/WebP/TIFF/BMP (an image opens as a document of its pixel size), .emf/.wmf (one artboard, the picture's frame; records VectorCraft doesn't read are skipped with one warning), .eps and PostScript .ai (one artboard, the bounding box: an EPS file VectorCraft wrote restores the document it carries, restored: true; other files are read by a PostScript interpreter — paths, colours and spot inks, clips, gradients, images, type in the fonts named — and come in as their TIFF preview, with a warning, when their PostScript can't be read). A PDF/.ai/.ait or SVG saved with Preserve Editing restores the native document it carries (restored: true; a PDF only when no pages are picked), unless the file was changed elsewhere since or the data can't be read: then its artwork is imported and the first warning says why. Templates (native templates, .ait) open as a new untitled document; a restored .ai keeps its path (Save writes .ai again). Linked images are read from their files (looked for at their path, then relative to the document): missing ones show their saved preview (links.relink), modified ones are read again only with Preferences › Update Links: Automatically (else links.update). An SVG's <image> files (relative links from the SVG's folder) stay linked, SVG files become art, missing ones a placeholder in their box (a warning and missingLinks)",
+            "{path} or {name, dataBase64}, PDF/.ai: pages?: \"2-3, 5\" (1-based, default all; one artboard each) | page?: n, cropTo?: bounding|art|crop (default)|trim|bleed|media (the box each artboard gets; bounding: the art's bounds), password? (encrypted PDFs; see document.pdfInfo), textAs?: text (default: point type per line, lines wrapped in a frame as area type where they lay out the same, in the file's fonts by name; missing ones are listed in warnings) | outlines (glyph paths), layers?: true (default: optional content groups become layers with their visibility, print state and lock — art that is off comes in as a hidden layer; other art goes to a layer per page) | false (one layer per page, without the art that is off; Save then asks for a name), editingData?: true (default: an EPS or .ai that carries its editor's own copy of the art opens from it, with its layers, hidden objects, guides, artboards and the art outside them; a .ai whose type shows opens from its PDF part with textAs: outlines) | false (only what its page or PDF part prints, for print pipelines; a .ai saved without PDF compatibility then can't be opened), colorMode?: rgb|cmyk (the mode the document opens in, its colours converted as file.documentColorMode does, grays? as there; default: the file's — a PDF keeps CMYK, Gray and spot inks (spot swatches at a tint) and opens in CMYK when painted mostly in CMYK), DXF: dxf?: {layout?: \"Model\" (default) | a paper layout's name (document.dxfInfo lists them), unit?, scale? (the ratio: 1 unit of the art = scale drawing units; default: the drawing at 1:1 in its own unit), fit?: false (scale to fit an artboard of fitTo?: [612, 792], turned to the art's orientation), scaleLineweights?: false (lineweights scale with the art), center?: true (false: the drawing's origin on the artboard's bottom-left corner; fitted art's bottom-left corner), mergeLayers?: false (all art on one layer)} → {index, title, format, warnings, restored, missingLinks, modifiedLinks, updatedLinks: [{name, path, ids}]}; any readable format (see document.formats): .vectorcraft/.drawcraft, .svg/.svgz, .pdf/.ai, .ait, ASCII .dxf (each DXF layer with art a layer; blocks symbols; what can't come in is listed in warnings), PNG/JPEG/GIF/WebP/TIFF/BMP (an image opens as a document of its size at the resolution it declares, as file.place sizes it; 72 ppi, 1 px = 1 pt, when it declares none), .emf/.wmf (one artboard, the picture's frame; records VectorCraft doesn't read are skipped with one warning), .eps and PostScript .ai (one artboard, the bounding box: an EPS file VectorCraft wrote restores the document it carries, restored: true; other files are read by a PostScript interpreter — paths, colours and spot inks, clips, gradients, images, type in the fonts named — and come in as their TIFF preview, with a warning, when their PostScript can't be read). A PDF/.ai/.ait or SVG saved with Preserve Editing restores the native document it carries (restored: true; a PDF only when no pages are picked), unless the file was changed elsewhere since or the data can't be read: then its artwork is imported and the first warning says why. Templates (native templates, .ait) open as a new untitled document; a restored .ai keeps its path (Save writes .ai again). Linked images are read from their files (looked for at their path, then relative to the document): missing ones show their saved preview (links.relink), modified ones are read again only with Preferences › Update Links: Automatically (else links.update). An SVG's <image> files (relative links from the SVG's folder) stay linked, SVG files become art, missing ones a placeholder in their box (a warning and missingLinks)",
             always,
             load::open
         ),
@@ -465,8 +469,8 @@ pub const FORMATS: &[Format] = &[
         extensions: &["ai"],
         mime: "application/pdf",
         read: true,
-        // Saved (Save As), not exported.
-        write: false,
+        // Save As writes it; exports write the same file.
+        write: true,
         raster: false,
         options: native::AI_OPTIONS,
     },
@@ -555,6 +559,9 @@ pub const FORMATS: &[Format] = &[
     Format { id: "wmf", label: "WMF", extensions: &["wmf"], mime: "image/wmf", read: true, write: true, raster: false, options: metafile::OPTIONS },
     Format { id: "tga", label: "Targa", extensions: &["tga"], mime: "image/x-tga", read: false, write: true, raster: true, options: TGA_OPTIONS },
     Format { id: "psd", label: "PSD", extensions: &["psd"], mime: "image/x-psd", read: false, write: true, raster: true, options: PSD_OPTIONS },
+    // Affinity Photo's `.afphoto` opens by its content but isn't listed: Finder shouldn't offer a
+    // vector app for a raster editor's documents.
+    reader("affinity", "Affinity", &["af", "afdesign", "afpub"], "application/vnd.affinity", false),
 ];
 
 /// Every extension `document.open` reads (the "All readable files" filter of open dialogs).
@@ -579,6 +586,9 @@ pub const OPEN_EXTS: &[&str] = &[
     "emf",
     "wmf",
     "eps",
+    "af",
+    "afdesign",
+    "afpub",
 ];
 
 /// The extension that picks each writable format when exporting (the format's first; PNG-8 shares
@@ -618,6 +628,9 @@ pub const PLACE_EXTS: &[&str] = &[
     "emf",
     "wmf",
     "eps",
+    "af",
+    "afdesign",
+    "afpub",
     "txt",
 ];
 
@@ -638,9 +651,11 @@ pub fn open_filters() -> impl Iterator<Item = (&'static str, &'static [&'static 
         .chain(std::iter::once(("Plug-ins", super::plugin::EXTS)))
 }
 
-/// File → Place dialog filters: "All placeable files", then one per readable format, then text.
+/// File → Place dialog filters: "All placeable files", then one per placeable format, then text.
 pub fn place_filters() -> impl Iterator<Item = (&'static str, &'static [&'static str])> {
-    std::iter::once(("All placeable files", PLACE_EXTS)).chain(format_filters()).chain(std::iter::once(("Text", TEXT_EXTS)))
+    std::iter::once(("All placeable files", PLACE_EXTS))
+        .chain(format_filters().filter(|(_, exts)| exts.iter().all(|ext| PLACE_EXTS.contains(ext))))
+        .chain(std::iter::once(("Text", TEXT_EXTS)))
 }
 
 /// A format by id or extension (any case, leading dot allowed; `jpeg` finds `jpg`).
@@ -710,6 +725,22 @@ pub(crate) fn create_dir(path: &str) -> Result<()> {
     std::fs::create_dir_all(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))
 }
 
+/// Write `bytes` to a new file at `path`. A file already at `path` is an error and is never
+/// replaced. When the write fails part way, the file it started is removed.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn write_new_file(path: &str, bytes: &[u8]) -> Result<()> {
+    use std::io::Write as _;
+    let err = |e: std::io::Error| EngineError::Other(format!("{path}: {e}"));
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(err)?;
+    let written = f.write_all(bytes).and_then(|()| f.sync_all());
+    drop(f);
+    written.map_err(|e| {
+        // Best effort: the partly written file is all there is to clean up.
+        let _ = std::fs::remove_file(path);
+        err(e)
+    })
+}
+
 /// A file's size (bytes) and modification time (ms since the Unix epoch, when the file system
 /// keeps one); `None` when there is no file at `path`.
 #[cfg(not(target_arch = "wasm32"))]
@@ -768,6 +799,11 @@ pub(crate) fn write_file(path: &str, _: &[u8]) -> Result<()> {
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn create_dir(path: &str) -> Result<()> {
+    Err(no_fs(path))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn write_new_file(path: &str, _: &[u8]) -> Result<()> {
     Err(no_fs(path))
 }
 
@@ -860,6 +896,8 @@ pub(crate) fn write_or_return(path: Option<&str>, bytes: &[u8], extra: Value) ->
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_affinity;
+#[cfg(test)]
 mod tests_pdf;
 #[cfg(test)]
 mod tests_pdfcolor;
@@ -921,6 +959,9 @@ mod tests_psd;
 
 #[cfg(test)]
 mod tests_epsimport;
+
+#[cfg(test)]
+mod tests_aiimport;
 
 #[cfg(test)]
 mod tests_pdflayers;

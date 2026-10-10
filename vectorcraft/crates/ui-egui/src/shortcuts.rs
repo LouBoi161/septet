@@ -73,11 +73,20 @@ pub(crate) fn all_shortcuts() -> Vec<(KeyboardShortcut, &'static str, serde_json
             v.push((sc, "window.panel", json!({ "panel": panel })));
         }
     }
+    settings_chord(&mut v, cfg!(target_os = "macos"));
     // Most specific (most modifiers) first so Cmd+Shift+Z isn't eaten by Cmd+Z.
     v.sort_by_key(|(sc, ..)| {
         std::cmp::Reverse(sc.modifiers.shift as u8 + sc.modifiers.alt as u8 + sc.modifiers.command as u8 + sc.modifiers.ctrl as u8)
     });
     v
+}
+
+/// On a Mac, Cmd+, opens Settings as in every Mac app (#663), beside Preferences' own shortcut,
+/// unless a command or a user's shortcut already took it.
+fn settings_chord(v: &mut Vec<(KeyboardShortcut, &'static str, serde_json::Value)>, mac: bool) {
+    if let Some(sc) = parse("Cmd+,").filter(|sc| mac && !v.iter().any(|(s, ..)| s == sc)) {
+        v.push((sc, "edit.preferences", json!({})));
+    }
 }
 
 /// Consume a press of `sc`. A `=` chord also takes [`Key::Plus`], which is how `+` arrives from
@@ -409,12 +418,18 @@ pub fn handle(app: &mut VectorcraftApp, ctx: &egui::Context) {
     {
         let _ = app.run("edit.clear", json!({}));
     }
-    // Single-key tool shortcuts (no Cmd/Ctrl/Alt).
+    // Single-key tool shortcuts (no Cmd/Ctrl/Alt). With a layout without Latin letters (Persian,
+    // Arabic, Russian, Greek…) the key's position stands in for what it types (#793).
     let events: Vec<(String, Modifiers)> = ctx.input(|i| {
+        let mut physical = None;
         i.events
             .iter()
             .filter_map(|e| match e {
-                egui::Event::Text(t) => Some((t.clone(), i.modifiers)),
+                egui::Event::Key { physical_key, pressed: true, .. } => {
+                    physical = *physical_key;
+                    None
+                }
+                egui::Event::Text(t) => Some((latin(t, physical), i.modifiers)),
                 _ => None,
             })
             .collect()
@@ -440,6 +455,16 @@ pub fn handle(app: &mut VectorcraftApp, ctx: &egui::Context) {
     }
 }
 
+/// What a single-key shortcut reads for `text`, typed by the key at `physical`: the text itself,
+/// or, when it holds no ASCII character (a layout without Latin letters), what that key types on a
+/// US layout, so V selects the Selection tool whatever the V key types.
+fn latin(text: &str, physical: Option<Key>) -> String {
+    match physical {
+        Some(k) if !text.is_ascii() => k.symbol_or_name().to_lowercase(),
+        _ => text.to_string(),
+    }
+}
+
 /// The digit a number-row or keypad key types.
 fn digit_of(k: Key) -> Option<u8> {
     const DIGITS: [Key; 10] = [Key::Num0, Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9];
@@ -459,6 +484,31 @@ mod tests {
         });
         out.textures_delta.clear();
         out
+    }
+
+    /// Cmd+Shift+B while the Type tool edits text is Type › Bold, not Hide Bounding Box (#724).
+    #[test]
+    fn cmd_shift_b_while_typing_is_bold_not_the_bounding_box() {
+        let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), Default::default());
+        app.session.execute("file.new", &json!({"width": 200, "height": 200})).unwrap();
+        app.select_tool("type");
+        let view = app.view_info();
+        for kind in [vectorcraft_tools::PointerKind::Down, vectorcraft_tools::PointerKind::Up] {
+            app.session.pointer(&vectorcraft_tools::PointerEvent::new(kind, 50.0, 50.0), view).unwrap();
+        }
+        frame(&mut app, vec![egui::Event::Text("Bold".into())]);
+        assert!(app.session.tool_wants_text());
+        let chord =
+            egui::Event::Key { key: Key::B, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND | Modifiers::SHIFT };
+        frame(&mut app, vec![chord.clone()]);
+        assert!(app.ui.view.bounding_box, "the bounding box stays");
+        // The chord reached Bold: the text is in a bold face, or its family has none and says so.
+        let face = crate::panels::character::text_style(&app).map(|(s, _)| s.font_style).unwrap_or_default();
+        assert!(face.contains("Bold") || app.ui.status.contains("has no Bold style"), "{face:?} {:?}", app.ui.status);
+        // Out of the text, the chord hides the bounding box as before.
+        app.select_tool("selection");
+        frame(&mut app, vec![chord]);
+        assert!(!app.ui.view.bounding_box);
     }
 
     /// Tab shows and hides the panels, and in the Type tool it types a tab, without moving the
@@ -648,6 +698,27 @@ mod tests {
         assert_eq!(app.session.tool_id(), "curvature");
     }
 
+    /// #793: with a layout without Latin letters the one-key shortcuts go by the key's position:
+    /// the P key typing Persian `ح` chooses the Pen, the V key typing Russian `м` the Selection
+    /// tool. A Latin layout keeps the letter typed: AZERTY's A (the Q key's place) is A.
+    #[test]
+    fn one_key_shortcuts_follow_the_key_on_layouts_without_latin_letters() {
+        let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), Default::default());
+        app.session.execute("file.new", &json!({"width": 200, "height": 200})).unwrap();
+        let typed = |key, physical, text: &str| {
+            vec![
+                egui::Event::Key { key, physical_key: Some(physical), pressed: true, repeat: false, modifiers: Modifiers::NONE },
+                egui::Event::Text(text.into()),
+            ]
+        };
+        frame(&mut app, typed(Key::P, Key::P, "ح"));
+        assert_eq!(app.session.tool_id(), "pen");
+        frame(&mut app, typed(Key::V, Key::V, "м"));
+        assert_eq!(app.session.tool_id(), "selection");
+        frame(&mut app, typed(Key::A, Key::Q, "a"));
+        assert_eq!(app.session.tool_id(), "directSelection", "AZERTY: the letter typed");
+    }
+
     #[test]
     fn plus_typed_any_way_zooms_in() {
         assert_eq!(parse("Cmd++"), parse("Cmd+="), "`+` and `=` are one chord key");
@@ -689,6 +760,24 @@ mod tests {
         assert_eq!((preview.0.as_str(), &preview.1["perpendicular"]), ("perspective.move", &json!(true)));
         assert_eq!(digit_of(Key::Num0), Some(0));
         assert_eq!(digit_of(Key::A), None);
+    }
+
+    /// Cmd+, opens Settings on a Mac only, and never takes a chord a command already has.
+    #[test]
+    fn cmd_comma_opens_settings_on_a_mac() {
+        let comma = parse("Cmd+,").unwrap();
+        let mut v = vec![];
+        super::settings_chord(&mut v, false);
+        assert!(v.is_empty(), "not elsewhere");
+        super::settings_chord(&mut v, true);
+        assert_eq!(v.len(), 1);
+        assert_eq!((v[0].0, v[0].1), (comma, "edit.preferences"));
+        let mut taken = vec![(comma, "view.zoomIn", json!({}))];
+        super::settings_chord(&mut taken, true);
+        assert_eq!(taken.len(), 1, "a command that has it keeps it");
+        if cfg!(target_os = "macos") {
+            assert!(super::all_shortcuts().iter().any(|(sc, id, _)| *sc == comma && *id == "edit.preferences"));
+        }
     }
 
     #[test]

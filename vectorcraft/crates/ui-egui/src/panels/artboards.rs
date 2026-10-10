@@ -12,14 +12,32 @@ use crate::theme::Tokens;
 use crate::widgets::{self, menu_item};
 use crate::{VectorcraftApp, icons};
 
+/// The Artboard tool's Move Artwork with Artboard and Scale Artwork with Artboard options (#602) as
+/// check boxes: the Control bar and Properties show them while the tool is in use.
+pub(crate) fn art_options(app: &mut VectorcraftApp, ui: &mut Ui) {
+    let opts = app.session.tool_options();
+    for (key, label, default) in [("moveArt", tl!("Move Artwork with Artboard"), true), ("scaleArt", tl!("Scale Artwork with Artboard"), false)] {
+        let on = opts[key].as_bool().unwrap_or(default);
+        if widgets::check(ui, label, on, true) {
+            app.run("tool.setOption", json!({ "key": key, "value": !on })).ok();
+        }
+    }
+}
+
+/// Whether artboards resized while the Artboard tool is in use take their art along (its Scale
+/// Artwork with Artboard option): the panels' sizes pass it to `artboard.setProps` as `scaleArt`.
+pub(crate) fn scale_art(app: &VectorcraftApp) -> bool {
+    app.session.tool_id() == "artboard" && app.session.tool_options()["scaleArt"].as_bool().unwrap_or(false)
+}
+
 /// The active artboard (of `n`).
-fn selected(app: &VectorcraftApp, n: usize) -> usize {
+pub(crate) fn selected(app: &VectorcraftApp, n: usize) -> usize {
     app.view().map_or(0, |v| v.artboard).min(n.saturating_sub(1))
 }
 
 /// Make artboard `i` the active one, leaving the view where it is: the navigator's and, while it
 /// is the tool, the Artboard tool's.
-fn select(app: &mut VectorcraftApp, i: usize) {
+pub(crate) fn select(app: &mut VectorcraftApp, i: usize) {
     if let Some(v) = app.view_mut() {
         v.artboard = i;
     }
@@ -113,7 +131,9 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
     });
     let n = abs.len();
     widgets::bottom_bar(ui, |ui| {
-        widgets::icon_button_enabled(ui, "dc-rearrange", tl!("Rearrange All Artboards (on the roadmap)"), false, false, 24.0);
+        if widgets::icon_button_enabled(ui, "dc-rearrange", tl!("Rearrange All Artboards"), false, n > 1, 24.0).clicked() {
+            open_rearrange(app);
+        }
         ui.add_space((ui.available_width() - 4.0 * 28.0).max(0.0));
         if widgets::icon_button_enabled(ui, "dc-arrow-up", tl!("Move Up"), false, sel > 0, 24.0).clicked()
             && app.run("artboard.reorder", json!({"index": sel, "to": sel - 1})).is_ok()
@@ -140,6 +160,11 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
     });
 }
 
+/// Open Rearrange All Artboards (#681).
+pub(crate) fn open_rearrange(app: &mut VectorcraftApp) {
+    app.run("ui.menuDialog", json!({ "command": "artboard.rearrange" })).ok();
+}
+
 pub fn menu(app: &mut VectorcraftApp, ui: &mut Ui) {
     let n = app.session.active().map(|d| d.doc.artboards.len()).unwrap_or(0);
     let sel = selected(app, n);
@@ -161,7 +186,9 @@ pub fn menu(app: &mut VectorcraftApp, ui: &mut Ui) {
     if menu_item(ui, tl!("Artboard Options…"), n > 0, false) {
         app.select_tool("artboard");
     }
-    menu_item(ui, tl!("Rearrange All Artboards…"), false, false);
+    if menu_item(ui, tl!("Rearrange All Artboards…"), n > 1, false) {
+        open_rearrange(app);
+    }
     ui.separator();
     if menu_item(ui, tl!("Fit to Artwork Bounds"), n > 0, false) {
         app.run("artboard.fitToArt", json!({"index": sel})).ok();

@@ -11,6 +11,7 @@ pub mod bbox;
 pub mod builder;
 pub mod catalog;
 pub mod corners;
+pub mod cropimage;
 pub mod cut;
 pub mod direct;
 pub mod distort;
@@ -274,6 +275,8 @@ pub struct ToolContext<'a> {
     /// Selection & Anchor Display → Tolerance: how near (screen pixels) a click must be to a path
     /// or an anchor to pick it.
     pub selection_tolerance: f64,
+    /// Selection & Anchor Display → Size (1–7, default 3): how big anchors and handles are drawn.
+    pub anchor_size: u32,
     /// Selection & Anchor Display → Object Selection by Path Only: a click inside a filled path
     /// doesn't pick it, only one on its path does.
     pub path_only: bool,
@@ -320,6 +323,10 @@ pub struct ToolContext<'a> {
     pub measurement_labels: bool,
     /// Smart Guides → Transform Tools: the readouts while scaling, rotating and shearing.
     pub transform_tools_guides: bool,
+    /// Smart Guides → Spacing Guides: a moved selection snaps to spacing equal to the gap between
+    /// two other objects in its row or column, or evenly between its two neighbours, and the
+    /// equal gaps show.
+    pub spacing_guides: bool,
     /// Smart Guides → Snapping Tolerance (screen pixels): how near a smart guide target pulls the
     /// pointer, a dragged edge or a drawn point.
     pub snapping_tolerance: f64,
@@ -362,12 +369,21 @@ impl ToolContext<'_> {
     pub fn pick_tol(&self) -> f64 {
         self.tol(self.selection_tolerance)
     }
+    /// How near (document units) a press picks an anchor or a direction handle's end: the
+    /// selection tolerance, but at least 2 px past the drawn point, so a point is easy to catch
+    /// and wins over the segments through it, which are tested after it (#593).
+    pub fn point_tol(&self) -> f64 {
+        // Anchors are drawn 5 px wide at the default Size 3, a pixel more or less per step.
+        let half = (5.0 + f64::from(self.anchor_size.clamp(1, 7)) - 3.0) / 2.0;
+        self.tol(self.selection_tolerance.max(half + 2.0))
+    }
     pub fn hit_options(&self) -> vectorcraft_doc::hit::HitOptions {
         vectorcraft_doc::hit::HitOptions {
             tol: self.pick_tol(),
             outline: self.outline,
             path_only: self.path_only,
             type_path_only: self.type_path_only,
+            scope: self.isolation,
         }
     }
 }
@@ -416,6 +432,8 @@ pub enum Cursor {
     PenDelete,
     PenClose,
     PenContinue,
+    /// While drawing, over an end of another open path (a click joins the two).
+    PenJoin,
     /// Over the last anchor of the path being drawn (a click retracts its outgoing handle), or with
     /// Alt held over a selected path's handle or anchor (the Anchor Point tool's gesture).
     PenConvert,
@@ -502,6 +520,11 @@ pub trait Tool: Send {
     fn busy(&self) -> bool {
         false
     }
+    /// Is a drag moving, scaling or rotating the selection (the canvas then hides the bounding box,
+    /// so only the art is seen going with the pointer)?
+    fn transforming(&self) -> bool {
+        false
+    }
     /// Does the tool take `key` now, ahead of the command shortcuts bound to it (the Gradient tool
     /// with a stop selected takes Delete and the arrows)?
     fn claims_key(&self, _cx: &ToolContext, _key: ToolKey) -> bool {
@@ -571,6 +594,7 @@ pub fn create(id: &str) -> Box<dyn Tool> {
             .or_else(|| extra::create(other))
             .or_else(|| slice::create(other))
             .or_else(|| printtiling::create(other))
+            .or_else(|| cropimage::create(other))
             .or_else(|| cut::create(other))
             .unwrap_or_else(|| Box::new(NoopTool(tool_info(other).map(|t| t.id).unwrap_or("selection")))),
     }
@@ -666,6 +690,7 @@ pub(crate) mod testutil {
             slices_locked: false,
             auto_add_delete: true,
             selection_tolerance: 3.0,
+            anchor_size: 3,
             path_only: false,
             type_path_only: false,
             double_click_isolate: true,
@@ -683,6 +708,7 @@ pub(crate) mod testutil {
             anchor_path_labels: true,
             measurement_labels: true,
             transform_tools_guides: true,
+            spacing_guides: true,
             snapping_tolerance: 4.0,
             construction_angles: guides::construction_angles(guides::DEFAULT_CONSTRUCTION_ANGLES),
             screen: None,

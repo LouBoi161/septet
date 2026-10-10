@@ -3,6 +3,7 @@
 //! was handed and the folders it keeps next to its preferences.
 
 use vectorcraft_engine::cmd::fileio;
+use vectorcraft_ui_egui::picks::PickRequest;
 use vectorcraft_ui_egui::{ClipboardProbeFactory, FilePick, Services, VectorcraftApp};
 
 use crate::{clipboard, prefs, printing};
@@ -18,13 +19,28 @@ pub fn open_files(app: &mut VectorcraftApp, files: Vec<String>) {
     }
 }
 
+/// Have the font scans also list the fonts font services load in place, from files outside the
+/// font folders (#579): DirectWrite's system font collection on Windows, CoreText's font manager on
+/// macOS. Before the first font scan (the app's start); only the first call counts.
+pub fn install_platform_fonts() {
+    #[cfg(all(windows, not(target_vendor = "win7")))]
+    crate::system_fonts::install();
+    #[cfg(target_os = "macos")]
+    crate::mac_fonts::install();
+}
+
 /// The folders kept next to the preferences ([`prefs::data_dir`]): the User Defined swatch and
-/// graphic style libraries, and Data Recovery's copies.
+/// graphic style libraries, the Libraries panel's libraries and Data Recovery's copies.
 pub fn set_user_folders(app: &mut VectorcraftApp) {
     let folder = |name: &str| prefs::data_dir().map(|d| d.join(name).to_string_lossy().to_string());
     // User Defined swatch and graphic style libraries live next to the preferences.
     app.session.swatch_libraries.set_user_dir(folder("Swatches"));
     app.session.style_libraries.set_user_dir(folder("Graphic Styles"));
+    // So do the Libraries panel's libraries; runs without preferences (agents' test runs) keep
+    // theirs for the session only, never touching the user's.
+    if prefs::prefs_enabled() {
+        app.session.libraries.set_dir(folder("Libraries"));
+    }
     // Data Recovery copies live next to the preferences too (none for runs without
     // preferences, such as agents' test runs, unless the recoveryFolder preference is set).
     if std::env::var_os("VECTORCRAFT_NO_PREFS").is_none() {
@@ -32,14 +48,49 @@ pub fn set_user_folders(app: &mut VectorcraftApp) {
     }
 }
 
-/// A native file dialog showing `pick`'s file types, folder and suggested name.
-fn file_dialog(pick: &FilePick) -> rfd::FileDialog {
-    let d = pick.filters.iter().fold(rfd::FileDialog::new(), |d, (name, exts)| d.add_filter(*name, exts));
+/// The window file dialogs belong to (none in a host's window, which the app doesn't own).
+pub type Parent = Option<std::sync::Arc<winit::window::Window>>;
+
+/// A native file dialog for `request` over `parent` (Windows and Linux, where the portal then
+/// shows it over the window and keeps it in front; macOS shows them as before).
+fn file_dialog(request: &PickRequest, parent: &Parent) -> rfd::FileDialog {
+    let d = match parent {
+        Some(w) if !cfg!(target_os = "macos") => rfd::FileDialog::new().set_parent(&**w),
+        _ => rfd::FileDialog::new(),
+    };
+    let pick = match request {
+        PickRequest::Open(pick) | PickRequest::Save(pick) => pick,
+        PickRequest::OpenMany => return fileio::place_filters().fold(d.set_title("Place"), |d, (name, exts)| d.add_filter(name, exts)),
+        PickRequest::Folder => return d,
+    };
+    let d = pick.filters.iter().fold(d, |d, (name, exts)| d.add_filter(*name, exts));
     let d = match &pick.folder {
         Some(folder) => d.set_directory(folder),
         None => d,
     };
     if pick.name.is_empty() { d } else { d.set_file_name(&pick.name) }
+}
+
+/// Show `dialog` for `request` (on the calling thread, until it closes) → the paths picked.
+fn show_dialog(dialog: rfd::FileDialog, request: &PickRequest) -> Vec<String> {
+    let paths = match request {
+        PickRequest::Open(_) => dialog.pick_file().into_iter().collect(),
+        PickRequest::OpenMany => dialog.pick_files().unwrap_or_default(),
+        PickRequest::Save(pick) => {
+            // The Templates folder may not exist yet.
+            if let Some(folder) = &pick.folder {
+                let _ = std::fs::create_dir_all(folder);
+            }
+            dialog.save_file().into_iter().collect()
+        }
+        PickRequest::Folder => dialog.pick_folder().into_iter().collect(),
+    };
+    paths.into_iter().map(|p| p.to_string_lossy().to_string()).collect()
+}
+
+/// Show the dialog for `request` over `parent` now → the paths picked.
+fn pick_now(request: PickRequest, parent: &Parent) -> Vec<String> {
+    show_dialog(file_dialog(&request, parent), &request)
 }
 
 /// File → Show in Folder: select `path` in Finder / Explorer, or open its folder elsewhere.
@@ -77,25 +128,32 @@ fn write_file(path: &str, bytes: &[u8]) -> Result<(), String> {
     fileio::write_atomic(std::path::Path::new(path), bytes).map_err(|e| e.to_string())
 }
 
-pub fn services() -> Services {
+/// Linux: show the dialog for `request` over `parent` on a thread of its own, answering on the
+/// receiver. Shown on the UI thread, nothing would answer the compositor meanwhile, which then
+/// offers to kill the window as not responding (#592).
+fn start_pick(request: PickRequest, parent: &Parent) -> Option<std::sync::mpsc::Receiver<Vec<String>>> {
+    let dialog = file_dialog(&request, parent);
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("file-dialog".into())
+        .spawn(move || {
+            // The app gone meanwhile has no use for the answer.
+            let _ = tx.send(show_dialog(dialog, &request));
+        })
+        .ok()?;
+    Some(rx)
+}
+
+/// The desktop's services, file dialogs over `parent`.
+pub fn services(parent: Parent) -> Services {
+    let (p1, p2, p3, p4, p5) = (parent.clone(), parent.clone(), parent.clone(), parent.clone(), parent);
     Services {
-        pick_open: Some(Box::new(|pick: &FilePick| file_dialog(pick).pick_file().map(|p| p.to_string_lossy().to_string()))),
-        pick_open_multi: Some(Box::new(|| {
-            fileio::place_filters()
-                .fold(rfd::FileDialog::new().set_title("Place"), |d, (name, exts)| d.add_filter(name, exts))
-                .pick_files()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect()
-        })),
-        pick_save: Some(Box::new(|pick: &FilePick| {
-            // The Templates folder may not exist yet.
-            if let Some(folder) = &pick.folder {
-                let _ = std::fs::create_dir_all(folder);
-            }
-            file_dialog(pick).save_file().map(|p| p.to_string_lossy().to_string())
-        })),
+        pick_open: Some(Box::new(move |pick: &FilePick| pick_now(PickRequest::Open(pick.clone()), &p1).into_iter().next())),
+        pick_open_multi: Some(Box::new(move || pick_now(PickRequest::OpenMany, &p2))),
+        pick_save: Some(Box::new(move |pick: &FilePick| pick_now(PickRequest::Save(pick.clone()), &p3).into_iter().next())),
+        // Windows and macOS dialogs run the window's events while they are open; Linux's don't.
+        start_pick: cfg!(all(unix, not(target_os = "macos")))
+            .then(|| Box::new(move |request: PickRequest| start_pick(request, &p5)) as vectorcraft_ui_egui::picks::StartPick),
         read: Some(Box::new(|p: &str| std::fs::read(p).map_err(|e| e.to_string()))),
         write: Some(Box::new(write_file)),
         // Background Save and Export write from a worker thread.
@@ -111,7 +169,7 @@ pub fn services() -> Services {
         reveal: Some(Box::new(reveal)),
         // Links panel: Edit Original; Package: Show Package. Relink to Folder and Package pick folders.
         open_file: Some(Box::new(open_file)),
-        pick_folder: Some(Box::new(|| rfd::FileDialog::new().pick_folder().map(|p| p.to_string_lossy().to_string()))),
+        pick_folder: Some(Box::new(move || pick_now(PickRequest::Folder, &p4).into_iter().next())),
         // File → Print: the system's printers and print queue.
         print: Some(Box::new(printing::SystemPrint)),
         ..Default::default()

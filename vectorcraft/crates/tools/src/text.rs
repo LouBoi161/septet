@@ -44,6 +44,10 @@ enum Mode {
 struct Typing {
     base: Vec<TextRun>,
     cur: Vec<TextRun>,
+    /// The first byte any edit of the session touched (the text before it is unchanged): the
+    /// previewed span starts no later, so Return at a paragraph's end splits that paragraph (its
+    /// style continues), not the next one.
+    lo: usize,
 }
 
 /// IME marked text inside the typing session, not yet committed.
@@ -54,6 +58,9 @@ struct Preedit {
     /// The clause being converted, in bytes relative to `range.start` (empty: the IME's cursor).
     active: Option<Range<usize>>,
 }
+
+/// The edited text's layout, keyed by the font database's generation and the text.
+type CachedLayout = ((u64, TextObject), Arc<TextLayout>);
 
 #[derive(Default)]
 pub struct TypeTool {
@@ -82,7 +89,7 @@ pub struct TypeTool {
     clicks: (Option<Point>, u8),
     /// Styled copy of the last copied range (pasting the same plain text keeps its styles).
     clipboard: Vec<TextRun>,
-    cache: Mutex<Option<(TextObject, Arc<TextLayout>)>>,
+    cache: Mutex<Option<CachedLayout>>,
 }
 
 impl TypeTool {
@@ -102,16 +109,19 @@ impl TypeTool {
         }
     }
 
-    /// Layout of `t`, cached by content (overlays run every frame).
+    /// Layout of `t`, cached by content (overlays run every frame) and by the fonts available (the
+    /// web build adds fonts after startup).
     fn layout(&self, t: &TextObject) -> Arc<TextLayout> {
+        let fonts = FontDb::global().generation();
         let mut c = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((k, l)) = c.as_ref()
+        if let Some(((g, k), l)) = c.as_ref()
+            && *g == fonts
             && k == t
         {
             return l.clone();
         }
         let l = Arc::new(vectorcraft_text::layout(FontDb::global(), t));
-        *c = Some((t.clone(), l.clone()));
+        *c = Some(((fonts, t.clone()), l.clone()));
         l
     }
 
@@ -174,9 +184,10 @@ impl TypeTool {
         if self.typing.is_none() {
             out.push(Action::Begin("Typing".into()));
         }
-        let ty = self.typing.get_or_insert_with(|| Typing { base: t.runs.clone(), cur: t.runs.clone() });
+        let ty = self.typing.get_or_insert_with(|| Typing { base: t.runs.clone(), cur: t.runs.clone(), lo: usize::MAX });
         let len = edit::runs_len(&ty.cur);
         let (a, b) = (self.caret.min(self.anchor).min(len), self.caret.max(self.anchor).min(len));
+        ty.lo = ty.lo.min(a);
         let caret = match &styled {
             Some(r) => edit::replace_range_styled(&mut ty.cur, a, b, r),
             None => edit::replace_range(&mut ty.cur, a, b, insert),
@@ -187,7 +198,7 @@ impl TypeTool {
         // One preview for the whole session: the changed span of base → cur, with its runs.
         let base: String = ty.base.iter().map(|r| r.text.as_str()).collect();
         let cur: String = ty.cur.iter().map(|r| r.text.as_str()).collect();
-        let (p, s) = common_affixes(&base, &cur);
+        let (p, s) = common_affixes(&base, &cur, ty.lo);
         let runs = edit::slice_runs(&ty.cur, p, cur.len() - s);
         let runs = if runs.is_empty() { json!([]) } else { serde_json::to_value(&runs).unwrap_or(json!([])) };
         out.push(Action::Preview("text.editRange".into(), json!({"id": id.0, "start": p, "end": base.len() - s, "runs": runs})));
@@ -332,11 +343,12 @@ fn char_range_to_bytes(s: &str, r: Range<usize>) -> Option<Range<usize>> {
     (a <= b).then_some(a..b)
 }
 
-/// Lengths of the common prefix and suffix of `a` and `b` (on char boundaries, not overlapping).
-fn common_affixes(a: &str, b: &str) -> (usize, usize) {
+/// Lengths of the common prefix (at most `max_prefix`) and suffix of `a` and `b` (on char
+/// boundaries, not overlapping).
+fn common_affixes(a: &str, b: &str, max_prefix: usize) -> (usize, usize) {
     let mut p = 0;
     for ((i, x), y) in a.char_indices().zip(b.chars()) {
-        if x != y {
+        if x != y || i + x.len_utf8() > max_prefix {
             break;
         }
         p = i + x.len_utf8();

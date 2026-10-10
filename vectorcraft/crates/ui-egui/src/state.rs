@@ -365,9 +365,9 @@ pub struct UiState {
     /// Layers panel › Panel Options… (row size, thumbnails, Show Layers Only).
     #[serde(default)]
     pub layers_panel: crate::panels::layers::PanelOptions,
-    /// The Layers panel's open rows, per open document (`DocState::uid` → node ids).
-    #[serde(skip)]
-    pub layers_expanded: std::collections::HashMap<u64, std::collections::HashSet<u64>>,
+    /// The Image Trace panel's Advanced section is open (as it was last left).
+    #[serde(default = "yes")]
+    pub image_trace_advanced: bool,
     /// The desktop window's size, position and maximized state, saved when the app quits and
     /// restored at the next launch (the desktop host reads and writes it; none on the web).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -425,6 +425,9 @@ pub struct FloatingPanels {
     pub active: usize,
     /// Top-left corner in screen points.
     pub pos: [f32; 2],
+    /// A width the group was given (the Tabs panel sized over its text), else its panels' own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f32>,
 }
 
 impl FloatingPanels {
@@ -521,7 +524,7 @@ impl Default for UiState {
             dxf_import: Value::Null,
             home: None,
             layers_panel: Default::default(),
-            layers_expanded: Default::default(),
+            image_trace_advanced: true,
             window: None,
         }
     }

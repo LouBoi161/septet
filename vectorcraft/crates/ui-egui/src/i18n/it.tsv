@@ -11,6 +11,23 @@
 # Coverage: the whole interface — every menu string and every `tl!` literal (`complete_menus`,
 # tested). Left in English on purpose (`MENU_KEEP_AS_IS` in the tests): the product name, language
 # names, OpenType, the built-in workspace names and the bracketed perspective grid preset names.
+# Photoshop-style raster effects (Effect menu, their dialogs).
+	Radial Blur…	Sfocatura radiale…
+	Smart Blur…	Sfocatura intelligente…
+	Sharpen	Nitidezza
+	Unsharp Mask…	Maschera di contrasto…
+	Radial Blur	Sfocatura radiale
+	Smart Blur	Sfocatura intelligente
+	Unsharp Mask	Maschera di contrasto
+	Gaussian Blur	Sfocatura gaussiana
+	Method	Metodo
+	Quality	Qualità
+	Radius	Raggio
+	Spin	Rotazione
+	Draft	Bozza
+	Good	Buona
+	Best	Ottima
+
 # Status and error messages too (`@msg` rows at the end, `COMPLETE_MESSAGES` in the tests).
 # A native speaker's review is welcome: keep the placeholders ({name}), the trailing "…" and the
 # leading/trailing spaces of fragments exactly as they are.
@@ -76,6 +93,7 @@
 	Add to Swatches	Aggiungi ai campioni
 	Add Used Colors	Aggiungi colori usati
 	Additional Plug-ins Folder	Cartella plug-in aggiuntivi
+	Additional Fonts Folder	Cartella font aggiuntivi
 	Adjust Adjoining Width Points	Regola punti di larghezza adiacenti
 	Adjust Color Balance…	Regola bilanciamento colore…
 	Adjust Colors	Regola colori
@@ -143,6 +161,7 @@
 	Appearance panel	Pannello Aspetto
 	Applies when the linked file is relinked or updated.	Si applica quando il file collegato viene ricollegato o aggiornato.
 	Applies the next time VectorCraft starts.	Si applica al prossimo avvio di VectorCraft.
+	Apply	Applica
 	Apply Brush	Applica pennello
 	Apply Character Style	Applica stile carattere
 	Apply Effect	Applica effetto
@@ -202,6 +221,11 @@
 	Auto Size New Area Type	Dimensionamento automatico del nuovo testo in area
 	Auto Spell Check	Controllo ortografico automatico
 	Auto-Collapse Iconic Panels	Comprimi automaticamente i pannelli a icona
+	Ellipse Properties:	Proprietà dell’ellisse:
+	Invert Pie	Inverti settore
+	Pie End Angle:	Angolo finale del settore:
+	Pie Start Angle:	Angolo iniziale del settore:
+	Show Tool Group Labels	Mostra etichette dei gruppi di strumenti
 	Auto-Rotate (turn the paper to each artboard)	Rotazione automatica (orienta la carta in base a ogni tavola da disegno)
 	Automatic flatness	Planarità automatica
 	Automatically	Automaticamente
@@ -320,6 +344,8 @@
 	Clean Up…	Pulisci…
 	Clear	Cancella
 	Clear All Tabs	Cancella tutte le tabulazioni
+	Above Text	Sopra il testo
+	Position Panel Above Text	Posiziona il pannello sopra il testo
 	Clear Appearance	Cancella aspetto
 	Clear Guides	Cancella guide
 	Clear Overrides	Cancella sostituzioni
@@ -471,6 +497,7 @@
 	Copy Fonts Used in the Document	Copia i font usati nel documento
 	Copy Links	Copia collegamenti
 	Copy Selected Style	Copia stile selezionato
+	Copy to User Defined	Copia in Definito dall'utente
 	Copy Width Point	Copia punto di larghezza
 	Copyright	Copyright
 	Copyright Info URL:	URL informazioni copyright:
@@ -508,7 +535,7 @@
 	Create Object Mosaic…	Crea mosaico di oggetti…
 	Create Outlines	Crea contorni
 	Create Path	Crea tracciato
-	Create PDF layers from top-level layers	Crea livelli PDF dai livelli principali
+	Create PDF layers from layers and sublayers	Crea livelli PDF dai livelli e sottolivelli
 	Create PDF-Compatible File	Crea file compatibile PDF
 	Create Report	Crea rapporto
 	Create Slice	Crea sezione
@@ -773,6 +800,8 @@
 	Em Box Bottom/Left	Riquadro em in basso/a sinistra
 	Em Box Center	Riquadro em al centro
 	Em Box Top/Right	Riquadro em in alto/a destra
+	ICF Top/Right	ICF in alto/a destra
+	ICF Bottom/Left	ICF in basso/a sinistra
 	Em Dash	Lineetta
 	Em Space	Spazio em
 	Embed	Incorpora
@@ -953,6 +982,7 @@
 	Flare Tool	Strumento Riflesso
 	Flare Tool Options	Opzioni strumento Riflesso
 	Flat Image	Immagine appiattita
+	Flat Logo	Logo piatto
 	Flatness:	Planarità:
 	Flatten Artwork	Appiattisci grafica
 	Flatten Transparency	Appiattisci trasparenza
@@ -1149,6 +1179,11 @@
 	Ignore	Ignora
 	Ignore Artboards (all the art as one page)	Ignora tavole da disegno (tutta la grafica come una sola pagina)
 	Ignore White	Ignora bianco
+	Palette:	Palette:
+	Limited	Limitata
+	Full Tone	Tono continuo
+	Document Library	Libreria del documento
+	Library:	Libreria:
 	Image	Immagine
 	Image Info	Informazioni immagine
 	Image Map:	Mappa immagine:
@@ -1189,6 +1224,7 @@
 	Input White	Bianco di input
 	Insert Break Character	Inserisci carattere di interruzione
 	Insert Character	Inserisci carattere
+	Insert Inline Symbol	Inserisci simbolo nel testo
 	Insert Special Character	Inserisci carattere speciale
 	Insert Whitespace Character	Inserisci carattere spazio
 	Inspect Document	Ispeziona documento
@@ -1369,7 +1405,6 @@
 	Make a theme on Create and save it.	Crea un tema nella scheda Crea e salvalo.
 	Make all bleed settings the same	Usa lo stesso valore per tutte le abbondanze
 	Make and Expand	Crea ed espandi
-	Make and Expand…	Crea ed espandi…
 	Make Clipping Mask	Crea maschera di ritaglio
 	Make Compound Shape	Crea forma composta
 	Make Envelope	Crea involucro
@@ -1382,7 +1417,6 @@
 	Make with Top Object	Crea con oggetto superiore
 	Make with Warp…	Crea con alterazione…
 	Make/Release Clipping Mask	Crea/rilascia maschera di ritaglio
-	Make…	Crea…
 	Manage Workspaces	Gestisci aree di lavoro
 	Manage Workspaces…	Gestisci aree di lavoro…
 	Manually	Manualmente
@@ -1393,6 +1427,9 @@
 	Marks and Bleed	Segni e abbondanza
 	Marks and Bleeds	Segni e abbondanze
 	Match User Interface Brightness	Adatta alla luminosità dell'interfaccia utente
+	Light Gray	Grigio chiaro
+	Medium Gray	Grigio medio
+	Dark Gray	Grigio scuro
 	Materials…	Materiali…
 	Matte	Colore alone
 	Matte:	Colore alone:
@@ -1446,6 +1483,9 @@
 	Modify	Modifica
 	Mojikumi	Mojikumi
 	Mojikumi Set	Set mojikumi
+	Kinsoku Set	Set kinsoku
+	Hard	Forte
+	Soft	Debole
 	Monitor RGB	RGB monitor
 	Mono	Mono
 	Monochrome images	Immagini monocromatiche
@@ -1494,6 +1534,8 @@
 	New Art Brush from Selection	Nuovo pennello artistico dalla selezione
 	New Art Has Basic Appearance	La nuova grafica ha aspetto di base
 	New Artboard	Nuova tavola da disegno
+	Artboard	Tavola da disegno
+	Exit	Esci
 	New Bristle Brush	Nuovo pennello a setole
 	New Brush…	Nuovo pennello…
 	New Calligraphic Brush	Nuovo pennello calligrafico
@@ -1563,6 +1605,9 @@
 	No text selected	Nessun testo selezionato
 	No Thumbnails	Nessuna miniatura
 	Noise	Disturbo
+	Create:	Crea:
+	Fills	Riempimenti
+	Strokes	Tracce
 	Nonbreaking Hyphen	Trattino indivisibile
 	Nonbreaking Space	Spazio indivisibile
 	None	Nessuno
@@ -1943,7 +1988,17 @@
 	Rating:	Valutazione:
 	Real World:	Mondo reale:
 	Real-time Drawing and Editing	Disegno e modifica in tempo reale
-	Rearrange All Artboards (on the roadmap)	Ridisponi tutte le tavole da disegno (in programma)
+	Rearrange All Artboards	Ridisponi tutte le tavole da disegno
+	Rearrange All	Ridisponi tutto
+	Layout Order:	Ordine del layout:
+	Change to Left-to-Right Layout	Passa al layout da sinistra a destra
+	Grid by Row	Griglia per righe
+	Grid by Column	Griglia per colonne
+	Arrange by Row	Disponi in una riga
+	Arrange by Column	Disponi in una colonna
+	Move Artwork with Artboard	Sposta la grafica con la tavola da disegno
+	Scale Artwork with Artboard	Scala la grafica con la tavola da disegno
+	Artboards: {n}	Tavole da disegno: {n}
 	Rearrange All Artboards…	Ridisponi tutte le tavole da disegno…
 	Recall Selection	Richiama selezione
 	RECENT	RECENTI
@@ -2105,6 +2160,8 @@
 	Reverse Spine	Inverti dorsale
 	Revert	Ripristina
 	Revert to the saved version of “{name}”?	Ripristinare la versione salvata di “{name}”?
+	Replace “{name}”, the file this document was opened from?	Sostituire “{name}”, il file da cui è stato aperto questo documento?
+	Opening it left out what VectorCraft can't read yet ({what}), so replacing it loses that for good. Save under another name to keep it.	Aprendolo è rimasto fuori ciò che VectorCraft non sa ancora leggere ({what}), quindi sostituirlo lo perde per sempre. Salva con un altro nome per conservarlo.
 	Revolve…	Rivoluzione…
 	RGB Color	Colore RGB
 	Right	Destra
@@ -2396,6 +2453,8 @@
 	Show Guides	Mostra guide
 	Show handles when multiple anchors are selected	Mostra le maniglie quando sono selezionati più punti di ancoraggio
 	Show Hidden Characters	Mostra caratteri nascosti
+	Bold	Grassetto
+	Italic	Corsivo
 	Show Images in Outline Mode	Mostra immagini in modalità Contorno
 	Show in Folder	Mostra nella cartella
 	Show Indic Options	Mostra opzioni per lingue indiane
@@ -2484,6 +2543,13 @@
 	Smooth Color	Colore graduale
 	Smooth Tool	Strumento Smussa
 	Snap Curves To Lines	Aggancia curve a linee
+	View:	Vista:
+	Tracing Result	Risultato ricalco
+	Tracing Result with Outlines	Risultato ricalco con contorni
+	Outlines	Contorni
+	Outlines with Source Image	Contorni con immagine di origine
+	Source Image	Immagine di origine
+	Image Trace View	Vista del ricalco immagine
 	Snap Options	Opzioni di aggancio
 	Snap to Glyph	Aggancia a glifo
 	Snap to Grid	Aggancia alla griglia
@@ -2546,6 +2612,7 @@
 	Character:	Carattere:
 	Character options	Opzioni carattere
 	Stroke options	Opzioni traccia
+	Transform options	Opzioni di trasformazione
 	Stroke Weight	Spessore traccia
 	Stroke:	Traccia:
 	Stroke: click for swatches, Shift-click for the color mixer	Traccia: fai clic per i campioni, Shift+clic per il miscelatore colori
@@ -2578,6 +2645,7 @@
 	Swash	Ornamentale
 	Swatch Conflict	Conflitto campioni
 	Swatch Conflicts	Conflitti campioni
+	Swatch exchange files keep solid colors only.	I file di scambio campioni conservano solo i colori pieni.
 	Swatch Libraries	Librerie campioni
 	Swatch Libraries Menu	Menu Librerie campioni
 	Swatch Library	Libreria campioni
@@ -2587,6 +2655,25 @@
 	Swatch Tiles	Riquadri campioni
 	Swatches	Campioni
 	Switch workspace	Cambia area di lavoro
+	Add Content	Aggiungi contenuto
+	Click to apply to the selected type	Fai clic per applicarlo al testo selezionato
+	Create New Library	Crea nuova libreria
+	Create New Library…	Crea nuova libreria…
+	Rename Library…	Rinomina libreria…
+	Delete the library “{name}”?	Eliminare la libreria “{name}”?
+	Drag art or swatches here, or use + to add the selection's colors and text styles.	Trascina qui grafica o campioni, oppure usa + per aggiungere i colori e gli stili di testo della selezione.
+	Its graphics, colors and text styles are deleted from this machine.	Grafiche, colori e stili di testo vengono eliminati da questo computer.
+	Keep graphics, colors and text styles here to use them in any document. Libraries are stored on this machine — no account required.	Conserva qui grafiche, colori e stili di testo per usarli in qualsiasi documento. Le librerie restano su questo computer: non serve un account.
+	This library is empty	Questa libreria è vuota
+	Add to Library	Aggiungi alla libreria
+	Delete Library	Elimina libreria
+	Delete Library Item	Elimina elemento della libreria
+	Library	Libreria
+	Rename Library	Rinomina libreria
+	Show Library	Mostra libreria
+	Use Library Item	Usa elemento della libreria
+	Graphic	Grafica
+	Show all open documents	Mostra tutti i documenti aperti
 	Symbol Instance	Istanza di simbolo
 	Symbol Libraries	Librerie simboli
 	Symbol Libraries (on the roadmap)	Librerie simboli (in programma)
@@ -2909,6 +2996,7 @@
 	Scrub Numeric Fields by Dragging	Regola i campi numerici trascinando
 	{count} file(s) in {folder}{note}. Show the package folder?	{count} file in {folder}{note}. Vuoi mostrare la cartella del pacchetto?
 	{count} linked file(s) not found	File collegati non trovati: {count}
+	fonts not copied: {fonts}	font non copiati: {fonts}
 	{count} linked image(s) changed since this document was saved. Show the new versions?	Immagini collegate modificate dopo il salvataggio di questo documento: {count}. Vuoi mostrare le nuove versioni?
 	{count} more rules: Export writes every one.	Altre {count} regole: Esporta le scrive tutte.
 	{count} unnamed objects left out: name them, or turn on Unnamed Objects in the panel menu.	{count} oggetti senza nome esclusi: assegna loro un nome o attiva Oggetti senza nome nel menu del pannello.
@@ -2968,6 +3056,9 @@
 	 to zoom in  |  	 per ingrandire  |  
 	 to zoom out  |  	 per ridurre  |  
 	 to zoom into an area	 per ingrandire un'area
+	Hold	Tieni premuto
+	 right or left to zoom in or out  |  	 a destra o a sinistra per ingrandire o ridurre  |  
+	 to keep zooming	 per continuare lo zoom
 	 an object to copy its attributes  |  	 su un oggetto per copiarne gli attributi  |  
 	 to apply the selection's to it  |  	 per applicargli quelli della selezione  |  
 	 to sample a color	 per campionare un colore
@@ -3065,6 +3156,22 @@ axis	Both	Entrambi
 # stays English for agents and tests. `{_1}`, `{_2}` … stand for the `{}` of the format string, in order
 # (`complete_languages_translate_every_message` lists any that are missing). Command ids, parameter
 # names and values in backticks or code (`colorModel rgb`, `document.export`) stay as they are.
+@msg	no library `{id}`	nessuna libreria `{id}`
+@msg	select some type first	seleziona prima del testo
+@msg	{_1} has no {_2} style	{_1} non ha lo stile {_2}
+@msg	a layer couldn't be read	non è stato possibile leggere un livello
+@msg	it has more than one artboard	ha più di una tavola da disegno
+@msg	it has no page	non ha pagine
+@msg	it has too many text objects	ha troppi oggetti di testo
+@msg	it has too much text	ha troppo testo
+@msg	its editing data doesn't say where its artboard is	i suoi dati di modifica non indicano dove si trova la tavola da disegno
+@msg	its editing data has no layers	i suoi dati di modifica non hanno livelli
+@msg	its editing data is damaged	i suoi dati di modifica sono danneggiati
+@msg	its editing data is for a different page	i suoi dati di modifica sono di un'altra pagina
+@msg	its layers use {_1}, which aren't read yet	i suoi livelli usano {_1}, che non vengono ancora letti
+@msg	its page has text, and its layers have no text objects to put it in	la sua pagina ha del testo e i suoi livelli non hanno oggetti di testo in cui metterlo
+@msg	its type is to come in as outlines, which only its page has	il suo testo deve arrivare come contorni, che ha solo la sua pagina
+@msg	the art on them differs from the page's in {_1}% of it	l'illustrazione dei livelli differisce da quella della pagina per il {_1}% della sua superficie
 @msg	`to` must be "corner" or "smooth"	`to` deve essere "corner" o "smooth"
 @msg	BMP files are RGB or grayscale: colorModel rgb or gray	I file BMP sono RGB o in scala di grigi: colorModel rgb o gray
 @msg	Blend colors: select at least three objects with filled colours	Fondi colori: seleziona almeno tre oggetti con riempimento colore
@@ -3118,6 +3225,7 @@ axis	Both	Entrambi
 @msg	Release Guides: no guides	Rilascia guide: nessuna guida
 @msg	Release: no layer to put the rectangle in	Rilascia: nessun livello in cui inserire il rettangolo
 @msg	Replace Spine: select a blend and a path	Sostituisci dorsale: seleziona una fusione e un tracciato
+@msg	select two or more objects to distribute	seleziona due o più oggetti da distribuire
 @msg	select paths or anchor points	seleziona tracciati o punti di ancoraggio
 @msg	SVG parse error: {0}	Errore di analisi SVG: {0}
 @msg	Save for Web: the image is empty	Salva per il web: l'immagine è vuota
@@ -3352,6 +3460,7 @@ axis	Both	Entrambi
 @msg	no symbol instances selected	nessuna istanza di simbolo selezionata
 @msg	no target object has an opacity mask: select one or give `id`	nessun oggetto di destinazione ha una maschera di opacità: selezionane uno o specifica `id`
 @msg	no threaded text selected	nessun testo concatenato selezionato
+@msg	no user library folder here	nessuna cartella di librerie utente qui
 @msg	no user workspace `{from}`	nessuna area di lavoro utente `{from}`
 @msg	node {_1} is not text	il nodo {_1} non è testo
 @msg	not a DXF drawing	non è un disegno DXF
@@ -3416,6 +3525,10 @@ axis	Both	Entrambi
 @msg	select a stroke with a variable width	seleziona una traccia con larghezza variabile
 @msg	select a symbol instance	seleziona un'istanza di simbolo
 @msg	select an Image Trace object	seleziona un oggetto di ricalco immagine
+@msg	could not decode image: {0}	impossibile decodificare l'immagine: {0}
+@msg	image is empty	l'immagine è vuota
+@msg	the image is {width} × {height} pixels, more than Image Trace takes ({max} megapixels)	l'immagine misura {width} × {height} pixel, più di quanto accetti Ricalco immagine ({max} megapixel)
+@msg	this trace would make more than {max} anchor points, more than the document can show smoothly: raise Noise, lower Paths or Colors, or pick a lower-fidelity preset	questo ricalco creerebbe più di {max} punti di ancoraggio, più di quanti il documento possa mostrare in modo fluido: aumenta Disturbo, riduci Tracciati o Colori, oppure scegli un preset a fedeltà inferiore
 @msg	select an envelope	seleziona un involucro
 @msg	select an image	seleziona un'immagine
 @msg	select an object in perspective	seleziona un oggetto in prospettiva
@@ -3582,6 +3695,25 @@ axis	Both	Entrambi
 @msg	{tool} isn't in a toolbar group of several tools	{tool} non fa parte di un gruppo di più strumenti nella barra degli strumenti
 @msg	onto must name a panel floating in another group	onto deve indicare un pannello mobile in un altro gruppo
 @msg	x and y must both be numbers	x e y devono essere entrambi numeri
+@msg	"{0}" is not a colour: write it as #rrggbb	"{0}" non è un colore: scrivilo come #rrggbb
+@msg	this isn't a flat-colour logo ({_1}% of its solid areas match a few flat colours), so Flat Logo mode would turn its gradients into patches: use Color mode instead	questo non è un logo a colori piatti ({_1}% delle sue aree piene corrisponde a pochi colori piatti), quindi la modalità Logo piatto trasformerebbe i suoi sfumati in macchie: usa la modalità Colore
+@msg	`{what}` closes nothing	`{what}` non chiude nulla
+@msg	`{what}` closes something it didn't open	`{what}` chiude qualcosa che non ha aperto
+@msg	a path has too many points	un tracciato ha troppi punti
+@msg	it ends inside a layer	terminano all'interno di un livello
+@msg	it has art outside its layers	contengono grafica al di fuori dei loro livelli
+@msg	it has more than {MAX_NODES} objects	contengono più di {MAX_NODES} oggetti
+@msg	it has no layers	non hanno livelli
+@msg	it has too many values in a row	contengono troppi valori di seguito
+@msg	it has {_1}, which VectorCraft doesn't read from it yet	contengono {_1}, che VectorCraft non vi legge ancora
+@msg	its objects are nested too deeply	i loro oggetti sono annidati troppo in profondità
+@msg	its section ending with `%{end}` doesn't end	la loro sezione che termina con `%{end}` non termina
+@msg	objects with several fills or strokes, effects or brushes came in as their drawn look ({_1}): their appearance isn't editable yet	gli oggetti con più riempimenti o tratti, effetti o pennelli sono stati importati come appaiono disegnati ({_1}): il loro aspetto non è ancora modificabile
+@msg	gradient “{name}” isn't defined in the file: a plain colour stands in for it	la sfumatura “{name}” non è definita nel file: la sostituisce un colore pieno
+@msg	an image VectorCraft can't read was left out	un'immagine che VectorCraft non può leggere è stata omessa
+@msg	an image whose data is cut short was left out	un'immagine con dati incompleti è stata omessa
+@msg	its editing data doesn't say where its art is	i suoi dati di modifica non dicono dove si trova la grafica
+@msg	this file was saved without PDF compatibility, and its editing data can't be read ({why})	questo file è stato salvato senza compatibilità PDF e i suoi dati di modifica non si possono leggere ({why})
 
 # The macOS menu bar (native_menu): the app and Window menus' system items, Settings pages.
 	Services	Servizi
@@ -3589,6 +3721,19 @@ axis	Both	Entrambi
 	Zoom	Zoom
 	Bring All to Front	Porta tutto in primo piano
 	Settings	Impostazioni
+	Break Link	Interrompi collegamento
+	On: one locked object showing the document, updated when it changes.	Attivato: un unico oggetto bloccato che mostra il documento, aggiornato quando cambia.
+	Off: an editable copy of its art, embedded in this document.	Disattivato: una copia modificabile della sua grafica, incorporata in questo documento.
+	Images: link to the file instead of only embedding it.	Immagini: collega il file invece di incorporarlo soltanto.
+	VectorCraft documents: one locked object, updated when the file changes.	Documenti VectorCraft: un unico oggetto bloccato, aggiornato quando il file cambia.
+	A file dialog is open: choose there first	È aperta una finestra di dialogo dei file: scegli prima lì
+	Shaper	Shaper
+	Expand Shaper Group	Espandi gruppo Shaper
+	Release Shaper Group	Rilascia gruppo Shaper
+	Select Shaper Face	Seleziona faccia Shaper
+	Constrain	Vincola
+	Free Transform	Trasformazione libera
+	Perspective Distort	Distorsione prospettica
 @msg	VectorCraft can't write any of {_1}	VectorCraft non può scrivere nessuno di questi formati: {_1}
 @msg	the art has no extent	la grafica non occupa alcuna area
 @msg	the document was closed	il documento è stato chiuso

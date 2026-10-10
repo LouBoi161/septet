@@ -55,8 +55,11 @@ impl Embedded {
     pub fn new(ctx: &egui::Context, render_state: Option<&eframe::egui_wgpu::RenderState>, _storage: Option<&dyn eframe::Storage>) -> Self {
         vectorcraft_ui_egui::hosted::set_hosted(true);
         vectorcraft_ui_egui::i18n::detect_system_lang_in_background();
+        // Before the first font scan: the fonts font services load in place (#579).
+        desktop::install_platform_fonts();
         let open_externally: Rc<RefCell<Option<OpenExternally>>> = Rc::default();
-        let mut services = desktop::services();
+        // The host owns the window: file dialogs open on their own (and, on Linux, off the UI thread).
+        let mut services = desktop::services(None);
         let hook = open_externally.clone();
         // Edit Original: the host may open the file itself (in another of its tabs). A folder
         // (Show Package) always opens in the file manager.

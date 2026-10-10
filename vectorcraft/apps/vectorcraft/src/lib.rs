@@ -5,8 +5,12 @@ mod clipboard;
 pub mod desktop;
 #[cfg(feature = "wgpu")]
 pub mod embed;
+#[cfg(target_os = "macos")]
+mod mac_fonts;
 pub mod prefs;
 mod printing;
+#[cfg(all(windows, not(target_vendor = "win7")))]
+mod system_fonts;
 
 #[cfg(feature = "wgpu")]
 pub use embed::Embedded;

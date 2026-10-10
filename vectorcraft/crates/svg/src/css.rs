@@ -50,9 +50,13 @@ pub(crate) fn blend_css(b: BlendMode) -> &'static str {
     }
 }
 
-/// An object's opacity, blend mode and isolation.
+/// An object's opacity, blend mode and isolation, and `display: none` when it is hidden (written
+/// only when hidden objects are kept).
 pub(crate) fn transparency(n: &Node) -> Props {
     let mut p = Props::new();
+    if !n.visible {
+        p.push(("display", "none".into()));
+    }
     if n.opacity < 1.0 {
         p.push(("opacity", fmt_num(n.opacity as f64, 3)));
     }
@@ -545,6 +549,10 @@ impl Rules<'_> {
         if let Some(l) = st.leading {
             art.props.push(("line-height", self.len(l)));
         }
+        // One element: the first paragraph's alignment.
+        if (1..t.paragraph_count()).any(|i| t.para_at(i).justify != t.para.justify) {
+            art.unsupported("paragraphs aligned differently");
+        }
         let align = match t.para.justify {
             Justify::Auto | Justify::Left => None,
             Justify::Center => Some("center"),
@@ -576,6 +584,7 @@ impl Rules<'_> {
                 }
                 RasterFx::GaussianBlur { radius } => filter = Some(format!("blur({})", self.len(radius / 2.0))),
                 RasterFx::InnerGlow { .. } | RasterFx::Feather { .. } => art.unsupported("inner glows or feathering"),
+                RasterFx::Pixel(_) => art.unsupported("pixel effects"),
             }
         }
         if !shadows.is_empty() {

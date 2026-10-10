@@ -121,6 +121,21 @@ pub fn section_header(ui: &mut Ui, text: &str) {
     ui.add_space(2.0);
 }
 
+/// A collapsible section's header across the panel: a chevron (down while `open`) and `text`;
+/// a click anywhere on it toggles the section. Whether it was clicked.
+pub fn section_toggle(ui: &mut Ui, text: &str, open: bool) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, 3.0, t.hover);
+    }
+    let chevron = Rect::from_center_size(pos2(rect.left() + 8.0, rect.center().y), vec2(12.0, 12.0));
+    icons::paint(ui, if open { "chevron-down" } else { "chevron-right" }, chevron, if resp.hovered() { t.text_strong } else { t.icon });
+    ui.painter().text(pos2(rect.left() + 18.0, rect.center().y), egui::Align2::LEFT_CENTER, tl!(text), theme::semibold(12.5), t.text);
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, true, open, tl!(text)));
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+}
+
 /// Full-width 1 px divider with vertical margins.
 pub fn divider(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
@@ -655,16 +670,70 @@ pub(crate) fn combo<R>(
         .stroke(Stroke::new(1.0, t.input_border))
         .corner_radius(CornerRadius::same(3))
         .show(ui, |ui| {
+            if searchable {
+                return searchable_combo(ui, ui.id().with(id), current, width - 4.0, list);
+            }
             egui::ComboBox::from_id_salt(ui.id().with(id))
                 .selected_text(egui::RichText::new(current).size(12.0))
                 .width(width - 4.0)
-                .close_behavior(if searchable { egui::PopupCloseBehavior::CloseOnClickOutside } else { egui::PopupCloseBehavior::CloseOnClick })
-                .height(if searchable { f32::INFINITY } else { ui.spacing().combo_height })
+                .height(ui.spacing().combo_height)
                 .show_ui(ui, list)
                 .inner
                 .flatten()
         })
         .inner
+}
+
+/// A dropdown whose list keeps its own search field and scrolling rows (the font menu): drawn as
+/// egui's combo box, but in a popup without the scroll area egui puts around a combo's list, so
+/// the field stays at the top and only the rows scroll (#555). A click outside closes it.
+fn searchable_combo<R>(ui: &mut Ui, id: egui::Id, current: &str, width: f32, list: impl FnOnce(&mut Ui) -> Option<R>) -> Option<R> {
+    let popup = id.with("popup");
+    let open = egui::Popup::is_id_open(ui.ctx(), popup);
+    let pad = ui.spacing().button_padding;
+    let icon = Vec2::splat(ui.spacing().icon_width);
+    let galley = egui::WidgetText::from(egui::RichText::new(current).size(12.0)).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        width - 2.0 * pad.x - ui.spacing().icon_spacing - icon.x,
+        egui::TextStyle::Button,
+    );
+    let height = (galley.size().y.max(icon.y) + 2.0 * pad.y).max(ui.spacing().interact_size.y);
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, height), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let v = if open { ui.visuals().widgets.open } else { *ui.style().interact(&resp) };
+        ui.painter().rect(rect.expand(v.expansion), v.corner_radius, v.weak_bg_fill, v.bg_stroke, StrokeKind::Inside);
+        let inner = rect.shrink2(pad);
+        ui.painter().galley(egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), inner).min, galley, v.text_color());
+        // egui's combo arrow: a downward triangle.
+        let arrow =
+            Rect::from_center_size(egui::Align2::RIGHT_CENTER.align_size_within_rect(icon, inner).center(), vec2(icon.x * 0.7, icon.y * 0.45));
+        ui.painter().add(egui::Shape::convex_polygon(
+            vec![arrow.left_top(), arrow.right_top(), arrow.center_bottom()],
+            v.fg_stroke.color,
+            Stroke::NONE,
+        ));
+    }
+    // It opens below the button, or above it when there is more room there, and the list gets
+    // the room left (the popup's frame aside).
+    const GAP: f32 = 12.0;
+    let screen = ui.ctx().content_rect();
+    let frame = ui.spacing().menu_margin.sum().y + GAP;
+    let (below, above) = (screen.bottom() - rect.bottom() - frame, rect.top() - screen.top() - frame);
+    let (align, room) = if below >= above { (egui::RectAlign::BOTTOM_START, below) } else { (egui::RectAlign::TOP_START, above) };
+    egui::Popup::menu(&resp)
+        .id(popup)
+        .width(rect.width())
+        .align(align)
+        .align_alternatives(&[])
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_min_width(ui.available_width());
+            ui.set_max_height(room);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+            list(ui)
+        })
+        .and_then(|r| r.inner)
 }
 
 /// A popover anchored to `resp`, opened and closed by `toggle` (usually `resp.clicked()`), and
@@ -716,8 +785,20 @@ pub fn menu_scroll<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R
 /// A column of tool or panel buttons (the toolbar, the dock's icon column) that scrolls when the
 /// window is too short for it: with the mouse wheel, or the scroll bar shown while the pointer is
 /// over it.
+/// Its scroll bar stays a slim line at the edge, even while scrolled or dragged, so it never covers
+/// the buttons (#808).
 pub fn strip_scroll<R>(ui: &mut Ui, id: &str, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
-    egui::ScrollArea::vertical().id_salt(id).auto_shrink([false, true]).show(ui, add_contents).inner
+    ui.scope(|ui| {
+        ui.spacing_mut().scroll = egui::style::ScrollStyle {
+            bar_width: 4.0,
+            floating_width: 2.0,
+            bar_inner_margin: 0.0,
+            bar_outer_margin: 1.0,
+            ..egui::style::ScrollStyle::floating()
+        };
+        egui::ScrollArea::vertical().id_salt(id).auto_shrink([false, true]).show(ui, add_contents).inner
+    })
+    .inner
 }
 
 /// Whether the blend-mode list draws a separator above `BlendMode::ALL[i]`: where a
@@ -806,18 +887,23 @@ pub fn opacity_blend(
     edit
 }
 
-/// The 3×3 reference point locator. Returns a new index when clicked.
+/// The 3×3 reference point locator: nine squares, the eight outer ones joined by a line around
+/// the box (the centre one stands alone), the current one filled. Returns a new index when clicked.
 pub fn reference_point(ui: &mut Ui, current: usize) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
-    let size = 22.0;
+    // 5 pt squares with 4 pt gaps; the origin is snapped to whole points so the 1 pt lines through
+    // the squares' centres stay crisp.
+    let (sq, step) = (5.0, 9.0);
+    let size = 2.0 * step + sq;
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    let o = rect.min.round();
+    let centre = |i: usize| o + Vec2::new(sq / 2.0 + (i % 3) as f32 * step, sq / 2.0 + (i / 3) as f32 * step);
+    let line = Stroke::new(1.0, t.text_dim);
+    ui.painter().rect_stroke(Rect::from_two_pos(centre(0), centre(8)), 0.0, line, StrokeKind::Middle);
     let mut out = None;
-    let step = size / 2.0 - 2.5;
-    ui.painter().rect_stroke(rect.shrink(4.5), 0.0, Stroke::new(1.0, t.text_dim), StrokeKind::Middle);
     for i in 0..9 {
-        let c = Pos2::new(rect.left() + 3.0 + (i % 3) as f32 * step + 1.5, rect.top() + 3.0 + (i / 3) as f32 * step + 1.5);
-        let r = Rect::from_center_size(c, Vec2::splat(5.0));
-        let resp = ui.interact(r.expand(1.5), ui.id().with(("refpt", i)), Sense::click());
+        let r = Rect::from_center_size(centre(i), Vec2::splat(sq));
+        let resp = ui.interact(r.expand(2.0), ui.id().with(("refpt", i)), Sense::click());
         if resp.clicked() {
             out = Some(i);
         }
@@ -825,7 +911,7 @@ pub fn reference_point(ui: &mut Ui, current: usize) -> Option<usize> {
             ui.painter().rect_filled(r, 0.0, t.text);
         } else {
             ui.painter().rect_filled(r, 0.0, t.panel);
-            ui.painter().rect_stroke(r, 0.0, Stroke::new(1.0, t.text_dim), StrokeKind::Inside);
+            ui.painter().rect_stroke(r, 0.0, Stroke::new(1.0, if resp.hovered() { t.text } else { t.text_dim }), StrokeKind::Inside);
         }
     }
     out
@@ -903,8 +989,21 @@ pub fn check(ui: &mut Ui, label: &str, value: bool, enabled: bool) -> bool {
     check3(ui, label, Some(value), enabled)
 }
 
+/// [`check`] with tooltip `tip` on the box and its label. Returns true when toggled.
+pub fn check_tip(ui: &mut Ui, label: &str, value: bool, enabled: bool, tip: &str) -> bool {
+    let (clicked, resp) = check_row(ui, label, Some(value), enabled);
+    resp.on_hover_text(tip);
+    clicked
+}
+
 /// Three-state [`check`]: `None` shows a dash (a neutral or mixed state). Returns true when clicked.
 pub fn check3(ui: &mut Ui, label: &str, value: Option<bool>, enabled: bool) -> bool {
+    check_row(ui, label, value, enabled).0
+}
+
+/// [`check3`], also returning the row's response (what a tooltip goes on: a widget around it never
+/// counts as hovered under the box).
+fn check_row(ui: &mut Ui, label: &str, value: Option<bool>, enabled: bool) -> (bool, Response) {
     let t = Tokens::get(ui.ctx());
     let (bx, resp, border) = choice_row(ui, label, enabled);
     let checked = value == Some(true);
@@ -922,7 +1021,7 @@ pub fn check3(ui: &mut Ui, label: &str, value: Option<bool>, enabled: bool) -> b
         }
         Some(false) => {}
     }
-    enabled && resp.clicked()
+    (enabled && resp.clicked(), resp)
 }
 
 /// Radio button in the style of [`check`], with a disabled state. Returns true when clicked.
@@ -1376,6 +1475,9 @@ pub enum PanelDrag {
     /// A Brushes panel brush (`def`: its definition, for the chip at the pointer): the path it is
     /// dropped on takes it (`brush.apply`).
     Brush { name: String, def: serde_json::Value },
+    /// A Libraries panel graphic (`item`: its id in `library`): the canvas places a copy centred
+    /// where it is dropped (`library.use`).
+    LibraryGraphic { library: String, item: String },
 }
 
 /// A panel list `zone` that takes art dragged off the canvas: outlined while art is held over it;
@@ -1605,6 +1707,51 @@ pub fn orientation_button(ui: &mut Ui, landscape: bool, selected: bool, tip: &st
     let corner = [page.right_top() - vec2(fold, 0.0), page.right_top() + vec2(-fold, fold), page.right_top() + vec2(0.0, fold)];
     ui.painter().add(egui::Shape::line(corner.to_vec(), Stroke::new(1.2, if selected { t.panel } else { color })));
     resp.on_hover_text(tl!(tip)).clicked()
+}
+
+/// An artboard-layout toggle drawn in code (Rearrange All Artboards): small artboards in the grid
+/// cells `tiles` (column, row), tinted, and over them their order as a line from a dot on the first
+/// to an arrowhead on the last; accent-drawn in a pressed well when `selected`, greyed in a disabled
+/// `ui`. `tip` is shown as it is (the caller translates it). Returns clicked.
+pub fn layout_button(ui: &mut Ui, tiles: &[(u8, u8)], selected: bool, tip: &str) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::click());
+    let enabled = ui.is_enabled();
+    let bg = if selected {
+        t.tool_active
+    } else if resp.hovered() && enabled {
+        t.hover
+    } else {
+        Color32::TRANSPARENT
+    };
+    ui.painter().rect_filled(rect, CornerRadius::same(3), bg);
+    let color = if !enabled {
+        t.text_disabled
+    } else if selected {
+        t.accent
+    } else {
+        t.icon
+    };
+    // Cells at most 10 points a side in a 20-point square: a row's artboards stand tall, a
+    // column's lie flat.
+    let (cols, rows) = tiles.iter().fold((1u8, 1u8), |(c, r), &(x, y)| (c.max(x.saturating_add(1)), r.max(y.saturating_add(1))));
+    let cell = vec2((20.0 / f32::from(cols)).min(10.0), (20.0 / f32::from(rows)).min(10.0));
+    let origin = rect.center() - vec2(f32::from(cols) * cell.x, f32::from(rows) * cell.y) / 2.0;
+    let centre = |&(x, y): &(u8, u8)| origin + vec2((f32::from(x) + 0.5) * cell.x, (f32::from(y) + 0.5) * cell.y);
+    for tile in tiles {
+        ui.painter().rect_filled(Rect::from_center_size(centre(tile), cell - vec2(2.0, 2.0)), 1.0, color.gamma_multiply(0.35));
+    }
+    let path: Vec<Pos2> = tiles.iter().map(centre).collect();
+    if let ([first, ..], [.., from, to]) = (path.as_slice(), path.as_slice()) {
+        let (first, from, to) = (*first, *from, *to);
+        let dir = (to - from).normalized();
+        let side = dir.rot90() * 2.5;
+        let head = vec![to + dir * 1.5, to - dir * 2.5 + side, to - dir * 2.5 - side];
+        ui.painter().circle_filled(first, 1.6, color);
+        ui.painter().add(egui::Shape::line(path, Stroke::new(1.2, color)));
+        ui.painter().add(egui::Shape::convex_polygon(head, color, Stroke::NONE));
+    }
+    resp.on_hover_text(tip).clicked()
 }
 
 /// `region` of `doc` rendered on white, its longest side `px` pixels, as a texture named `name`

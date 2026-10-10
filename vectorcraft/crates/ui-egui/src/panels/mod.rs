@@ -24,6 +24,7 @@ pub mod history;
 pub mod image_trace;
 pub mod info;
 pub mod layers;
+pub mod libraries;
 pub mod library_panel;
 pub mod links;
 pub mod magic_wand;
@@ -67,11 +68,21 @@ pub(crate) fn corner_radius(app: &VectorcraftApp, n: &Node) -> Option<f64> {
 
 /// The Corner Radius field of a live rectangle's or polygon's properties: [`corner_radius`],
 /// which a new value sets on those corners.
+/// The width of a panel's number fields: the Transform fields', two to a row beside the reference
+/// point, their labels and the W/H link, so every field in the panel is as wide (#696). Measured
+/// from the full row, before its widgets.
+pub(crate) fn field_width(ui: &Ui) -> f32 {
+    // The reference point and its gap, the four labels and the W/H link.
+    const AROUND: f32 = 37.0 + 70.0;
+    ((ui.available_width() - AROUND) / 2.0).clamp(60.0, 110.0)
+}
+
 pub(crate) fn corner_radius_row(app: &mut VectorcraftApp, ui: &mut Ui, n: &Node, id: &str) {
     let units = app.session.general_unit();
+    let fw = field_width(ui);
     ui.horizontal(|ui| {
         dim_label(ui, tl!("Corner Radius:"));
-        if let Some(r) = crate::widgets::num_field(ui, id, corner_radius(app, n), units, 80.0) {
+        if let Some(r) = crate::widgets::num_field(ui, id, corner_radius(app, n), units, fw) {
             app.run("object.setLiveShape", json!({"radius": r})).ok();
         }
     });
@@ -159,6 +170,7 @@ pub fn panel_menu_items(app: &mut VectorcraftApp, ui: &mut Ui, id: &str) -> bool
         "paraStyles" => text_styles::menu(app, ui, text_styles::Kind::Para),
         "magicWand" => magic_wand::menu(app, ui),
         "tabs" => tabs::menu(app, ui),
+        "libraries" => libraries::menu(app, ui),
         flattener_preview::ID => flattener_preview::menu(app, ui),
         "attributes" => attributes::menu(app, ui),
         "colorThemes" => color_themes::menu(app, ui),
@@ -198,18 +210,8 @@ pub fn panel_menu(app: &mut VectorcraftApp, ui: &mut Ui, id: &str, rect: Rect) {
     });
 }
 
-pub fn libraries(_app: &mut VectorcraftApp, ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    ui.add_space(20.0);
-    ui.vertical_centered(|ui| {
-        icons::icon(ui, "library", 40.0, t.text_dim);
-        ui.add_space(8.0);
-        ui.label(egui::RichText::new(tl!("Local Libraries")).size(14.0).color(t.text));
-        dim_label(
-            ui,
-            "Drag art, colors and text styles here to reuse them across documents. Libraries are stored on this machine — no account required.",
-        );
-    });
+pub fn libraries(app: &mut VectorcraftApp, ui: &mut Ui) {
+    libraries::show(app, ui);
 }
 
 // ---------- shared helpers ----------
@@ -346,10 +348,9 @@ pub(crate) fn paint_chip(app: &mut VectorcraftApp, ui: &mut Ui, stroke: bool, si
         app.run("paint.toggleActive", json!({ "fill": !stroke })).ok();
         set_pstate(ui.ctx(), MIXER, ui.input(|i| i.modifiers.shift));
     }
-    egui::Popup::from_toggle_button_response(&resp)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .width(POPOVER_WIDTH)
-        .show(|ui| paint_popover(app, ui));
+    // A popover that keeps its own open state: the Swatches body opens menus of its own (Swatch
+    // Libraries, Show Swatch Kinds), which a remembered egui popup would close with them (#536).
+    crate::widgets::popover(&resp, resp.clicked(), |ui| paint_popover(app, ui));
 }
 
 /// The chip popovers' width (a narrow Swatches or Color panel).
