@@ -4,10 +4,16 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod app_dirs;
+mod appearance;
+pub mod caps_lock;
 pub mod crash_guard;
 mod embed;
 pub mod gpu_startup;
+// Pure logic is tested on every platform; only Linux runs the check.
+#[cfg(any(target_os = "linux", test))]
+pub mod linux_libs;
 pub mod monitor_profile;
+mod photoshop_settings;
 pub mod services;
 // Windows gets pen pressure from winit (WM_POINTER); the web runner has its own listener.
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
