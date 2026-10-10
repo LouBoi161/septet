@@ -170,7 +170,11 @@ verify() {
     commit_lockfiles "$app" "$tag"
     [ $tests = 1 ] || return 0
     step "septet tests" "$out/$app-septet-test.log" cargo test -p septet || return 1
-    step "$app tests" "$out/$app-test.log" bash -c "cd '$app' && cargo test --workspace --no-fail-fast" || return 1
+    # Known environment failures (scripts/sync-upstream-skips.txt); only passed when the app has some,
+    # because a custom test harness may not take --skip.
+    local skips
+    skips=$(sed -n "s/^$app \([^ ]*\).*/--skip \1/p" "$root/scripts/sync-upstream-skips.txt" | tr '\n' ' ')
+    step "$app tests" "$out/$app-test.log" bash -c "cd '$app' && cargo test --workspace --no-fail-fast ${skips:+-- $skips}" || return 1
     commit_lockfiles "$app" "$tag"
     [ $autotests = 1 ] || return 0
     start_xvfb && make_samples || return 1

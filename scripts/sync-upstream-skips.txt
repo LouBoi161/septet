@@ -1,0 +1,8 @@
+# Tests sync-upstream.sh skips: <app> <test name filter>, then why. Only for failures that upstream's
+# own release shows on the same machine (environment, not our changes); re-check them at each sync.
+
+# The installed Noto Sans Arabic (/usr/share/fonts/noto, Arch's noto-fonts) forms lam-alef as two
+# glyphs; upstream v0.8.0 fails the same way here (2026-10-10).
+vectorcraft tests_bidi::arabic_contextual_forms_and_lam_alef_use_the_shaper
+vectorcraft tests_bidi::different_style_arabic_boundary_receives_joining_context
+vectorcraft tests_bidi::identical_style_arabic_run_splits_keep_joining_and_source_attribution
