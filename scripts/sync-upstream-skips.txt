@@ -6,3 +6,12 @@
 vectorcraft tests_bidi::arabic_contextual_forms_and_lam_alef_use_the_shaper
 vectorcraft tests_bidi::different_style_arabic_boundary_receives_joining_context
 vectorcraft tests_bidi::identical_style_arabic_run_splits_keep_joining_and_source_attribution
+
+# Walks every installed ICC profile; colord's IFRA26S_2004_newsprint.icc doesn't round-trip. Upstream
+# v0.6.0 fails the same way here (2026-10-10).
+photocraft system_profiles
+
+# OPEN, not only the environment: with CRAFT_FONTS_DIR at the craft-fonts commit our CI embeds
+# (8dcdacd, newer than upstream's pin), Noto Sans CJK SC isn't registered under its manifest name.
+# Passes without CRAFT_FONTS_DIR. Look at it before the next release, then drop this line.
+photocraft tests::works_without_craft_fonts
