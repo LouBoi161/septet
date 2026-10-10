@@ -33,7 +33,7 @@ pub fn session(data_dir: Option<std::path::PathBuf>) -> Session {
         let mut cfg = AutosaveConfig::new(dir);
         cfg.local_offset = local_offset;
         if let Err(e) = session.start_autosave(cfg) {
-            eprintln!("filmcraft: auto-save and crash recovery unavailable: {e}");
+            log::warn!("auto-save and crash recovery unavailable: {e}");
         }
     }
     // voice-over recording reads the microphone through cpal
@@ -53,7 +53,7 @@ pub fn open_at_startup(session: &mut Session, files: &[String], demo: bool, star
     let project = files.iter().find(|f| is_project(f)).cloned();
     if let Some(p) = project {
         if let Err(e) = session.execute("file.open", json!({"path": p})) {
-            eprintln!("filmcraft: {e}");
+            log::error!("{e}");
         }
     } else if !startup_flag && session.prefs.general.at_startup == "openMostRecent" {
         // Settings ▸ General ▸ At Startup ▸ Open Most Recent
@@ -61,7 +61,7 @@ pub fn open_at_startup(session: &mut Session, files: &[String], demo: bool, star
         match recent {
             Some(p) => {
                 if let Err(e) = session.execute("file.open", json!({"path": p})) {
-                    eprintln!("filmcraft: {e}");
+                    log::error!("{e}");
                 }
             }
             None => {
@@ -78,25 +78,54 @@ pub fn open_at_startup(session: &mut Session, files: &[String], demo: bool, star
     }
 }
 
-/// The native file dialogs (rfd): import, relink, open and save.
+/// The native file dialogs (rfd): import, relink, open and save. Filter names follow the
+/// interface language.
 pub fn install_file_dialogs(app: &mut FilmcraftApp) {
     app.hooks.pick_files = Some(Box::new(|exts: &[&str]| {
-        rfd::FileDialog::new().add_filter("Media", exts).pick_files().unwrap_or_default().into_iter().map(|p| p.to_string_lossy().to_string()).collect()
+        rfd::FileDialog::new()
+            .add_filter(filmcraft_ui_egui::i18n::t("Media"), exts)
+            .pick_files()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect()
     }));
     // Link Media ▸ Locate…, Attach Proxies, Reconnect Full Resolution: one path, not imported.
-    app.hooks.pick_file_for_relink =
-        Some(Box::new(|exts: &[&str], _hint| rfd::FileDialog::new().add_filter("Media", exts).pick_file().map(|p| p.to_string_lossy().to_string())));
+    app.hooks.pick_file_for_relink = Some(Box::new(|exts: &[&str], _hint| {
+        rfd::FileDialog::new().add_filter(filmcraft_ui_egui::i18n::t("Media"), exts).pick_file().map(|p| p.to_string_lossy().to_string())
+    }));
     app.hooks.pick_save = Some(Box::new(|name: &str| {
-        rfd::FileDialog::new().add_filter("FilmCraft Project", &["fcproj"]).set_file_name(name).save_file().map(|p| p.to_string_lossy().to_string())
+        rfd::FileDialog::new()
+            .add_filter(filmcraft_ui_egui::i18n::t("FilmCraft Project"), &["fcproj"])
+            .set_file_name(name)
+            .save_file()
+            .map(|p| p.to_string_lossy().to_string())
     }));
     app.hooks.pick_save_as = Some(Box::new(|filter: &str, exts: &[&str], name: &str| {
-        rfd::FileDialog::new().add_filter(filter, exts).set_file_name(name).save_file().map(|p| p.to_string_lossy().to_string())
+        rfd::FileDialog::new()
+            .add_filter(filmcraft_ui_egui::i18n::t(filter), exts)
+            .set_file_name(name)
+            .save_file()
+            .map(|p| p.to_string_lossy().to_string())
     }));
     app.hooks.pick_folder = Some(Box::new(|| rfd::FileDialog::new().pick_folder().map(|p| p.to_string_lossy().to_string())));
-    app.hooks.pick_open_file =
-        Some(Box::new(|filter: &str, exts: &[&str]| rfd::FileDialog::new().add_filter(filter, exts).pick_file().map(|p| p.to_string_lossy().to_string())));
-    app.hooks.pick_open_project =
-        Some(Box::new(|| rfd::FileDialog::new().add_filter("FilmCraft Project", &["fcproj"]).pick_file().map(|p| p.to_string_lossy().to_string())));
+    app.hooks.pick_folder_at =
+        Some(Box::new(|dir: &str| rfd::FileDialog::new().set_directory(dir).pick_folder().map(|p| p.to_string_lossy().into_owned())));
+    app.hooks.pick_open_file = Some(Box::new(|filter: &str, exts: &[&str]| {
+        rfd::FileDialog::new().add_filter(filmcraft_ui_egui::i18n::t(filter), exts).pick_file().map(|p| p.to_string_lossy().to_string())
+    }));
+    app.hooks.pick_open_project = Some(Box::new(|| {
+        rfd::FileDialog::new()
+            .add_filter(filmcraft_ui_egui::i18n::t("FilmCraft Project"), &["fcproj"])
+            .pick_file()
+            .map(|p| p.to_string_lossy().to_string())
+    }));
+}
+
+/// The system's preferred languages, for Settings ▸ General ▸ Interface Language ▸ System Language
+/// (#218).
+pub fn install_system_languages(app: &mut FilmcraftApp) {
+    app.hooks.system_languages = Some(Box::new(|| sys_locale::get_locales().collect()));
 }
 
 /// Open a file in its default application, or reveal it in the file manager (Edit Original,
@@ -134,6 +163,9 @@ mod tests {
     fn startup_registers_the_hardware_decoders_without_a_logger() {
         assert!(!log::log_enabled!(log::Level::Info));
         let hardware = super::register_hardware_decoders();
-        assert_eq!(filmcraft_platform::registered(), cfg!(any(target_os = "macos", target_os = "windows")), "{hardware:?}");
+        // always on macOS and Windows; on Linux when a VA-API driver is there
+        let expected = cfg!(any(target_os = "macos", target_os = "windows"))
+            || (cfg!(target_os = "linux") && matches!(hardware, filmcraft_platform::Availability::Available(_)));
+        assert_eq!(filmcraft_platform::registered(), expected, "{hardware:?}");
     }
 }

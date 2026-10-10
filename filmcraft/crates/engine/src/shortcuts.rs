@@ -363,6 +363,22 @@ pub struct Binding {
     pub panel: Option<String>,
 }
 
+/// Off macOS the Control and Command keys are the same key. The built-in tables are written for
+/// macOS, so a binding on the Mac Control key (`⌃T`) can land on the same key as a Command binding
+/// (`⌘T`) in the same context: the Command binding wins and the Control one is left out there
+/// (that command has no default key on that platform). macOS keeps both.
+fn drop_control_collisions(b: &mut Vec<Binding>, p: Platform) {
+    if p.is_mac() {
+        return;
+    }
+    let primary: Vec<(String, Option<Chord>)> =
+        b.iter().filter(|x| x.chord().is_some_and(|c| !c.mods.ctrl)).map(|x| (x.context().to_string(), x.chord().map(|c| c.effective(p)))).collect();
+    b.retain(|x| {
+        let Some(c) = x.chord() else { return true };
+        !(c.mods.ctrl && primary.iter().any(|(ctx, k)| ctx == x.context() && *k == Some(c.effective(p))))
+    });
+}
+
 impl Binding {
     fn new(command: &str, keys: &str, panel: Option<&str>) -> Self {
         Binding { command: command.to_string(), keys: normalize(keys).unwrap_or_else(|_| keys.to_string()), panel: panel.map(str::to_string) }
@@ -560,24 +576,28 @@ impl Shortcuts {
                 out.push(Binding::new(c, k, panel_opt(p)));
             }
         }
-        drop_control_clashes(&mut out, Platform::current());
         out
     }
 
     /// Premiere-default entries FilmCraft Default adopts: commands with no shortcut of their own
-    /// whose Premiere key is free in that context on this OS (off macOS `Ctrl` and `Cmd` are the
-    /// same key, so ⌃9 Cut to Camera 9 would shadow ⌘9 Toggle All Audio Targets there).
+    /// whose Premiere key is free in that context on this platform.
     pub fn audit(&self) -> Vec<Binding> {
+        self.audit_for(Platform::current())
+    }
+
+    /// [`Self::audit`] for platform `p`. The Premiere table is Premiere's macOS keyboard: off macOS
+    /// the Control and Command keys are the same key, so an entry whose key would collide there
+    /// with one already taken (`⌃T` vs `⌘T`) is left out, and the command keeps no default key.
+    pub(crate) fn audit_for(&self, platform: Platform) -> Vec<Binding> {
         let base = self.base_defaults();
-        let os = Platform::current();
-        let eff = |b: &Binding| b.chord().map(|c| c.effective(os));
         let mut added: Vec<Binding> = Vec::new();
         for (c, k, p) in presets::PREMIERE {
             if !self.known(c) || base.iter().any(|b| b.command == *c) {
                 continue;
             }
             let b = Binding::new(c, k, panel_opt(p));
-            let taken = base.iter().chain(added.iter()).any(|o| o.context() == b.context() && eff(o) == eff(&b));
+            let key = b.chord().map(|c| c.effective(platform));
+            let taken = base.iter().chain(added.iter()).any(|o| o.context() == b.context() && o.chord().map(|c| c.effective(platform)) == key);
             if !taken {
                 added.push(b);
             }
@@ -587,8 +607,13 @@ impl Shortcuts {
 
     /// The bindings of a built-in preset.
     pub fn builtin(&self, name: &str) -> Option<Vec<Binding>> {
+        self.builtin_for(name, Platform::current())
+    }
+
+    /// [`Self::builtin`] as it is built on platform `p`.
+    pub(crate) fn builtin_for(&self, name: &str, p: Platform) -> Option<Vec<Binding>> {
         let mut b = self.base_defaults();
-        b.extend(self.audit());
+        b.extend(self.audit_for(p));
         let table: Vec<Entry> = match name {
             DEFAULT_PRESET => Vec::new(),
             PREMIERE_PRESET => presets::premiere(),
@@ -597,6 +622,7 @@ impl Shortcuts {
             _ => return None,
         };
         self.apply_table(&mut b, &table);
+        drop_control_collisions(&mut b, p);
         Some(b)
     }
 
@@ -969,26 +995,6 @@ impl Shortcuts {
 
 fn panel_opt(p: &str) -> Option<&str> {
     if p.is_empty() { None } else { Some(p) }
-}
-
-/// Off macOS `Ctrl` (the Control key) and `Cmd` are the same key, so a default on ⌃ can land on
-/// another command's ⌘ default (⌃9 Cut to Camera 9 and ⌘9 Toggle All Audio Targets both become
-/// Ctrl+9). The ⌘ shortcut keeps the key; the ⌃ one is dropped on that OS.
-fn drop_control_clashes(b: &mut Vec<Binding>, p: Platform) {
-    if p.is_mac() {
-        return;
-    }
-    let clashes = |x: &Binding, all: &[Binding]| {
-        let Some(c) = x.chord().filter(|c| c.mods.ctrl) else { return false };
-        let eff = c.effective(p);
-        all.iter().any(|o| o.command != x.command && o.context() == x.context() && o.chord().is_some_and(|oc| !oc.mods.ctrl && oc.effective(p) == eff))
-    };
-    let keep: Vec<bool> = b.iter().map(|x| !clashes(x, b)).collect();
-    let mut i = 0;
-    b.retain(|_| {
-        i += 1;
-        keep.get(i - 1).copied().unwrap_or(true)
-    });
 }
 
 fn check_panel(panel: Option<&str>) -> std::result::Result<Option<&'static str>, String> {
