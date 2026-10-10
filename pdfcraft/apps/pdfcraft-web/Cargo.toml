@@ -11,10 +11,12 @@ workspace = true
 
 [dependencies]
 pdfcraft-ui-egui = { workspace = true }
-eframe = { workspace = true, features = ["default_fonts", "glow", "persistence", "accesskit"] }
 egui = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# Only on wasm32 (the native build is a stub): eframe's `glow` feature would otherwise reach the
+# desktop app's eframe in a workspace build and change `eframe::App::on_exit` there (Septet).
+eframe = { workspace = true, features = ["default_fonts", "glow", "persistence", "accesskit"] }
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "HtmlElement", "Location", "Url", "UrlSearchParams", "Response"] }
 js-sys = "0.3"

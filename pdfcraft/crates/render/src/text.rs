@@ -18,6 +18,7 @@ use kurbo::{Affine, BezPath, Rect, Shape};
 /// One glyph on the page.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextGlyph {
+    /// The glyph's Unicode text: one character, or several for a ligature.
     pub text: String,
     /// Box in page view space (points, y down): [x0, y0, x1, y1].
     pub rect: [f32; 4],
@@ -146,6 +147,41 @@ impl PageText {
             .map(|(i, _)| i)
     }
 
+    /// The word around glyph `i` as its first and last glyph (double-click): it stops at word
+    /// gaps, blank glyphs and line ends.
+    pub fn word_at(&self, i: usize) -> Option<(usize, usize)> {
+        self.glyphs.get(i)?;
+        let blank = |k: usize| self.glyphs.get(k).is_none_or(|g| g.text.trim().is_empty());
+        // Glyph `k` (≥ 1) follows glyph `k - 1` with no word gap or line break between them.
+        let joined = |k: usize| !self.space_before.get(k).copied().unwrap_or(true) && self.line_of.get(k - 1) == self.line_of.get(k);
+        let mut first = i;
+        while first > 0 && joined(first) && !blank(first - 1) {
+            first -= 1;
+        }
+        let mut last = i;
+        while joined(last + 1) && !blank(last + 1) {
+            last += 1;
+        }
+        Some((first, last))
+    }
+
+    /// The line around glyph `i` as its first and last glyph (triple-click). A line's glyphs are
+    /// consecutive.
+    pub fn line_at(&self, i: usize) -> Option<(usize, usize)> {
+        self.glyphs.get(i)?;
+        let line = self.line_of.get(i)?;
+        let same = |k: usize| self.line_of.get(k) == Some(line);
+        let mut first = i;
+        while first > 0 && same(first - 1) {
+            first -= 1;
+        }
+        let mut last = i;
+        while same(last + 1) {
+            last += 1;
+        }
+        Some((first, last))
+    }
+
     /// Merge the boxes of `range` into one rectangle per line (for highlighting).
     pub fn line_rects(&self, range: std::ops::Range<usize>) -> Vec<[f32; 4]> {
         let mut out: Vec<(u32, [f32; 4])> = Vec::new();
@@ -225,13 +261,9 @@ impl<'a> Device<'a> for TextDevice {
         if !(b.x0.is_finite() && b.y0.is_finite() && b.x1.is_finite() && b.y1.is_finite()) || b.width() > 10_000.0 || b.height() > 10_000.0 {
             return;
         }
-        for (i, ch) in text.chars().enumerate() {
-            // Ligatures (e.g. "ffi") share the glyph box, split evenly.
-            let n = text.chars().count().max(1) as f64;
-            let w = b.width() / n;
-            let x0 = b.x0 + w * i as f64;
-            self.glyphs[dir].push(TextGlyph { text: ch.to_string(), rect: [x0 as f32, b.y0 as f32, (x0 + w) as f32, b.y1 as f32] });
-        }
+        // A glyph whose Unicode is several characters (a ligature such as "ffi") stays one glyph
+        // with its own box: the PDF gives no position for the characters inside it.
+        self.glyphs[dir].push(TextGlyph { text, rect: [b.x0 as f32, b.y0 as f32, b.x1 as f32, b.y1 as f32] });
     }
     fn draw_image(&mut self, _: Image<'a, '_>, _: Affine) {}
     fn pop_clip_path(&mut self) {}
@@ -573,6 +605,103 @@ mod tests {
         }
     }
 
+    /// One page per text matrix, each showing `codes` in Helvetica whose `/ToUnicode` maps the
+    /// codes in `unicode` (a `bfchar` body) to several characters.
+    fn ligature_pages(unicode: &str, codes: &str, matrices: &[&str]) -> Pdf {
+        use lopdf::{Document, Object, Stream, dictionary};
+        let mut doc = Document::with_version("1.7");
+        let cmap = format!(
+            "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def /CMapName /TestLigatures def /CMapType 2 def 1 begincodespacerange <00> <FF> endcodespacerange {unicode} endcmap CMapName currentdict /CMap defineresource pop end end"
+        );
+        let to_unicode = doc.add_object(Stream::new(dictionary! {}, cmap.into_bytes()));
+        let font = doc.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "ToUnicode" => to_unicode });
+        let pages = doc.new_object_id();
+        let mut kids = Vec::new();
+        for m in matrices {
+            let content = doc.add_object(Stream::new(dictionary! {}, format!("BT /F1 20 Tf {m} Tm ({codes}) Tj ET").into_bytes()));
+            let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages, "MediaBox" => vec![Object::Integer(0), Object::Integer(0), Object::Integer(300), Object::Integer(300)], "Resources" => dictionary! {"Font" => dictionary! {"F1" => font}}, "Contents" => content });
+            kids.push(Object::Reference(page));
+        }
+        let count = kids.len() as i64;
+        doc.objects.insert(pages, dictionary! {"Type" => "Pages", "Kids" => kids, "Count" => count}.into());
+        let catalog = doc.add_object(dictionary! {"Type" => "Catalog", "Pages" => pages});
+        doc.trailer.set("Root", catalog);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        Pdf::new(std::sync::Arc::new(bytes)).unwrap()
+    }
+
+    #[test]
+    fn a_ligature_is_one_glyph_in_every_writing_direction() {
+        // "o", one glyph for "ffi", "c", "e": "office", turned 0°, 90°, 180° and 270°. The same
+        // codes without the ligature mapping ("oWce") are the control for the glyph box.
+        let turns = ["1 0 0 1 100 150", "0 1 -1 0 150 100", "-1 0 0 -1 200 150", "0 -1 1 0 150 200"];
+        let ligature = ligature_pages("1 beginbfchar <57> <006600660069> endbfchar", "oWce", &turns);
+        let control = ligature_pages("", "oWce", &turns);
+        for (page, turn) in turns.iter().enumerate() {
+            let text = extract_page(&ligature, page, &InterpreterSettings::default()).unwrap();
+            let plain = extract_page(&control, page, &InterpreterSettings::default()).unwrap();
+            assert_eq!(plain.plain_text(), "oWce", "Tm {turn}");
+            assert_eq!(text.plain_text(), "office", "Tm {turn}");
+            assert_eq!(text.glyphs.iter().map(|g| g.text.as_str()).collect::<Vec<_>>(), ["o", "ffi", "c", "e"], "Tm {turn}");
+            assert_eq!(text.glyphs[1].rect, plain.glyphs[1].rect, "the painted glyph's box, Tm {turn}");
+            assert_eq!(text.find("ffi"), vec![1..2], "Tm {turn}");
+            assert_eq!(text.find("of"), vec![0..2], "a match ending inside the ligature covers it, Tm {turn}");
+            assert_eq!(text.line_rects(0..4).len(), 1, "one line, Tm {turn}");
+        }
+    }
+
+    #[test]
+    fn narrow_ligatures_keep_every_letter() {
+        // Split evenly, this "ffi" put its two "f"s so close that the second was dropped as a
+        // fake-bold copy of the first.
+        let pdf = ligature_pages("1 beginbfchar <62> <006600660069> endbfchar", "obce", &["1 0 0 1 100 150"]);
+        let text = extract_page(&pdf, 0, &InterpreterSettings::default()).unwrap();
+        assert_eq!(text.plain_text(), "office");
+    }
+
+    #[test]
+    fn right_to_left_ligatures_keep_their_logical_order() {
+        // "سلام" drawn left to right as meem, alef, lam, seen; then with lam-alef as one glyph.
+        let letters = ligature_pages("4 beginbfchar <61> <0645> <62> <0644> <63> <0633> <64> <0627> endbfchar", "adbc", &["1 0 0 1 100 150"]);
+        let ligature = ligature_pages("3 beginbfchar <61> <0645> <62> <06440627> <63> <0633> endbfchar", "abc", &["1 0 0 1 100 150"]);
+        for pdf in [letters, ligature] {
+            assert_eq!(extract_page(&pdf, 0, &InterpreterSettings::default()).unwrap().plain_text(), "سلام");
+        }
+        // "بَاب" with beh and its fatha as one glyph, as Add text writes shaped Arabic: the mark
+        // stays after its letter.
+        let marked = ligature_pages("3 beginbfchar <61> <0628064E> <62> <0627> <63> <0628> endbfchar", "cba", &["1 0 0 1 100 150"]);
+        assert_eq!(extract_page(&marked, 0, &InterpreterSettings::default()).unwrap().plain_text(), "بَاب");
+    }
+
+    #[test]
+    fn vertical_ligatures_stay_in_their_column() {
+        use lopdf::{Document, Object, Stream, dictionary};
+        let mut doc = Document::with_version("1.7");
+        // CID 2 is one glyph for "株式".
+        let cmap = b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def /CMapName /TestUnicode def /CMapType 2 def 1 begincodespacerange <0000> <FFFF> endcodespacerange 3 beginbfchar <0001> <65E5> <0002> <682A5F0F> <0003> <8A9E> endbfchar endcmap CMapName currentdict /CMap defineresource pop end end";
+        let unicode = doc.add_object(Stream::new(dictionary! {}, cmap.to_vec()));
+        let cid = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "CIDFontType2", "BaseFont" => "TestVertical",
+            "CIDSystemInfo" => dictionary! { "Registry" => Object::string_literal("Adobe"), "Ordering" => Object::string_literal("Identity"), "Supplement" => 0 },
+            "DW" => 1000, "DW2" => vec![Object::Integer(880), Object::Integer(-1000)], "CIDToGIDMap" => "Identity"
+        });
+        let font = doc.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "TestVertical", "Encoding" => "Identity-V", "DescendantFonts" => vec![Object::Reference(cid)], "ToUnicode" => unicode });
+        let content = doc.add_object(Stream::new(dictionary! {}, b"BT /F1 20 Tf 1 0 0 1 200 250 Tm <000100020003> Tj ET".to_vec()));
+        let pages = doc.new_object_id();
+        let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages, "MediaBox" => vec![Object::Integer(0), Object::Integer(0), Object::Integer(300), Object::Integer(300)], "Resources" => dictionary! {"Font" => dictionary! {"F1" => font}}, "Contents" => content });
+        doc.objects.insert(pages, dictionary! {"Type" => "Pages", "Kids" => vec![Object::Reference(page)], "Count" => 1}.into());
+        let catalog = doc.add_object(dictionary! {"Type" => "Catalog", "Pages" => pages});
+        doc.trailer.set("Root", catalog);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let pdf = Pdf::new(std::sync::Arc::new(bytes)).unwrap();
+        let text = extract_page(&pdf, 0, &InterpreterSettings::default()).unwrap();
+        assert_eq!(text.plain_text(), "日株式語");
+        assert_eq!(text.glyphs.len(), 3);
+        assert_eq!(text.line_rects(0..3).len(), 1, "one column");
+    }
+
     #[test]
     fn upright_mapping_round_trips() {
         let r = [10.0, 20.0, 30.0, 25.0];
@@ -655,5 +784,25 @@ mod tests {
         let mut v = Vec::new();
         word(&mut v, "每个字", 10.0, 10.0, 9.0);
         assert_eq!(layout(v).plain_text(), "每个字");
+    }
+
+    /// Two lines, "ab cd" and "e fg": words stop at blank glyphs, word gaps and line ends.
+    #[test]
+    fn words_and_lines_around_a_glyph() {
+        let t = PageText {
+            glyphs: Vec::from(["a", "b", " ", "c", "d", "e", "f", "g"].map(|s| TextGlyph { text: s.into(), rect: [0.0; 4] })),
+            line_of: vec![0, 0, 0, 0, 0, 1, 1, 1],
+            space_before: vec![false, false, false, false, false, false, true, false],
+        };
+        assert_eq!(t.word_at(1), Some((0, 1)));
+        assert_eq!(t.word_at(3), Some((3, 4)));
+        assert_eq!(t.word_at(4), Some((3, 4)));
+        assert_eq!(t.word_at(5), Some((5, 5)));
+        assert_eq!(t.word_at(7), Some((6, 7)));
+        assert_eq!(t.line_at(2), Some((0, 4)));
+        assert_eq!(t.line_at(6), Some((5, 7)));
+        assert_eq!(t.word_at(8), None);
+        assert_eq!(t.line_at(8), None);
+        assert_eq!(PageText::default().line_at(0), None);
     }
 }
