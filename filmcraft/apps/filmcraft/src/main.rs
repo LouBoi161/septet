@@ -25,7 +25,8 @@
 mod app_nap;
 mod args;
 mod control_server;
-#[cfg(any(target_os = "windows", test))]
+#[cfg(target_os = "linux")]
+mod dev_icon;
 mod graphics;
 mod logging;
 #[cfg(target_os = "macos")]
@@ -37,6 +38,8 @@ use filmcraft_embed::{audio, desktop};
 use filmcraft_engine::autosave::default_data_dir;
 use filmcraft_ui_egui::FilmcraftApp;
 use serde_json::json;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Reverse-DNS app id: Linux `.desktop` file, hicolor icon name and Wayland app id.
 const APP_ID: &str = "ai.storyteller.filmcraft";
@@ -73,7 +76,7 @@ fn main() -> eframe::Result {
     let logger = logging::install();
     // lossy, so a value that is not Unicode is reported like any other bad port instead of ignored
     let env_port = std::env::var_os("FILMCRAFT_CONTROL_PORT").map(|p| p.to_string_lossy().into_owned());
-    let Launch { control_port, files, demo, startup_flag, recover, data_dir } = match args::parse(env_port, std::env::args().skip(1)) {
+    let launch = match args::parse(env_port, std::env::args_os().skip(1)) {
         Ok(Cli::Run(l)) => l,
         Ok(Cli::Help) => {
             tell(args::USAGE, false);
@@ -88,7 +91,8 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
-    let log_dir = data_dir.clone().or_else(default_data_dir).map(|d| d.join(logging::LOG_DIR));
+    let data_root = launch.data_dir.clone().or_else(default_data_dir);
+    let log_dir = data_root.as_ref().map(|d| d.join(logging::LOG_DIR));
     log::info!("FilmCraft {} ({} {})", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH);
     // The log file lives next to the crash logs; opened after the arguments, so `--help`,
     // `--version` and usage errors leave no file behind. Records logged until now go in first.
@@ -103,82 +107,46 @@ fn main() -> eframe::Result {
         }
     }
     app_nap::disable();
+    #[cfg(target_os = "linux")]
+    dev_icon::ensure_dev_desktop_entry();
     // Panics anywhere go to <data dir>/Logs/crash-<day>.log with a backtrace; the UI pass and
     // frame workers catch them and keep running (see filmcraft_ui_egui::crash).
     filmcraft_ui_egui::crash::install(log_dir);
     // OS hardware video decoders (VideoToolbox on macOS) in front of our own; Settings ▸ Playback ▸
     // Hardware decoding switches them off. Unsupported streams and failures use our decoders.
     desktop::register_hardware_decoders();
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("FilmCraft")
-            .with_inner_size([1600.0, 980.0])
-            .with_min_inner_size([900.0, 560.0])
-            .with_drag_and_drop(true)
-            .with_fullsize_content_view(true)
-            .with_titlebar_shown(false)
-            .with_title_shown(false)
-            // Started for an agent (`--control`): open without taking the user's keyboard focus.
-            .with_active(control_port.is_none())
-            .with_icon(app_icon())
-            // Wayland matches the window to `packaging/linux/ai.storyteller.filmcraft.desktop`.
-            .with_app_id(APP_ID),
-        event_loop_builder: agent_event_loop(control_port.is_some()),
-        ..Default::default()
+    // Which graphics backends and adapter the window starts with: `--graphics`, else the saved
+    // mode, which moves on after starts that died before their window painted (a driver crash),
+    // see graphics.rs.
+    let backend_override = eframe::wgpu::Backends::from_env();
+    let mut graphics = graphics::GraphicsStart::begin(data_root.as_deref(), backend_override.is_some(), launch.graphics);
+    // The GPU export renderer creates its own wgpu instance with every backend; after a start
+    // fell back, that would load the driver that failed. Exports then composite on the CPU.
+    if graphics.mode() == graphics::Mode::Default {
+        desktop::register_gpu_frame_renderer();
+    }
+    let started = loop {
+        let mut options = native_options(launch.control_port.is_some());
+        // Before eframe creates the wgpu instance (e.g. no OpenGL on Windows, see graphics.rs).
+        graphics::apply(&mut options, graphics.mode(), backend_override);
+        let app_created = Arc::new(AtomicBool::new(false));
+        let result = eframe::run_native("FilmCraft", options, app_creator(launch.clone(), graphics.clone(), Arc::clone(&app_created)));
+        let app_created = app_created.load(Ordering::Relaxed);
+        match &result {
+            // wgpu reported the failure (no adapter, device creation failed) before the app
+            // existed: try the next mode in this process.
+            Err(e) if !app_created && graphics::is_graphics_failure(e) && graphics.step_down() => {
+                log::warn!("graphics start failed: {e}");
+                continue;
+            }
+            // Closed before the second frame: the window still came up.
+            Ok(()) if app_created => graphics.confirm(),
+            _ => {}
+        }
+        break result;
     };
-    // Before eframe creates the wgpu instance: leave OpenGL out on Windows (see graphics.rs).
-    #[cfg(target_os = "windows")]
-    let options = {
-        let mut options = options;
-        graphics::configure(&mut options, eframe::wgpu::Backends::from_env());
-        options
-    };
-    let started = eframe::run_native(
-        "FilmCraft",
-        options,
-        Box::new(move |cc| {
-            let mut session = desktop::session(data_dir.clone());
-            desktop::open_at_startup(&mut session, &files, demo, startup_flag);
-            if recover == Some(true) && !session.recovery_candidates().is_empty() {
-                let id = session.recovery_candidates()[0].id.clone();
-                match session.execute("file.recover", json!({"id": id})) {
-                    Ok(r) => log::info!("recovered {r}"),
-                    Err(e) => log::error!("recovery failed: {e}"),
-                }
-            }
-            let mut app = FilmcraftApp::new(session);
-            if recover == Some(false) {
-                app.dialog = None;
-            }
-            app.integrated_titlebar = cfg!(target_os = "macos");
-            if let Some(rs) = cc.wgpu_render_state.clone()
-                && std::env::var_os("FILMCRAFT_CPU_COMPOSITE").is_none()
-            {
-                app.set_wgpu(rs);
-            }
-            // Keep device selection available even when the default device is unavailable.
-            // Settings ▸ Audio Hardware is applied on the first frame (`apply_prefs`).
-            app.audio = Some(Box::new(audio::CpalOut::new()));
-            desktop::install_file_dialogs(&mut app);
-            desktop::install_system_languages(&mut app);
-            app.hooks.open_path = Some(Box::new(desktop::open_path));
-            app.hooks.raise_without_focus = Some(Box::new(|| {
-                window_raise::raise_without_focus();
-            }));
-            #[cfg(target_os = "macos")]
-            {
-                let (rx, update) = native_menu::install(&app, cc.egui_ctx.clone());
-                app.command_inbox = Some(rx);
-                app.hooks.shortcuts_changed = Some(update);
-                app.ui.show_menu_bar = false;
-            }
-            if let Some(port) = control_port {
-                let rx = control_server::start(port, cc.egui_ctx.clone());
-                app = app.with_control(rx);
-            }
-            Ok(Box::new(app))
-        }),
-    );
+    // However it ended, this start no longer counts as one that died.
+    graphics.finish();
     // The window could not be created (no usable GPU / graphics driver, no display): say so
     // instead of exiting silently, and keep the reason in the crash log.
     if let Err(e) = &started {
@@ -188,6 +156,93 @@ fn main() -> eframe::Result {
         let _ = rfd::MessageDialog::new().set_title("FilmCraft").set_description(&msg).set_level(rfd::MessageLevel::Error).show();
     }
     started
+}
+
+/// The main window's options; built for each start attempt (they hold a one-shot hook).
+fn native_options(agent: bool) -> eframe::NativeOptions {
+    eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title("FilmCraft")
+            .with_inner_size([1600.0, 980.0])
+            .with_min_inner_size([900.0, 560.0])
+            .with_drag_and_drop(true)
+            .with_fullsize_content_view(true)
+            .with_titlebar_shown(false)
+            .with_title_shown(false)
+            // Started for an agent (`--control`): open without taking the user's keyboard focus.
+            .with_active(!agent)
+            .with_icon(app_icon())
+            // Wayland matches the window to `packaging/linux/ai.storyteller.filmcraft.desktop`.
+            .with_app_id(APP_ID),
+        event_loop_builder: agent_event_loop(agent),
+        ..Default::default()
+    }
+}
+
+/// Creates the app once eframe has its window and graphics device; sets `created` when it runs,
+/// and confirms the graphics mode once two frames have painted.
+fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<AtomicBool>) -> eframe::AppCreator<'static> {
+    let Launch { control_port, control_input_only, files, demo, startup_flag, recover, data_dir, graphics: _ } = launch;
+    Box::new(move |cc| {
+        created.store(true, Ordering::Relaxed);
+        // A fallback graphics mode says so in the window, with a button back to the default.
+        let notice = graphics.degraded().then(|| {
+            let start = graphics.clone();
+            filmcraft_ui_egui::graphics_notice::GraphicsNotice::new(graphics.mode().label(), Box::new(move || start.reset_to_default()))
+        });
+        let confirmed = AtomicBool::new(false);
+        cc.egui_ctx.on_end_pass(
+            "graphics-start",
+            Arc::new(move |ui| {
+                if ui.ctx().cumulative_frame_nr() >= 2 && !confirmed.swap(true, Ordering::Relaxed) {
+                    graphics.confirm();
+                }
+            }),
+        );
+        let mut session = desktop::session(data_dir.clone());
+        let (project, media) = args::project_and_media(&files);
+        desktop::open_at_startup(&mut session, project, media, demo, startup_flag);
+        if recover == Some(true) && !session.recovery_candidates().is_empty() {
+            let id = session.recovery_candidates()[0].id.clone();
+            match session.execute("file.recover", json!({"id": id})) {
+                Ok(r) => log::info!("recovered {r}"),
+                Err(e) => log::error!("recovery failed: {e}"),
+            }
+        }
+        let mut app = FilmcraftApp::new(session);
+        app.graphics_notice = notice;
+        if recover == Some(false) {
+            app.dialog = None;
+        }
+        app.integrated_titlebar = cfg!(target_os = "macos");
+        if let Some(rs) = cc.wgpu_render_state.clone()
+            && std::env::var_os("FILMCRAFT_CPU_COMPOSITE").is_none()
+        {
+            app.set_wgpu(rs);
+        }
+        // Keep device selection available even when the default device is unavailable.
+        // Settings ▸ Audio Hardware is applied on the first frame (`apply_prefs`).
+        app.audio = Some(Box::new(audio::CpalOut::new()));
+        desktop::install_file_dialogs(&mut app);
+        desktop::install_system_languages(&mut app);
+        desktop::install_os_hooks(&mut app);
+        app.hooks.open_path = Some(Box::new(desktop::open_path));
+        app.hooks.raise_without_focus = Some(Box::new(|| {
+            window_raise::raise_without_focus();
+        }));
+        #[cfg(target_os = "macos")]
+        {
+            let (rx, update) = native_menu::install(&app, cc.egui_ctx.clone());
+            app.command_inbox = Some(rx);
+            app.hooks.menu_changed = Some(update);
+            app.ui.show_menu_bar = false;
+        }
+        if let Some(port) = control_port {
+            let rx = control_server::start(port, cc.egui_ctx.clone());
+            app = if control_input_only { app.with_control_input_only(rx) } else { app.with_control(rx) };
+        }
+        Ok(Box::new(app))
+    })
 }
 
 /// Driven by an agent (`--control`): don't activate the app on launch, so the user's keyboard
