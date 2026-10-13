@@ -67,7 +67,7 @@ impl Embedded {
         // The canvas renders on the CPU, and the preferences live in DesignCraft's own config
         // folder, not in eframe storage.
         let _ = (ctx, render_state, storage);
-        let mut app = crate::new_app();
+        let mut app = crate::new_app(None);
         // The host draws the window chrome.
         app.integrated_titlebar = false;
         Embedded { app, recovery_written: Vec::new(), link_times: HashMap::new(), outgoing: None, forget_drag: false }
@@ -101,7 +101,8 @@ impl Embedded {
     pub fn open_paths(&mut self, paths: &[PathBuf]) {
         for path in paths {
             let p = path.to_string_lossy().to_string();
-            if let Err(e) = self.app.run("file.open", json!({"path": p})) {
+            // As the command line does: a file that can't be opened gets the alert, too.
+            if let Err(e) = self.app.open_file("file.open", json!({"path": p})) {
                 log::warn!("designcraft: {p}: {e}");
             }
         }
@@ -136,7 +137,7 @@ impl Embedded {
                 }
                 _ => json!({"path": p}),
             };
-            if let Err(e) = self.app.run("file.place", params) {
+            if let Err(e) = self.app.open_file("file.place", params) {
                 log::warn!("designcraft: {p}: {e}");
             }
         }

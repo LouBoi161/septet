@@ -1272,6 +1272,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "caseless"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b6fd507454086c8edfd769ca6ada439193cdb209c7681712ef6275cccbfe5d8"
+dependencies = [
+ "unicode-normalization",
+]
+
+[[package]]
 name = "cbc"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1685,6 +1694,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-print"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=d991bf6792f8ade99c51358bf3c1d902c8cd96b5#d991bf6792f8ade99c51358bf3c1d902c8cd96b5"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
+name = "craft-ui"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=5c874d51eeb3de70e735c8ce87a59a7dedd47675#5c874d51eeb3de70e735c8ce87a59a7dedd47675"
+dependencies = [
+ "egui",
+ "serde",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1971,7 +1997,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
  "designcraft-engine",
  "designcraft-render",
@@ -1982,6 +2008,7 @@ dependencies = [
  "log",
  "muda",
  "rfd",
+ "serde",
  "serde_json",
  "winit",
  "winresource",
@@ -1989,7 +2016,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-color"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
  "kurbo 0.13.1",
  "moxcms 0.8.1",
@@ -1999,12 +2026,13 @@ dependencies = [
 
 [[package]]
 name = "designcraft-compose"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
  "designcraft-color",
  "designcraft-doc",
  "designcraft-fonts",
  "designcraft-geom",
+ "hypher",
  "log",
  "miniz_oxide 0.8.9",
  "regex",
@@ -2014,7 +2042,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-doc"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
  "designcraft-color",
  "designcraft-geom",
@@ -2025,8 +2053,10 @@ dependencies = [
 
 [[package]]
 name = "designcraft-engine"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
+ "caseless",
+ "craft-print",
  "designcraft-color",
  "designcraft-compose",
  "designcraft-doc",
@@ -2045,12 +2075,13 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "designcraft-epub"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
  "designcraft-color",
  "designcraft-doc",
@@ -2059,7 +2090,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-fonts"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
  "harfrust 0.13.3",
  "kurbo 0.13.1",
@@ -2071,7 +2102,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-format"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
  "designcraft-doc",
  "serde",
@@ -2082,7 +2113,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-geom"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
  "flo_curves",
  "kurbo 0.13.1",
@@ -2093,7 +2124,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-idml"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
  "designcraft-color",
  "designcraft-doc",
@@ -2105,7 +2136,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-images"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
  "designcraft-color",
  "designcraft-fonts",
@@ -2116,7 +2147,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-pdf"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
  "designcraft-color",
  "designcraft-compose",
@@ -2134,7 +2165,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-render"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
  "designcraft-color",
  "designcraft-compose",
@@ -2152,7 +2183,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-textimport"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
  "designcraft-doc",
  "quick-xml 0.38.4",
@@ -2161,7 +2192,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-tools"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
  "designcraft-color",
  "designcraft-compose",
@@ -2173,8 +2204,9 @@ dependencies = [
 
 [[package]]
 name = "designcraft-ui-egui"
-version = "0.5.0"
+version = "0.7.1"
 dependencies = [
+ "craft-ui",
  "designcraft-color",
  "designcraft-compose",
  "designcraft-doc",
@@ -5613,6 +5645,12 @@ dependencies = [
  "typenum",
  "zeroize",
 ]
+
+[[package]]
+name = "hypher"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45f2b4f6b5da34d400d4c112eadcc14512cc5d04307a8eee182586d9bebd7ce6"
 
 [[package]]
 name = "iana-time-zone"

@@ -1,21 +1,26 @@
 //! The persisted UI state (`ui.json`) and engine preferences (`prefs.json`) in the per-user
-//! config folder (or the data root, [`designcraft_engine::user_dirs`]). `DESIGNCRAFT_NO_PREFS`
-//! turns both off.
+//! config folder (or the data root, [`designcraft_engine::user_dirs`], or `DESIGNCRAFT_CONFIG_DIR`;
+//! see [`crate::profile`]). `DESIGNCRAFT_NO_PREFS` turns both off.
 
 use designcraft_ui_egui::DesignApp;
 
+/// `DESIGNCRAFT_NO_PREFS`: read and write nothing in the settings directory (tests, demos).
+pub fn no_prefs() -> bool {
+    std::env::var_os("DESIGNCRAFT_NO_PREFS").is_some()
+}
+
 /// `ui.json` in the per-user config folder (`prefs.json` sits beside it).
 pub fn prefs_path() -> Option<std::path::PathBuf> {
-    designcraft_engine::user_dirs::config_dir().map(|b| b.join("ui.json"))
+    crate::profile::config_dir().map(|b| b.join("ui.json"))
 }
 
 pub fn load_prefs(app: &mut DesignApp) {
-    if std::env::var_os("DESIGNCRAFT_NO_PREFS").is_some() {
+    if no_prefs() {
         return;
     }
     if let Some(p) = prefs_path()
         && let Ok(bytes) = std::fs::read(&p)
-        && let Ok(ui) = serde_json::from_slice::<designcraft_ui_egui::UiState>(&bytes)
+        && let Ok(ui) = designcraft_ui_egui::UiState::from_preferences_json(&bytes)
     {
         app.ui = ui;
     }
@@ -29,7 +34,7 @@ pub fn load_prefs(app: &mut DesignApp) {
 }
 
 pub fn save_prefs(app: &DesignApp) {
-    if std::env::var_os("DESIGNCRAFT_NO_PREFS").is_some() {
+    if no_prefs() {
         return;
     }
     if let Some(p) = prefs_path() {
@@ -55,6 +60,7 @@ mod tests {
         assert!(root.is_dir(), "the root is created");
         assert_eq!(prefs_path(), Some(root.join("ui.json")));
         assert_eq!(designcraft_engine::recovery::default_dir(), Some(root.join("Recovery")));
+        assert_eq!(crate::profile::recovery_dir(), Some(root.join("Recovery")));
         // The preferences go there and come back from there.
         let mut app = DesignApp::new(designcraft_engine::Session::new(), designcraft_ui_egui::Services::default());
         app.ui.story_editor_size = 21.0;
