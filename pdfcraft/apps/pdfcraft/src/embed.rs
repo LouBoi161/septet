@@ -2,8 +2,10 @@
 //!
 //! [`Embedded`] builds the app the way `main.rs` does for a plain launch with no arguments, minus
 //! everything that belongs to the process or the window: no logger or panic hook, no GPU
-//! selection, no update checks, no Apple events, no UI control channel. The host owns the
-//! window, its chrome, the fonts and the UI zoom (`pdfcraft_ui_egui::hosted`).
+//! selection or OpenGL fallback (nor the software-renderer notice), no update checks, no Apple
+//! events, no UI control channel, no portable mode (`pdfcraft_ui_egui::portable`: the host's data
+//! root decides). The host owns the window, its chrome, the fonts and the UI zoom
+//! (`pdfcraft_ui_egui::hosted`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -53,7 +55,7 @@ impl Embedded {
 
     /// Build the app as `main.rs` does without arguments: settings from `storage` (the host's),
     /// autosave and crash recovery in PdfCraft's own recovery folder, OS key-store identities on
-    /// macOS and Windows. Fonts are the host's: install [`Self::font_definitions`] among them.
+    /// macOS and Windows, last session's files when the preference asks for them. Fonts are the host's: install [`Self::font_definitions`] among them.
     pub fn new(_ctx: &egui::Context, _render_state: Option<&eframe::egui_wgpu::RenderState>, storage: Option<&dyn eframe::Storage>) -> Self {
         pdfcraft_ui_egui::hosted::set_hosted(true);
         settings::migrate_legacy_folders();
@@ -67,6 +69,9 @@ impl Embedded {
         if let Some(dir) = RecoveryStore::default_dir() {
             app.enable_recovery(RecoveryStore::new(dir));
         }
+        // With the preference on, last session's files come back (after recovery, so documents
+        // it offers don't open twice).
+        app.reopen_last_files(&[]);
         Self { app, _open_externally: None, _open_app: None, automation: Automation::new() }
     }
 
@@ -324,10 +329,24 @@ impl eframe::App for Embedded {
         eframe::App::save(&mut self.app, storage);
     }
 
+    // eframe's `glow` feature (`gl-fallback`, for the standalone binary only) adds the GL context.
+    #[cfg(not(feature = "gl-fallback"))]
     fn on_exit(&mut self) {
         eframe::App::on_exit(&mut self.app);
-        // As a quit does: documents still unsaved keep an up-to-date recovery entry, and with
-        // nothing unsaved the recovery folder is left empty.
+        self.exit();
+    }
+
+    #[cfg(feature = "gl-fallback")]
+    fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
+        eframe::App::on_exit(&mut self.app, gl);
+        self.exit();
+    }
+}
+
+impl Embedded {
+    /// After eframe's `on_exit`, as a quit does: documents still unsaved keep an up-to-date
+    /// recovery entry, and with nothing unsaved the recovery folder is left empty.
+    fn exit(&mut self) {
         self.app.autosave_now();
         self.app.shutdown_recovery();
     }

@@ -238,7 +238,20 @@ pub fn flatten_params(g: &PropGroup, eval: &mut dyn FnMut(&Property) -> Value) -
     Params { values }
 }
 
-/// A layer image in flight: layer-space point `p` sits at pixel `p * scale + offset`.
+/// The warning shown with effect instance `g` (Effect Controls, `effect.warning`), its
+/// parameters evaluated by `eval`: settings it can't render as asked, such as an OCIO config it
+/// can't read or transforms it passes through. `None` when it renders as asked.
+pub fn warning(g: &PropGroup, eval: &mut dyn FnMut(&Property) -> Value) -> Option<String> {
+    let GroupKind::Effect { effect } = &g.kind else { return None };
+    // Only the effects that can warn evaluate their parameters.
+    if !ocio::CUSTOM_CONFIG_FX.contains(&effect.as_str()) {
+        return None;
+    }
+    ocio::warning(effect, &flatten_params(g, eval))
+}
+
+/// A layer image in flight: point `p` sits at pixel `p * scale + offset`. Points are in layer
+/// space, or in effect space while the layer's effects run (see [`Buf::rebase`]).
 #[derive(Clone, Debug, Default)]
 pub struct Buf {
     pub img: Image,
@@ -249,6 +262,12 @@ pub struct Buf {
 impl Buf {
     pub fn to_px(&self, p: [f64; 2]) -> (f64, f64) {
         (p[0] * self.scale + self.offset[0], p[1] * self.scale + self.offset[1])
+    }
+    /// Measure from `origin` (in the current coordinates): a point `p` becomes `p − origin`.
+    /// Moves between layer space and effect space (the renderer's `effect_bounds`).
+    pub fn rebase(&mut self, origin: [f64; 2]) {
+        self.offset[0] += origin[0] * self.scale;
+        self.offset[1] += origin[1] * self.scale;
     }
     /// Grow by `pad` transparent pixels on every side.
     pub fn pad(&mut self, pad: u32) {
@@ -347,11 +366,6 @@ pub struct EffectEnv<'a> {
     /// comp's and the layer's motion blur switches are on (Transform's Use Composition's
     /// Shutter Angle).
     pub shutter: Option<(f64, f64, u32)>,
-    /// Top-left corner of the layer bounds ([`EffectCtx::layer_size`]) in layer coordinates:
-    /// (0, 0) for layers with a source rectangle; shape and text layers have comp-sized bounds
-    /// centred on their origin (−w/2, −h/2). Edge pinning measures from these bounds
-    /// ([`util::pin_rect`]).
-    pub bounds_origin: [f64; 2],
 }
 
 /// What an effect gets to render with.
@@ -667,6 +681,7 @@ pub const PARAM_GROUPS: &[(&str, &str)] = &[
     ("sourceCrops", "Source Crops"),
     // Simulation.
     ("extras", "Extras"),
+    ("effectCamera", "Effect Camera"),
     ("wiggle", "Wiggle"),
     ("light", "Light"),
     ("shading", "Shading"),
@@ -1093,6 +1108,11 @@ pub const GPU_EFFECTS: &[&str] = &[
     "ec.obsolete.basictext",
     "ec.obsolete.pathtext",
 ];
+
+/// Effects that can read [`EffectHost::comp_scene`] (the comp camera or the first comp light):
+/// their output changes when the camera, the lights or the layer's own transform move, so the
+/// renderer's layer cache folds the comp scene into the key for these.
+pub const READS_COMP_SCENE: &[&str] = &["ec.sim.carddance", "ec.sim.shatter", "ec.transition.cardwipe", "ec.sim.caustics", "ec.sim.ccparticleworld"];
 
 /// Effects whose output depends on [`EffectCtx::time`] directly (not only through animated
 /// parameters). The renderer's layer cache folds the layer time into the key for these.

@@ -65,7 +65,8 @@ pub fn install_hooks(app: &mut EffectcraftApp) {
     app.hooks.pick_save_file = Some(Box::new(|name: &str, ext: &str| {
         // A default with a folder that exists opens the dialog there.
         let path = std::path::Path::new(name);
-        let mut d = rfd::FileDialog::new().add_filter(ext, &[ext]);
+        // (No filter for a name without an extension, such as a folder to create.)
+        let mut d = if ext.is_empty() { rfd::FileDialog::new() } else { rfd::FileDialog::new().add_filter(ext, &[ext]) };
         if let Some(dir) = path.parent().filter(|d| d.is_dir()) {
             d = d.set_directory(dir);
         }

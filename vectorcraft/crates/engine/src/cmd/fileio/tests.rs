@@ -173,6 +173,7 @@ fn export_extensions_name_every_writable_format() {
             "svg",
             "svgz",
             "pdf",
+            "ai",
             "png",
             "jpg",
             "gif",
@@ -206,6 +207,7 @@ fn formats_query_lists_readers_writers_and_options() {
             "svg",
             "svgz",
             "pdf",
+            "ai",
             "png",
             "jpg",
             "gif",
@@ -393,4 +395,16 @@ fn oversized_raster_exports_are_refused() {
     let e = s.execute("document.export", &json!({"format": "webp", "scale": 10})).unwrap_err().to_string();
     assert!(e.contains("too large"), "{e}");
     assert!(s.execute("document.export", &json!({"format": "png", "scale": 40})).is_err(), "80000 px a side");
+}
+
+#[test]
+fn new_files_never_replace_a_file() {
+    let d = tmp_dir("new-file");
+    let path = d.join("Brand.ase").to_string_lossy().to_string();
+    let _ = std::fs::remove_file(&path);
+    write_new_file(&path, b"first").unwrap();
+    let e = write_new_file(&path, b"second").unwrap_err().to_string();
+    assert!(e.starts_with(&format!("{path}: ")), "{e}");
+    assert_eq!(std::fs::read(&path).unwrap(), b"first");
+    let _ = std::fs::remove_dir_all(d);
 }

@@ -58,14 +58,16 @@ impl Embedded {
     pub fn new(ctx: &egui::Context, _render_state: Option<&eframe::egui_wgpu::RenderState>, _storage: Option<&dyn eframe::Storage>) -> Self {
         lightcraft_ui_egui::hosted::set_hosted(true);
         crate::alloc_release::install();
-        let (prefs, prefs_warning, keep_prefs_file) = crate::prefs::load_prefs();
+        let (prefs, prefs_warning, keep_prefs_file) = crate::prefs::load_prefs(false);
         let library_dir = crate::session::library_dir(prefs.as_ref());
         // GPU compute off if the preference says so, before anything can create the device
         lightcraft_engine::gpu::set_enabled(prefs.as_ref().is_none_or(|u| u.settings.gpu));
         let (mut session, problem) = crate::session::open_session(false, library_dir, true);
         crate::session::configure_segmenter(&mut session);
         let (open_externally, open_app): (HostHook<OpenExternally>, HostHook<OpenApp>) = Default::default();
-        let services = ask_host_first(crate::services::services(), Rc::clone(&open_externally), Rc::clone(&open_app));
+        // no log file of LightCraft's own: the host keeps the process's log (Help ▸ Open Log Folder
+        // isn't offered)
+        let services = ask_host_first(crate::services::services(ctx.clone(), None), Rc::clone(&open_externally), Rc::clone(&open_app));
         let mut app = LightcraftApp::new(session, services);
         if let Some(ui) = prefs {
             app.ui = ui;
@@ -75,7 +77,7 @@ impl Embedded {
         app.integrated_titlebar = false;
         app.notices.extend(prefs_warning);
         // what's on disk now: only changes are written
-        let prefs = PrefsWriter::new(&app, keep_prefs_file);
+        let prefs = PrefsWriter::new(&app, keep_prefs_file, crate::prefs::prefs_path());
         app.library_problem = problem;
         Embedded { app, prefs, ctx: ctx.clone(), open_externally, open_app, queued: Vec::new() }
     }
@@ -238,7 +240,7 @@ impl Embedded {
 
     fn save_prefs(&mut self) {
         if let Err(e) = self.prefs.save(&self.app) {
-            eprintln!("lightcraft: {e}");
+            log::error!("{e}");
         }
     }
 }
@@ -265,6 +267,24 @@ impl Embedded {
             move || a.set(Some(what))
         };
         let sv = &mut self.app.services;
+        // no background dialog either: a command's file dialog would wait for the user; without
+        // the picker, commands ask the synchronous services below, which only take note
+        let picker = sv.picker.take();
+        let (lightroom, model_file, denoise_model) = (ask("pick a Lightroom catalog"), ask("pick a model file"), ask("pick a model file"));
+        let saved_more = (
+            sv.pick_lightroom_catalog.replace(Box::new(move || {
+                lightroom();
+                None
+            })),
+            sv.pick_model_file.replace(Box::new(move || {
+                model_file();
+                Vec::new()
+            })),
+            sv.pick_denoise_model.replace(Box::new(move || {
+                denoise_model();
+                Vec::new()
+            })),
+        );
         let (files, presets, tracklog, curves, save, save_curves, folder, reveal, open_with) = (
             ask("pick files"),
             ask("pick preset files"),
@@ -329,6 +349,8 @@ impl Embedded {
             sv.reveal,
             sv.open_with,
         ) = saved;
+        (sv.pick_lightroom_catalog, sv.pick_model_file, sv.pick_denoise_model) = saved_more;
+        sv.picker = picker;
         let opened = !had_dialog && self.app.ui.dialog.is_some();
         if opened {
             self.app.ui.dialog = None;
@@ -471,7 +493,7 @@ impl eframe::App for Embedded {
     fn on_exit(&mut self) {
         self.save_prefs();
         if let Err(e) = self.app.session.close_library() {
-            eprintln!("lightcraft: saving the library failed: {e}");
+            log::error!("saving the library failed: {e}");
         }
     }
 }

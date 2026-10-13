@@ -3,8 +3,9 @@
 //! and the UI zoom (see `photocraft_ui_egui::hosted`).
 //!
 //! [`Embedded::new`] builds the app as `main.rs` does for a plain launch without arguments, minus
-//! everything process-wide or window-owning: no panic hook, control server, macOS menu bar or
-//! Apple events, GPU startup marker or relaunch, saved window layout or window sizing.
+//! everything process-wide or window-owning: no panic hook or log file, control server, macOS
+//! menu bar or Apple events, GPU startup marker or relaunch, display-server choice, saved window
+//! layout or window sizing.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -97,7 +98,16 @@ impl Embedded {
         attach_gpu(&mut app, render_state);
         // No `services.cursor_pos`: the host's window handle isn't ours to query, so a file the OS
         // drops straight onto the app opens as a document (as on Wayland). The host places files
-        // at a position through `place_paths` instead.
+        // at a position through `place_paths` instead. No `services.screen_pick` either (Pick
+        // from Screen needs the window's monitors) and no `xwayland_command` (that relaunches
+        // PhotoCraft, not the host).
+        // Caps Lock state, as main.rs (the precise crosshair for painting tools, #1758): from the
+        // X server the host's window is on (none on native Wayland).
+        #[cfg(target_os = "linux")]
+        let x11 = display == Some(tablet::DisplayKind::X11);
+        #[cfg(not(target_os = "linux"))]
+        let x11 = false;
+        app.services.caps_lock = crate::caps_lock::poll(x11);
         #[cfg(target_os = "macos")]
         let pen_monitor = tablet::install_macos(&app.stylus.feed);
         #[cfg(target_os = "linux")]

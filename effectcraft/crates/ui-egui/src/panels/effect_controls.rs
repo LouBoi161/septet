@@ -30,8 +30,12 @@ use crate::{EffectcraftApp, widgets};
 
 type Actions = Vec<(String, serde_json::Value)>;
 
-const ROW: f32 = 24.0;
+const ROW: f32 = 20.0;
 const DIAL_ROW: f32 = 64.0;
+// The effect title starts at 44 pt. Each level's names sit one tree step farther in;
+// reserve the same icon gutter for properties and groups so sibling names align.
+const PARAM_NAME_X: f32 = 58.0;
+const TREE_INDENT: f32 = 14.0;
 
 fn selected_layer(app: &EffectcraftApp) -> Option<Layer> {
     let comp = app.session.active_comp()?;
@@ -142,7 +146,8 @@ fn toggle_pick(app: &mut EffectcraftApp, kind: &str, layer: &Layer, prop: &Prope
     }
 }
 
-/// One property row: stopwatch, name, value control (and the keyframe navigator).
+/// One property row: stopwatch, name, value control (and the keyframe navigator). Returns the
+/// value fields of a vector, one per dimension, for the pick whip.
 #[allow(clippy::too_many_arguments)]
 fn prop_row(
     app: &mut EffectcraftApp,
@@ -155,8 +160,9 @@ fn prop_row(
     r: Rect,
     indent: f32,
     actions: &mut Actions,
-) {
+) -> Vec<Rect> {
     let t = app.tokens;
+    let mut dims = vec![];
     let cy = r.center().y;
     let uid = prop.uid;
     let swr = Rect::from_center_size(pos2(r.min.x + indent, cy), vec2(14.0, 14.0));
@@ -183,7 +189,9 @@ fn prop_row(
         key_navigator(app, ui, p, layer, prop, ectx, r, actions);
     }
     let value = ectx.value(layer, prop);
-    let vx = (r.min.x + r.width() * 0.48).max(swr.max.x + 130.0);
+    // Keep a shared value column while names and their icons follow the group hierarchy.
+    // Extremely deep groups still leave a little name space before their value.
+    let vx = (r.min.x + r.width() * 0.48).max(r.min.x + PARAM_NAME_X + 124.0).max(swr.max.x + 40.0);
     // A vector's values end before the keyframe navigator: in a narrow panel they move left over
     // the name (cut short) instead of running under the navigator (#271).
     let vx = match &value {
@@ -200,8 +208,8 @@ fn prop_row(
         }
         _ => vx,
     };
-    let name_clip =
-        Rect::from_min_max(pos2(swr.max.x + 6.0, r.min.y), pos2(((r.min.x + r.width() * 0.48).max(swr.max.x + 124.0) - 4.0).min(vx - 6.0), r.max.y));
+    let name_clip = Rect::from_min_max(pos2(swr.max.x + 6.0, r.min.y), pos2(vx - 6.0, r.max.y));
+    app.auto.add(&format!("effectControls.prop.{uid}.name"), name_clip, &prop.name);
     p.with_clip_rect(name_clip.intersect(p.clip_rect())).text(pos2(swr.max.x + 6.0, cy), Align2::LEFT_CENTER, &prop.name, Tokens::ui(12.0), t.text);
     let merge = format!("ec-{uid}");
     let set =
@@ -286,7 +294,9 @@ fn prop_row(
             if matches!(prop.ui, ParamUi::Point | ParamUi::Point3) {
                 let cr = Rect::from_center_size(pos2(x + 8.0, cy), vec2(18.0, 18.0));
                 let active = app.ui.fx_pick.as_ref().is_some_and(|k| k.prop == uid && k.kind == "point");
-                if fw::crosshair_button(ui, cr, active, egui::Id::new(("ec-xh", uid)), &t).on_hover_text("Click, then click in the Composition panel").clicked()
+                if fw::crosshair_button(ui, cr, active, egui::Id::new(("ec-xh", uid)), &t)
+                    .on_hover_text(crate::i18n::tr("Click, then click in the Composition panel"))
+                    .clicked()
                 {
                     toggle_pick(app, "point", layer, prop);
                 }
@@ -296,6 +306,7 @@ fn prop_row(
             for d in 0..n.min(c.len()) {
                 let (vr, nv, _) = widgets::hot_number_at(ui, pos2(x, cy - 9.0), egui::Id::new(("ec-v", uid, d)), c[d], 1.0, (-1e9, 1e9), 1, "", &t);
                 app.auto.add(&format!("effectControls.prop.{uid}.value.{d}"), vr, &prop.name);
+                dims.push(vr);
                 if let Some(nv) = nv {
                     let mut nc = c.clone();
                     nc[d] = nv;
@@ -314,7 +325,7 @@ fn prop_row(
             let er = Rect::from_center_size(pos2(sr.max.x + 14.0, cy), vec2(18.0, 18.0));
             let active = app.ui.fx_pick.as_ref().is_some_and(|k| k.prop == uid && k.kind == "color");
             if fw::eyedropper_button(ui, er, active, egui::Id::new(("ec-eye", uid)), &t)
-                .on_hover_text("Eyedropper: click, then click in the Composition panel")
+                .on_hover_text(crate::i18n::tr("Eyedropper: click, then click in the Composition panel"))
                 .clicked()
             {
                 toggle_pick(app, "color", layer, prop);
@@ -380,6 +391,11 @@ fn prop_row(
                 }
             }
         }
+        // EXtractoR's red / green / blue / alpha: a popup of the footage's OpenEXR channels (#295).
+        Value::Str(s) if super::fx_editors::is_extractor_channel(group, prop) => {
+            let dr = Rect::from_min_size(pos2(vx, cy - 9.0), vec2((r.max.x - vx - 56.0).clamp(80.0, 200.0), 18.0));
+            super::fx_editors::channel_popup(app, ui, layer, prop, s, dr, actions);
+        }
         Value::Gradient(g) => {
             let gr = Rect::from_min_size(pos2(vx, cy - 7.0), vec2((r.max.x - vx - 56.0).clamp(60.0, 180.0), 14.0));
             let n = 48;
@@ -395,6 +411,7 @@ fn prop_row(
         }
         _ => {}
     }
+    dims
 }
 
 /// How many of a vector parameter's values show (a 3D point's Z only on a 3D layer).
@@ -533,10 +550,13 @@ fn group_rows(
                     continue;
                 }
                 *y += ROW;
-                let indent = 24.0 + 14.0 * depth as f32;
+                let indent = PARAM_NAME_X - 13.0 + TREE_INDENT * depth as f32;
                 let visible = !(r.max.y < rect.min.y || r.min.y > rect.max.y);
                 if visible {
-                    prop_row(app, ui, p, layer, g, pr, ectx, r, indent, actions);
+                    app.auto.add(&format!("effectControls.row.{}", pr.uid), r, &pr.name);
+                    let dims = prop_row(app, ui, p, layer, g, pr, ectx, r, indent, actions);
+                    // A Timeline pick whip can be dropped here (After Effects).
+                    super::timeline::whip_target(ui.ctx(), r.intersect(rect), layer.id.0, pr.uid, dims);
                 }
                 if app.ui.fx_slider_open.contains(&pr.uid) {
                     if matches!(pr.ui, ParamUi::Angle) {
@@ -561,8 +581,10 @@ fn group_rows(
                 }
                 *y += ROW;
                 let open = !app.ui.fx_closed.contains(&sg.uid);
-                let tw = Rect::from_center_size(pos2(r.min.x + 12.0 + 14.0 * depth as f32, r.center().y), vec2(12.0, 12.0));
+                let tw = Rect::from_center_size(pos2(r.min.x + PARAM_NAME_X - 12.0 + TREE_INDENT * depth as f32, r.center().y), vec2(12.0, 12.0));
                 if r.max.y >= rect.min.y && r.min.y <= rect.max.y {
+                    app.auto.add(&format!("effectControls.row.{}", sg.uid), r, &sg.name);
+                    app.auto.add(&format!("effectControls.group.{}.twirl", sg.uid), tw, &sg.name);
                     if widgets::twirl(ui, tw, open, egui::Id::new(("ec-g", sg.uid)), &t).clicked() {
                         if open {
                             app.ui.fx_closed.insert(sg.uid);
@@ -570,7 +592,8 @@ fn group_rows(
                             app.ui.fx_closed.remove(&sg.uid);
                         }
                     }
-                    p.text(pos2(tw.max.x + 6.0, r.center().y), Align2::LEFT_CENTER, &sg.name, Tokens::ui(12.0), t.text);
+                    let name = p.text(pos2(tw.max.x + 6.0, r.center().y), Align2::LEFT_CENTER, &sg.name, Tokens::ui(12.0), t.text);
+                    app.auto.add(&format!("effectControls.group.{}.name", sg.uid), name, &sg.name);
                 }
                 if open {
                     let sub = fx.sub(&sg.match_id);
@@ -652,7 +675,7 @@ fn roto_editor(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, l
 /// Height of the custom editor shown under an effect's header (0 when none).
 fn editor_height(effect: &str, g: &PropGroup, width: f32) -> f32 {
     match effect {
-        super::fx_editors::GLOW | super::fx_editors::RESHAPE => super::fx_editors::header_height(effect, g, width),
+        super::fx_editors::GLOW | super::fx_editors::RESHAPE | super::fx_editors::EXTRACTOR => super::fx_editors::header_height(effect, g, width),
         "ec.color.curves" => 34.0 + curves_size(width) + 26.0,
         effectcraft_engine::effects::warp_stab::ID => 50.0,
         effectcraft_engine::effects::camera_tracker::ID => super::camera_tracker_ui::EDITOR_HEIGHT,
@@ -706,7 +729,7 @@ fn channel_popup(
     auto: &str,
 ) -> Option<usize> {
     let t = app.tokens;
-    p.text(pos2(x, cy), Align2::LEFT_CENTER, "Channel:", Tokens::ui(12.0), t.text_dim);
+    p.text(pos2(x, cy), Align2::LEFT_CENTER, crate::i18n::tr("Channel:"), Tokens::ui(12.0), t.text_dim);
     let dr = Rect::from_min_size(pos2(x + 58.0, cy - 9.0), vec2(80.0, 18.0));
     let pop = id.with("pop");
     if widgets::dropdown(ui, dr, names.get(cur).copied().unwrap_or(""), &t, id).clicked() {
@@ -759,7 +782,7 @@ fn curves_editor(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter,
     };
     let rr = Rect::from_min_size(pos2(mr.max.x + 8.0, cy - 9.0), vec2(44.0, 18.0));
     let rresp = ui.interact(rr, egui::Id::new(("ec-creset", euid)), Sense::click());
-    p.text(rr.center(), Align2::CENTER_CENTER, "Reset", Tokens::ui(11.5), if rresp.hovered() { t.hot_text } else { t.text_dim });
+    p.text(rr.center(), Align2::CENTER_CENTER, crate::i18n::tr("Reset"), Tokens::ui(11.5), if rresp.hovered() { t.hot_text } else { t.text_dim });
     app.auto.add(&format!("effectControls.effect.{euid}.curves.reset"), rr, "Reset curve");
     if rresp.clicked() {
         actions.push(("prop.set".into(), json!({"layer": layer.id.0, "prop": prop.uid, "value": fw::CurvePoints::identity().format()})));
@@ -828,7 +851,7 @@ fn levels_editor(
             app.ui.fx_levels_channel.insert(euid, n);
         }
     } else {
-        p.text(pos2(x0, cy), Align2::LEFT_CENTER, "Histogram", Tokens::ui(12.0), t.text_dim);
+        p.text(pos2(x0, cy), Align2::LEFT_CENTER, crate::i18n::tr("Histogram"), Tokens::ui(12.0), t.text_dim);
     }
     let w = (r.width() - 72.0).clamp(120.0, 256.0);
     let hr = Rect::from_min_size(pos2(x0 + 8.0, r.min.y + 34.0), vec2(w, 80.0));
@@ -893,7 +916,7 @@ fn levels_editor(
 fn histogram_only(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, g: &PropGroup, r: Rect) {
     let t = app.tokens;
     let x0 = r.min.x + 30.0;
-    p.text(pos2(x0, r.min.y + 12.0), Align2::LEFT_CENTER, "Histogram", Tokens::ui(12.0), t.text_dim);
+    p.text(pos2(x0, r.min.y + 12.0), Align2::LEFT_CENTER, crate::i18n::tr("Histogram"), Tokens::ui(12.0), t.text_dim);
     let w = (r.width() - 72.0).clamp(120.0, 256.0);
     let hr = Rect::from_min_size(pos2(x0 + 8.0, r.min.y + 24.0), vec2(w, 80.0));
     match frame_histogram(app, ui.ctx()) {
@@ -916,7 +939,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let p = ui.painter().with_clip_rect(rect);
     let ctx = ui.ctx().clone();
     let Some(layer) = selected_layer(app) else {
-        p.text(rect.center(), Align2::CENTER_CENTER, "Select a layer to see its effects", Tokens::ui(12.0), t.text_faint);
+        p.text(rect.center(), Align2::CENTER_CENTER, crate::i18n::tr("Select a layer to see its effects"), Tokens::ui(12.0), t.text_faint);
         return;
     };
     let Some(cid) = app.session.active_comp_id() else { return };
@@ -958,9 +981,9 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let mut tops: Vec<(u64, f32)> = vec![];
     for (fi, g) in fx.iter().enumerate() {
         let GroupKind::Effect { effect } = &g.kind else { continue };
-        let r = Rect::from_min_size(pos2(body.min.x, y), vec2(body.width(), 26.0));
+        let r = Rect::from_min_size(pos2(body.min.x, y), vec2(body.width(), ROW + 2.0));
         tops.push((g.uid, r.min.y));
-        y += 26.0;
+        y += ROW + 2.0;
         let open = !app.ui.fx_closed.contains(&g.uid);
         let selected = app.session.state.selected_props.iter().any(|(l, u)| *l == layer.id && *u == g.uid);
         bp.rect_filled(r, 0.0, if selected { Color32::from_rgb(0x2f, 0x3a, 0x52) } else { Color32::from_rgb(0x2a, 0x2a, 0x2a) });
@@ -978,10 +1001,11 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
             }
         }
         app.auto.add(&format!("effectControls.effect.{}.twirl", g.uid), tw, &g.name);
-        bp.text(pos2(tw.max.x + 6.0, r.center().y), Align2::LEFT_CENTER, &g.name, Tokens::semibold(12.0), t.text);
+        let name = bp.text(pos2(tw.max.x + 6.0, r.center().y), Align2::LEFT_CENTER, &g.name, Tokens::semibold(12.0), t.text);
+        app.auto.add(&format!("effectControls.effect.{}.name", g.uid), name, &g.name);
         let reset = Rect::from_min_size(pos2(r.max.x - 96.0, r.min.y + 4.0), vec2(40.0, 18.0));
         let rresp = ui.interact(reset, egui::Id::new(("ec-reset", g.uid)), Sense::click());
-        bp.text(reset.center(), Align2::CENTER_CENTER, "Reset", Tokens::ui(11.5), if rresp.hovered() { t.hot_text } else { t.text_dim });
+        bp.text(reset.center(), Align2::CENTER_CENTER, crate::i18n::tr("Reset"), Tokens::ui(11.5), if rresp.hovered() { t.hot_text } else { t.text_dim });
         app.auto.add(&format!("effectControls.effect.{}.reset", g.uid), reset, "Reset");
         if rresp.clicked() {
             actions.push(("effect.reset".into(), json!({"layer": layer.id.0, "effect": g.uid})));
@@ -989,7 +1013,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
         // About…: the effect's name and category (AE's About dialog).
         let about = Rect::from_min_size(pos2(r.max.x - 50.0, r.min.y + 4.0), vec2(44.0, 18.0));
         let aresp = ui.interact(about, egui::Id::new(("ec-about", g.uid)), Sense::click());
-        bp.text(about.center(), Align2::CENTER_CENTER, "About...", Tokens::ui(11.5), if aresp.hovered() { t.hot_text } else { t.text_dim });
+        bp.text(about.center(), Align2::CENTER_CENTER, crate::i18n::tr("About..."), Tokens::ui(11.5), if aresp.hovered() { t.hot_text } else { t.text_dim });
         app.auto.add(&format!("effectControls.effect.{}.about", g.uid), about, "About");
         let apop = egui::Id::new(("ec-about-pop", g.uid));
         if aresp.clicked() {
@@ -1038,6 +1062,15 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
             item(ui, "Move Up", fi > 0, "effect.reorder", json!({"layer": lid, "effect": g.uid, "index": fi.max(1)}));
             item(ui, "Move Down", fi + 1 < fx.len(), "effect.reorder", json!({"layer": lid, "effect": g.uid, "index": fi + 2}));
         });
+        // What the effect can't render as asked (an OCIO config it can't read, transforms it
+        // passes through), under its name.
+        if let Some(w) = effectcraft_engine::effects::warning(g, &mut |pr| ectx.value(&layer, pr)) {
+            let galley = bp.layout(format!("⚠ {w}"), Tokens::ui(11.0), t.warning, (body.width() - 20.0).max(60.0));
+            let wr = Rect::from_min_size(pos2(body.min.x + 10.0, y + 3.0), galley.size());
+            bp.galley(wr.min, galley, t.warning);
+            app.auto.add(&format!("effectControls.effect.{}.warning", g.uid), wr, &w);
+            y += wr.height() + 6.0;
+        }
         if open {
             let eh = editor_height(effect, g, body.width());
             if eh > 0.0 {
@@ -1050,7 +1083,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
                         effectcraft_engine::effects::camera_tracker::ID => super::camera_tracker_ui::editor(app, ui, &bp, &layer, g, er, &mut actions),
                         effectcraft_engine::effects::roto::ID => roto_editor(app, ui, &bp, &layer, g, er, &mut actions),
                         "ec.color.levels" | "ec.color.levelsic" => levels_editor(app, ui, &bp, &layer, g, effect, &ectx, er, &mut actions),
-                        super::fx_editors::GLOW | super::fx_editors::RESHAPE => {
+                        super::fx_editors::GLOW | super::fx_editors::RESHAPE | super::fx_editors::EXTRACTOR => {
                             super::fx_editors::header_editor(app, ui, &bp, &layer, g, effect, &ectx, er, &mut actions)
                         }
                         _ => histogram_only(app, ui, &bp, g, er),
@@ -1065,7 +1098,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     // Drag an effect header to reorder: insertion line between headers.
     if let Some(du) = dragging {
         if let Some(pos) = ctx.pointer_interact_pos() {
-            let slot = tops.iter().position(|(_, ty)| pos.y < *ty + 13.0).unwrap_or(tops.len());
+            let slot = tops.iter().position(|(_, ty)| pos.y < *ty + (ROW + 2.0) / 2.0).unwrap_or(tops.len());
             let ly = tops.get(slot).map(|(_, ty)| *ty).unwrap_or(y - 4.0);
             bp.line_segment([pos2(body.min.x + 4.0, ly), pos2(body.max.x - 4.0, ly)], Stroke::new(2.0, t.accent));
             if ctx.input(|i| i.pointer.any_released()) {
@@ -1167,7 +1200,7 @@ pub fn viewer_hook(
             if pick.kind == "color"
                 && keyer.is_none()
                 && let Some(img) = &app.viewer_image
-                && let Some(s) = fw::sample_frame(img, map.comp, c)
+                && let Some(s) = fw::sample_frame(img, super::viewer_tools::shown_region(&ctx, map.comp), c)
             {
                 let sw = Rect::from_min_size(hp + vec2(14.0, 14.0), vec2(26.0, 18.0));
                 painter.rect_filled(sw, 2.0, Color32::from_rgb((s[0] * 255.0) as u8, (s[1] * 255.0) as u8, (s[2] * 255.0) as u8));
@@ -1178,13 +1211,15 @@ pub fn viewer_hook(
             && let Some(pos) = resp.interact_pointer_pos()
         {
             let c = map.to_comp(pos);
+            // Effect points and the keyer's input are in effect space.
+            let m = super::viewer::from_effect_space(ectx, &layer, l2c(ectx, &layer));
             if pick.kind == "point" {
-                if let Some(lp) = fw::comp_to_layer(&l2c(ectx, &layer), c) {
+                if let Some(lp) = fw::comp_to_layer(&m, c) {
                     actions.push(("prop.set".into(), json!({"layer": pick.layer, "prop": pick.prop, "value": [lp[0], lp[1]]})));
                 }
             } else if let Some(fx) = keyer {
                 // Ctrl/Cmd+click averages the 5 × 5 pixels around the point.
-                if let Some(lp) = fw::comp_to_layer(&l2c(ectx, &layer), c) {
+                if let Some(lp) = fw::comp_to_layer(&m, c) {
                     let average = ui.input(|i| i.modifiers.command);
                     actions.push((
                         "effect.pickColor".into(),
@@ -1192,7 +1227,7 @@ pub fn viewer_hook(
                     ));
                 }
             } else if let Some(img) = &app.viewer_image
-                && let Some(s) = fw::sample_frame(img, map.comp, c)
+                && let Some(s) = fw::sample_frame(img, super::viewer_tools::shown_region(&ctx, map.comp), c)
             {
                 actions.push(("prop.set".into(), json!({"layer": pick.layer, "prop": pick.prop, "value": [s[0], s[1], s[2], 1.0]})));
             }
@@ -1210,6 +1245,8 @@ pub fn viewer_hook(
         for layer in ectx.comp.layers.iter().filter(|l| selected.contains(&l.id) && l.is_active_at(ectx.time)) {
             let Some(fx) = layer.effects() else { continue };
             let m = l2c(ectx, layer);
+            // Masks are in layer space, effect points in effect space.
+            let fm = super::viewer::from_effect_space(ectx, layer, m);
             for g in fx.groups().filter(|g| g.enabled && sel.iter().any(|(l, u)| *l == layer.id && *u == g.uid)) {
                 if matches!(&g.kind, GroupKind::Effect { effect } if effect == super::fx_editors::RESHAPE) {
                     super::fx_editors::reshape_overlay(app, ui, painter, map, ectx, layer, g, &m, &mut actions);
@@ -1219,7 +1256,7 @@ pub fn viewer_hook(
                     .iter()
                     .map(|pr| {
                         let v = ectx.value(layer, pr).as_vec2();
-                        map.to_screen(fw::layer_to_comp(&m, v))
+                        map.to_screen(fw::layer_to_comp(&fm, v))
                     })
                     .collect();
                 // Gradient Ramp and friends: a guide between start and end points.
@@ -1240,7 +1277,7 @@ pub fn viewer_hook(
                     }
                     if resp.dragged()
                         && let Some(pos) = resp.interact_pointer_pos()
-                        && let Some(lp) = fw::comp_to_layer(&m, map.to_comp(pos))
+                        && let Some(lp) = fw::comp_to_layer(&fm, map.to_comp(pos))
                     {
                         let key = gesture_key(ui, id, resp.drag_started());
                         actions.push(("prop.set".into(), json!({"layer": layer.id.0, "prop": pr.uid, "value": [lp[0], lp[1]], "merge": key})));

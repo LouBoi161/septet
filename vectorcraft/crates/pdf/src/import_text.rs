@@ -24,6 +24,9 @@ pub(crate) struct Placement {
     pub size: f64,
     /// Width of the em ÷ its height, in percent.
     pub h_scale: f64,
+    /// How far the em leans along the baseline per unit of its height (a text matrix with a
+    /// shear: faux italic, or type slanted as a whole); 0 when it stands square on the baseline.
+    pub slant: f64,
 }
 
 impl Placement {
@@ -33,14 +36,23 @@ impl Placement {
         let origin = m * Point::ORIGIN;
         let ex = m * Point::new(1000.0, 0.0) - origin;
         let ey = m * Point::new(0.0, 1000.0) - origin;
-        let (w, size) = (ex.hypot(), ey.hypot());
+        let w = ex.hypot();
         // Upright in y-down document space: x to the right of up.
         let upright = ex.cross(ey) < 0.0;
-        (origin.is_finite() && w.is_finite() && size.is_finite() && w > 0.01 && size > 0.01 && size < 1e5 && upright).then(|| Self {
+        if !(w.is_finite() && w > 0.01) {
+            return None;
+        }
+        let dir = ex / w;
+        // The em's height is across the baseline; what's left of `ey` along it is a slant.
+        let up = Vec2::new(dir.y, -dir.x);
+        let size = ey.dot(up);
+        let slant = ey.dot(dir) / size;
+        (origin.is_finite() && size.is_finite() && slant.is_finite() && size > 0.01 && size < 1e5 && upright).then(|| Self {
             origin,
-            dir: ex / w,
+            dir,
             size,
             h_scale: w / size * 100.0,
+            slant,
         })
     }
 
@@ -63,6 +75,8 @@ pub(crate) struct Look {
     pub font: u128,
     pub family: String,
     pub style: String,
+    /// The installed version of the font when it isn't the one family and style resolve to.
+    pub version: Option<String>,
     pub size: f64,
     pub h_scale: f64,
     pub fill: Option<Paint>,
@@ -85,6 +99,7 @@ impl Look {
         CharStyle {
             font_family: self.family.clone(),
             font_style: self.style.clone(),
+            font_version: self.version.clone(),
             size: round(self.size),
             h_scale: round(self.h_scale),
             fill: self.fill.clone().unwrap_or(Paint::None),
@@ -211,6 +226,7 @@ impl TextLine {
             let gap = (at.origin - self.next).dot(self.last_dir);
             let on_line = opacity == self.opacity
                 && at.dir.dot(self.at.dir) > 0.9995
+                && (at.slant - self.at.slant).abs() < 1e-3
                 && (at.origin - self.at.origin).dot(self.at.up()).abs() < size * 0.15
                 && gap > -size * 0.3
                 && gap < size * 3.0;
@@ -218,6 +234,7 @@ impl TextLine {
             // that one ends.
             let on_curve = !on_line
                 && opacity == self.opacity
+                && (at.slant - self.at.slant).abs() < 1e-3
                 && at.dir.dot(self.last_dir) > CURVE_TURN_COS
                 && at.dir.dot(self.last_dir) < 0.99999
                 && (at.origin - self.next).hypot() < size * 0.6;
@@ -301,7 +318,7 @@ impl TextLine {
         if self.runs.iter().all(|(_, t)| t.trim().is_empty()) {
             return None;
         }
-        let mut runs = self.runs.into_iter().map(|(look, text)| TextRun { text, style: look.style() });
+        let mut runs = self.runs.into_iter().map(|(look, text)| TextRun { text, style: look.style(), inline: None });
         let first = runs.next()?;
         let mut t = TextObject::point(Point::ORIGIN, &first.text, first.style);
         t.runs.extend(runs);
@@ -309,7 +326,8 @@ impl TextLine {
             to_logical(&mut t);
         }
         let angle = self.at.dir.atan2();
-        t.xf = Affine::translate(self.at.origin.to_vec2()) * Affine::rotate(angle);
+        // The glyphs' tops lean along the baseline (+x), up being -y in the type's own space.
+        t.xf = Affine::translate(self.at.origin.to_vec2()) * Affine::rotate(angle) * Affine::skew(-self.at.slant, 0.0);
         let db = vectorcraft_text::FontDb::global();
         if let Some(path) = path {
             t.kind = TextKind::OnPath { path: vectorcraft_geom::PathData::from_bezpath(&path), start: 0.0, end: None };
@@ -397,13 +415,13 @@ fn tracked(runs: Vec<TextRun>, tracking: f64, spaces: &[(usize, f64)]) -> Vec<Te
             let at = b - off;
             let (Some(before), Some(space)) = (r.text.get(from..at), r.text.get(at..at + 1)) else { continue };
             if !before.is_empty() {
-                out.push(TextRun { text: before.to_string(), style: style.clone() });
+                out.push(TextRun { text: before.to_string(), style: style.clone(), inline: None });
             }
-            out.push(TextRun { text: space.to_string(), style: CharStyle { tracking: own, ..style.clone() } });
+            out.push(TextRun { text: space.to_string(), style: CharStyle { tracking: own, ..style.clone() }, inline: None });
             from = at + 1;
         }
         if let Some(rest) = r.text.get(from..).filter(|t| !t.is_empty()) {
-            out.push(TextRun { text: rest.to_string(), style });
+            out.push(TextRun { text: rest.to_string(), style, inline: None });
         }
         off = end;
     }
@@ -490,7 +508,7 @@ fn to_logical(t: &mut TextObject) {
             _ => runs.push((i, c.to_string())),
         }
     }
-    let runs = runs.into_iter().filter_map(|(i, text)| Some(TextRun { text, style: t.runs.get(i)?.style.clone() })).collect();
+    let runs = runs.into_iter().filter_map(|(i, text)| Some(TextRun { text, style: t.runs.get(i)?.style.clone(), inline: None })).collect();
     t.runs = runs;
     t.para.direction = Some(if rtl { ParaDirection::RightToLeft } else { ParaDirection::LeftToRight });
 }

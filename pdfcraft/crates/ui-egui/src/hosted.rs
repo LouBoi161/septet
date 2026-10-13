@@ -31,7 +31,8 @@ pub fn is_hosted() -> bool {
 
 /// Keep everything PdfCraft stores per user (crash recovery, the digital IDs it creates) under
 /// `root` instead of the user's data folders, which is created if missing (a portable install);
-/// `None` goes back to those folders. Set it before the app is built.
+/// `None` goes back to those folders. Set it before the app is built. PdfCraft's own portable
+/// mode ([`crate::portable`]) is off in a host window and whenever a data root is set.
 pub fn set_data_root(root: Option<PathBuf>) {
     if let Some(dir) = &root
         && let Err(e) = std::fs::create_dir_all(dir)

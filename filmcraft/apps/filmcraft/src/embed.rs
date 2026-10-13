@@ -79,6 +79,7 @@ impl Embedded {
         // Settings ▸ Audio Hardware is applied on the first frame (`apply_prefs`).
         app.audio = Some(Box::new(audio::CpalOut::new()));
         desktop::install_file_dialogs(&mut app);
+        desktop::install_system_languages(&mut app);
         Self::with_app(ctx, app)
     }
 
@@ -113,7 +114,8 @@ impl Embedded {
     }
 
     /// The fonts FilmCraft installs at startup (Inter, Inter Medium / SemiBold as the "medium" and
-    /// "semibold" families, JetBrains Mono, and the Japanese craft-fonts when built with them).
+    /// "semibold" families, JetBrains Mono, the Japanese craft-fonts when built with them, then a
+    /// Chinese fallback: the Chinese craft-fonts, else one installed system face).
     pub fn font_definitions() -> egui::FontDefinitions {
         filmcraft_ui_egui::theme::font_definitions()
     }
@@ -178,8 +180,8 @@ impl Embedded {
         }
     }
 
-    /// Hidden: stop playback (and its sound, voice-over and mixer recording) and J/K/L trimming,
-    /// which run on the UI clock. FilmCraft does nothing in particular when it comes back.
+    /// Hidden: stop playback (and its sound, voice-over and mixer recording), Source monitor
+    /// playback and J/K/L trimming, which run on the UI clock. FilmCraft does nothing in particular when it comes back.
     pub fn set_visible(&mut self, visible: bool) {
         if visible {
             return;
@@ -187,6 +189,7 @@ impl Embedded {
         // (a drag to another app's tab hides this one: the drag goes on)
         self.drag_hidden = !hosted::dragged_items(&self.app, &self.ctx).is_empty();
         self.app.stop();
+        self.app.stop_source();
         if self.app.session.trim_play.active()
             && let Err(e) = self.app.session.execute("trim.shuttleStop", json!({}))
         {
@@ -632,7 +635,7 @@ fn write_still(img: &Image, name: &str, accept: &[&str], dir: &Path) -> Option<P
         _ => None,
     })?;
     let (w, h) = (u32::try_from(img.w).ok()?, u32::try_from(img.h).ok()?);
-    let bytes = match encode_still(format, img.to_rgba8(), w, h) {
+    let bytes = match encode_still(format, img.to_rgba8(), w, h, false) {
         Ok(b) => b,
         Err(e) => {
             log::warn!("can't encode {name}.{ext}: {e}");
@@ -837,7 +840,7 @@ mod tests {
     fn a_dragged_clip_leaves_as_its_file_or_as_a_still_of_it() {
         let (src, out) = (scratch("drag-src"), scratch("drag-out"));
         let png = src.join("still.png");
-        std::fs::write(&png, encode_still(Format::PngSequence, Image::new(32, 18).to_rgba8(), 32, 18).unwrap()).unwrap();
+        std::fs::write(&png, encode_still(Format::PngSequence, Image::new(32, 18).to_rgba8(), 32, 18, false).unwrap()).unwrap();
         let mut e = embedded();
         let r = e.app.session.execute("file.import", json!({"paths": [png.to_string_lossy()]})).unwrap();
         let item = ItemId(r["items"][0].as_u64().unwrap());

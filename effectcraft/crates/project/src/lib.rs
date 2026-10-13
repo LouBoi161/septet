@@ -11,6 +11,7 @@ pub mod essential;
 pub mod props;
 pub mod render_queue;
 pub mod render_templates;
+pub mod sequence;
 pub mod styles;
 pub mod tracking;
 
@@ -26,7 +27,13 @@ use serde::{Deserialize, Serialize};
 pub use effectcraft_keyframe as keyframe;
 pub use effectcraft_keyframe::{Keyframe, Value};
 
-pub const SCHEMA_VERSION: u32 = 1;
+/// The project file schema. 2: effects on layers without a source rectangle (shape, text)
+/// measure positions from the top-left of their comp-sized bounds (effect space), not from
+/// the layer's origin; projects from schema 1 are converted when opened (#227).
+pub const SCHEMA_VERSION: u32 = 2;
+
+/// The first schema in which effect positions are in effect space (see [`SCHEMA_VERSION`]).
+pub const SCHEMA_EFFECT_SPACE: u32 = 2;
 
 /// The EffectCraft version, written into project files as `savedBy`.
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -956,6 +963,11 @@ pub struct Footage {
     /// Interpret Footage ▸ Color ▸ Interpret As Linear Light: the file's values are linear.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub linear_light: bool,
+    /// Interpret Footage ▸ Color ▸ Preserve RGB: the file's values enter the composition
+    /// unconverted. Float footage (OpenEXR, float TIFF) is not sRGB-encoded on decode, and the
+    /// colour profile, Interpret As Linear Light and the working space don't apply.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub preserve_rgb: bool,
     /// Data footage ([`FootageKind::Data`]): the file's text (JSON, CSV or TSV), kept in the
     /// project so expressions read it everywhere (and on the web).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -963,6 +975,16 @@ pub struct Footage {
     /// PDF / Illustrator footage: the page shown (0-based; File ▸ Import ▸ Page).
     #[serde(default, skip_serializing_if = "is_default")]
     pub page: u32,
+    /// Image sequences imported with Force Alphabetical Order: the files play one after another
+    /// and their numbering doesn't count (otherwise a gap in it shows a placeholder, as in After
+    /// Effects; [`sequence`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub alphabetical: bool,
+    /// Interpret Footage ▸ Start Timecode ▸ Override Start: the frame (at the footage's frame
+    /// rate) its timecode shows at its first frame. `None` = Use Source File Timecode (0: file
+    /// timecode isn't read). It only relabels source time, as in After Effects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_timecode: Option<i64>,
 }
 
 fn is_default<T: Default + PartialEq>(v: &T) -> bool {
@@ -992,14 +1014,28 @@ impl Default for Footage {
             fields: FieldOrder::Off,
             invert_alpha: false,
             linear_light: false,
+            preserve_rgb: false,
             data: None,
             layer: None,
             page: 0,
+            alphabetical: false,
+            start_timecode: None,
         }
     }
 }
 
 impl Footage {
+    /// Interpret As Linear Light applies (Preserve RGB passes the file's values through).
+    pub fn linear_light_applies(&self) -> bool {
+        self.linear_light && !self.preserve_rgb
+    }
+
+    /// Source time as the footage's timecode: its frame `frame` from Start Timecode
+    /// (`0:00:41:20`), as the Footage panel shows it.
+    pub fn timecode(&self, frame: i64) -> String {
+        effectcraft_time::format_timecode_ae(frame.saturating_add(self.start_timecode.unwrap_or(0)), self.frame_rate, false)
+    }
+
     /// The data format of data footage: `json`, `csv` or `tsv` (from the file extension).
     pub fn data_format(&self) -> Option<&'static str> {
         if self.kind != FootageKind::Data {

@@ -54,6 +54,9 @@ impl Embedded {
         let mut session = desktop::session();
         let recovery = session.begin_recovery();
         let show_home = session.prefs.startup.show_home_on_launch;
+        // The ScriptUI panels open when the app last quit open again (a failing one is
+        // reported in a toast and forgotten).
+        let _ = session.execute("window.restoreScriptPanels", json!({}));
         let mut app = EffectcraftApp::new(session);
         app.set_gpu_failure_bridge(gpu_failures);
         app.ui.start_screen = show_home;
@@ -75,9 +78,10 @@ impl Embedded {
     }
 
     /// The fonts EffectCraft installs at startup: Inter (named families `medium` and
-    /// `semibold`), JetBrains Mono and the system's Japanese fallback.
+    /// `semibold`), JetBrains Mono and the system's fallbacks for CJK (Japanese first) and other
+    /// scripts.
     pub fn font_definitions() -> egui::FontDefinitions {
-        theme::font_definitions()
+        theme::font_definitions("en")
     }
 
     /// The project's file name (`Untitled Project.ecproj` before it is saved); `None` while Home

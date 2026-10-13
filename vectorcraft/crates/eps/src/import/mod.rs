@@ -10,6 +10,7 @@
 //! - `data`: data the program reads from itself through decoding filters, and images.
 //! - `text`: fonts by name and type as point type; Type 3 fonts' glyphs drawn by their procedures.
 //! - `preview`: the previews a file carries, for when its PostScript can't be read.
+//! - `native`: the layers of an Illustrator file, from the editing copy of its art that it carries.
 //!
 //! Clipped art comes in as clipping groups. In a file in the legacy Illustrator format (versions
 //! 3–8, with the prolog that defines its operators), the group operators `u` … `U` (nested) come in
@@ -24,10 +25,13 @@
 //! error, the operator and the procedures it ran in; without a preview, what was drawn before the
 //! error is kept (with that warning), else the file is refused.
 
+mod ai;
+mod ate;
 mod data;
 mod graphics;
 mod interp;
 mod lex;
+mod native;
 mod obj;
 mod preview;
 mod shading;
@@ -43,6 +47,8 @@ mod tests_generators;
 mod tests_illustrator;
 #[cfg(test)]
 mod tests_images;
+#[cfg(test)]
+mod tests_native;
 
 use std::sync::Arc;
 
@@ -55,6 +61,7 @@ use graphics::{GState, Out};
 use interp::{Fault, Interp};
 use obj::PsError;
 
+pub use native::{ai_alone, is_loss, layered_ai};
 pub use text::family_style;
 
 /// The page of a PostScript file without a bounding box (US Letter).
@@ -159,8 +166,15 @@ fn reason(e: &PsError, fault: Option<&Fault>) -> String {
     }
 }
 
-/// Read an EPS or PostScript file (its first page).
+/// Read an EPS or PostScript file (its first page), an Illustrator EPS through the editing copy of
+/// its art when it carries one (see `native`).
 pub fn import(bytes: &[u8]) -> Result<Imported, String> {
+    import_with(bytes, true)
+}
+
+/// [`import`], an Illustrator EPS through the editing copy of its art only when `editing_data`
+/// (else what its page prints, as any EPS).
+pub fn import_with(bytes: &[u8], editing_data: bool) -> Result<Imported, String> {
     let (ps, _) = crate::sections(bytes).ok_or("the file's preview header points outside the file")?;
     if !ps.starts_with(b"%!") {
         return Err("this is not a PostScript file".into());
@@ -182,6 +196,7 @@ pub fn import(bytes: &[u8]) -> Result<Imported, String> {
     }
     let drew = !out.drawn.is_empty();
     let why = match (&result, drew) {
+        (Ok(()), true) if editing_data => return Ok(native::layered(ps, finish(out))),
         (Ok(()), true) => return Ok(finish(out)),
         (Ok(()), false) => "it draws nothing VectorCraft's PostScript reader can show".to_string(),
         (Err(e), _) => reason(e, fault.as_ref()),
@@ -211,6 +226,16 @@ fn finish(mut out: Out) -> Imported {
     if !out.shadings.is_empty() {
         graphics::collapse(&mut children, &out.shadings);
     }
+    let mut layer = Node::layer(out.doc.alloc_id(), "Layer 1", LayerColor::Preset(0));
+    if let Some(c) = layer.children_mut() {
+        *c = children;
+    }
+    finish_with(out, vec![Arc::new(layer)])
+}
+
+/// The document of what `out` drew, as `layers`: the spot inks as spot swatches, in CMYK when
+/// most process colours were.
+fn finish_with(out: Out, layers: Vec<Arc<Node>>) -> Imported {
     let mut doc = out.doc;
     if out.cmyk > out.rgb {
         doc.color_mode = ColorMode::Cmyk;
@@ -227,10 +252,6 @@ fn finish(mut out: Out) -> Imported {
             doc.swatches.push(Swatch { paint: Paint::Pattern { pattern: name.clone(), xf: Affine::IDENTITY }, name, global: false, spot: false });
         }
     }
-    let mut layer = Node::layer(doc.alloc_id(), "Layer 1", LayerColor::Preset(0));
-    if let Some(c) = layer.children_mut() {
-        *c = children;
-    }
-    doc.layers = vec![Arc::new(layer)];
+    doc.layers = layers;
     Imported { document: doc, warnings: out.warnings, preview: false }
 }

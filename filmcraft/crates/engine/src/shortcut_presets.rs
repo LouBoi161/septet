@@ -14,7 +14,8 @@ pub const FILMCRAFT_PANEL: &[Entry] = &[
     // selected in the Project panel (and every clip of it) instead of the selected clips.
     ("project.delete", "Delete", "Project"),
     ("project.delete", "Backspace", "Project"),
-    // Delete (forward delete, the only delete key on most PC keyboards) clears like Backspace.
+    // Delete (forward delete, the only delete key on most PC keyboards) clears like Backspace:
+    // the selected timeline clips (#243) and, in Essential Graphics, the selected graphic layer.
     ("edit.clear", "Delete", ""),
     ("file.newBin", "Cmd+B", "Project"),
     ("edit.undo", "Left", "History"),

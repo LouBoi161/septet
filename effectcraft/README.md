@@ -185,6 +185,16 @@ Windows on ARM, without x64 emulation. CI installs that MSI on Windows 11 ARM64 
 both programs are ARM64 and runs the command-line tool there, but it doesn't open the app's window
 or run the test suite natively on ARM64 yet, so please report anything that behaves differently.
 
+On Gentoo, the community [::snakebyte overlay](https://github.com/switch87/snakebyte-overlay) packages
+the Linux release as `media-video/effectcraft-bin` (not maintained by the EffectCraft team):
+
+```sh
+eselect repository add snakebyte git https://github.com/switch87/snakebyte-overlay.git
+emaint sync -r snakebyte
+echo 'media-video/effectcraft-bin ~amd64' >> /etc/portage/package.accept_keywords/effectcraft
+emerge --ask media-video/effectcraft-bin
+```
+
 To build it yourself you need [Rust](https://rustup.rs/) 1.95 or newer.
 
 ```sh
@@ -194,6 +204,9 @@ cargo run --release -p effectcraft          # the app (add `-- --demo` to open t
 cargo run --release -p effectcraft-cli -- render --out intro.mp4    # render the demo headless
 cargo xtask web --serve 8765                # the browser build on http://127.0.0.1:8765/ (docs/web.md)
 ```
+
+New to it? [docs/footage.md](docs/footage.md) covers importing footage and image sequences and
+Interpret Footage.
 
 To work on it: `cargo test --workspace`, and `cargo xtask ci` before every commit (format, lints,
 tests, layering, asset attribution and the WebAssembly build). See [CONTRIBUTING.md](CONTRIBUTING.md),

@@ -39,10 +39,13 @@ struct App {
     graphics_loss: GraphicsLoss,
     /// The graphics device was lost and the unsaved changes are kept for Data Recovery.
     graphics_lost: bool,
+    /// Frames the UI has run (see [`end_before_teardown`]).
+    frames: u64,
 }
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.frames = ctx.cumulative_frame_nr();
         if let Some(why) = self.graphics_loss.take() {
             // eframe can't give a window a new device: the user saves and starts again.
             self.graphics_lost = self.app.graphics_lost(&why);
@@ -67,6 +70,10 @@ impl eframe::App for App {
         }
     }
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        #[cfg(target_os = "macos")]
+        if self.app.services.native_menu.is_some() {
+            mac_menu::raw_input_hook(raw);
+        }
         self.app.raw_input_hook(raw);
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -79,6 +86,7 @@ impl eframe::App for App {
     #[cfg(not(feature = "windows7"))]
     fn on_exit(&mut self) {
         save_prefs(&self.app);
+        end_before_teardown(self.frames);
     }
     #[cfg(feature = "windows7")]
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -89,6 +97,22 @@ impl eframe::App for App {
 /// Where the log files live: `logs` in the preferences folder (see `logging`).
 fn log_dir() -> Option<std::path::PathBuf> {
     Some(vectorcraft_embed::prefs::data_dir()?.join("logs"))
+}
+
+/// On macOS with accessibility, end the process once the app has saved what it keeps on quitting,
+/// before eframe tears the window down (#661). AccessKit then gives the window's content view back
+/// its own class, which AppKit's Touch Bar support was observing it under, and AppKit aborts the
+/// app as it quits on Macs with a Touch Bar. Nothing after the window is needed on a normal quit.
+/// Not while the window is still starting up (`frames` below [`gpu::STARTUP_FRAMES`]): a graphics
+/// failure then starts the app again on another adapter (#651).
+#[allow(unused_variables)]
+fn end_before_teardown(frames: u64) {
+    #[cfg(all(target_os = "macos", feature = "accessibility", feature = "wgpu"))]
+    if frames >= gpu::STARTUP_FRAMES {
+        log::info!("quitting");
+        log::logger().flush();
+        std::process::exit(0);
+    }
 }
 
 /// The window, Dock, taskbar and app-switcher icon (`assets/app-icon/`, see its README). macOS gets
@@ -102,6 +126,18 @@ fn app_icon() -> egui::IconData {
     eframe::icon_data::from_png_bytes(png).unwrap_or_default()
 }
 
+/// Windows shows a window's big icon (`ICON_BIG`) in the taskbar and Alt+Tab; eframe sets only the
+/// small one (the title bar's), so the taskbar showed a generic icon. Set the big one too.
+#[cfg(windows)]
+fn set_taskbar_icon(w: &winit::window::Window) {
+    use winit::platform::windows::WindowExtWindows as _;
+    let icon = app_icon();
+    // An icon that can't be made leaves the generic one: nothing else depends on it.
+    if let Ok(i) = winit::window::Icon::from_rgba(icon.rgba, icon.width, icon.height) {
+        w.set_taskbar_icon(Some(i));
+    }
+}
+
 /// Windows and Linux: no OS title bar; the app bar is the title bar (`vectorcraft_ui_egui::titlebar`).
 /// macOS keeps its traffic lights over the integrated title strip.
 const CUSTOM_TITLEBAR: bool = !cfg!(target_os = "macos");
@@ -110,6 +146,8 @@ fn main() -> std::process::ExitCode {
     // First, so every start-up warning is recorded (`logging`).
     let logger = logging::install();
     vectorcraft_ui_egui::i18n::detect_system_lang_in_background();
+    // Before the first font scan (the app's start): the fonts font services load (#579).
+    vectorcraft_embed::desktop::install_platform_fonts();
     let mut control_port: Option<u16> = std::env::var("VECTORCRAFT_CONTROL_PORT").ok().and_then(|p| p.parse().ok());
     let mut files = Vec::new();
     let mut in_window_menus = std::env::var_os("VECTORCRAFT_IN_WINDOW_MENUS").is_some_and(|v| !v.is_empty() && v != "0");
@@ -144,7 +182,21 @@ fn main() -> std::process::ExitCode {
     #[cfg(feature = "wgpu")]
     let gpu_pref = saved.as_ref().and_then(|ui| ui.engine_prefs.get("gpuPreference")).and_then(serde_json::Value::as_str);
     #[cfg(feature = "wgpu")]
-    let power = gpu::power_preference(gpu_pref, eframe::wgpu::PowerPreference::from_env());
+    let power_env = eframe::wgpu::PowerPreference::from_env();
+    #[cfg(feature = "wgpu")]
+    let power = gpu::power_preference(gpu_pref, power_env);
+    // Automatic draws on the GPU that drives the (primary) display: a GPU without a monitor reset
+    // its driver and took every monitor down (pdfcraft#378). Logged first: the first question in
+    // every black-window report.
+    #[cfg(feature = "wgpu")]
+    let displays = gpu::preferred_displays(gpu_pref, power_env);
+    #[cfg(feature = "wgpu")]
+    if gpu::automatic(gpu_pref, power_env) {
+        let listed: Vec<String> = displays.iter().map(ToString::to_string).collect();
+        log::info!("display GPUs (PCI vendor:device): {}", if listed.is_empty() { "unknown".to_string() } else { listed.join(", ") });
+    } else {
+        log::info!("graphics processor chosen by the user ({power:?}): which GPU drives the display isn't considered");
+    }
     #[cfg(feature = "wgpu")]
     let startup = std::sync::Arc::new(gpu::Startup::default());
     let options = eframe::NativeOptions {
@@ -171,7 +223,12 @@ fn main() -> std::process::ExitCode {
         options.wgpu_options.surface = eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY;
         // Only adapters that can show the window, in the order `gpu` gives (#306, #502).
         if let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup {
-            create.native_adapter_selector = Some(gpu::selector(power, startup.clone()));
+            create.native_adapter_selector = Some(gpu::selector(power, displays, startup.clone()));
+            // Nothing draws or dispatches indirectly, so wgpu's check of indirect arguments only
+            // costs a compute shader at start-up, one some drivers can't compile (OCLP-patched
+            // Metal on an Iris Pro, #651). `WGPU_VALIDATION_INDIRECT_CALL=1` turns it back on.
+            create.instance_descriptor.flags =
+                (eframe::wgpu::InstanceFlags::from_build_config() - eframe::wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL).with_env();
         }
         options
     };
@@ -188,11 +245,13 @@ fn main() -> std::process::ExitCode {
             "VectorCraft",
             options,
             Box::new(move |cc| {
-                let mut app = VectorcraftApp::new(Session::new(), services());
+                let mut app = VectorcraftApp::new(Session::new(), services(cc.winit_window().cloned()));
                 load_prefs(&mut app, saved);
                 // Fit the window to its monitor, or put it back where it was (still hidden).
                 if let Some(w) = cc.winit_window() {
                     app.ui.window = Some(window::restore(w, saved_window));
+                    #[cfg(windows)]
+                    set_taskbar_icon(w);
                 }
                 // The libraries and Data Recovery folders next to the preferences.
                 vectorcraft_embed::desktop::set_user_folders(&mut app);
@@ -230,7 +289,7 @@ fn main() -> std::process::ExitCode {
                 #[cfg(not(target_os = "macos"))]
                 let _ = in_window_menus;
                 open_files(&mut app, files);
-                Ok(Box::new(App { app, graphics_loss, graphics_lost: false }))
+                Ok(Box::new(App { app, graphics_loss, graphics_lost: false, frames: 0 }))
             }),
         )
     });

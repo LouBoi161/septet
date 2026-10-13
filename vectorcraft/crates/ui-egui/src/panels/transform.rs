@@ -13,6 +13,8 @@ use crate::widgets::{self, menu_item};
 use crate::{VectorcraftApp, icons};
 
 pub const ANGLE_PRESETS: [f64; 9] = [-180.0, -135.0, -90.0, -45.0, 0.0, 45.0, 90.0, 135.0, 180.0];
+/// The shear angle's presets: steep enough to be useful, short of the degenerate ±90°.
+pub const SHEAR_PRESETS: [f64; 9] = [-60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0];
 
 /// Proportional size: the other dimension when one changes with the link on.
 pub fn constrained(w: f64, h: f64, new_w: Option<f64>, new_h: Option<f64>) -> (f64, f64) {
@@ -53,7 +55,8 @@ fn artboard_fields(app: &mut VectorcraftApp, ui: &mut Ui, index: usize, r: Rect)
     let rp = vectorcraft_geom::reference_point(r, refi);
     let set = |app: &mut VectorcraftApp, x, y, w, h| {
         let n = artboard_rect(r, refi, x, y, w, h, link);
-        let p = json!({"index": index, "x": n.x0, "y": n.y0, "width": n.width(), "height": n.height()});
+        let scale_art = crate::panels::artboards::scale_art(app);
+        let p = json!({"index": index, "x": n.x0, "y": n.y0, "width": n.width(), "height": n.height(), "scaleArt": scale_art});
         if let Err(e) = app.run("artboard.setProps", p) {
             app.status(e);
         }
@@ -151,8 +154,10 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
             ui.add_space(4.0);
             let icon = icons::icon(ui, "dc-shear", 16.0, t.icon).on_hover_text(tl!("Shear"));
             crate::scrub::note_label(ui, icon.rect);
-            if let Some(a) = widgets::plain_field(ui, "xfp-shear", 0.0, "°", 1, 56.0)
+            // Shear is relative: the field rests at 0° and a new value shears by it.
+            if let Some(a) = widgets::spin_plain(ui, "xfp-shear", 0.0, "°", 2, 96.0, 15.0, -89.0, &SHEAR_PRESETS)
                 && a != 0.0
+                && a.abs() < 90.0
             {
                 app.run("object.shear", json!({"angle": a, "axis": "horizontal", "origin": origin})).ok();
             }
@@ -187,6 +192,10 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
                 });
                 corner_radius_row(app, ui, &n, "xfp-radius");
             }
+            vectorcraft_doc::LiveShape::Ellipse { pie, .. } => {
+                widgets::subheader(ui, tl!("Ellipse Properties:"));
+                pie_rows(app, ui, *pie, "xfp-pie");
+            }
             _ => {
                 widgets::subheader(ui, tl!("Shape Properties:"));
                 widgets::dim_label(ui, tl!(n.kind_label()));
@@ -204,6 +213,33 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
     if widgets::check(ui, tl!("Scale Strokes & Effects"), ss, true) {
         set_pref(app, "scaleStrokes", !ss);
     }
+}
+
+/// An ellipse's Pie Start and End Angle (degrees, counterclockwise from 3 o'clock; 0 to 360 is the
+/// whole ellipse) and Invert Pie, which shows the other part of it (Transform and Properties panels).
+pub(crate) fn pie_rows(app: &mut VectorcraftApp, ui: &mut Ui, pie: (f64, f64), id: &str) {
+    for (label, key, v) in [(tl!("Pie Start Angle:"), "pieStart", pie.0), (tl!("Pie End Angle:"), "pieEnd", pie.1)] {
+        ui.horizontal(|ui| {
+            widgets::dim_label(ui, label);
+            if let Some(a) = widgets::plain_field(ui, (id, key), v, "°", 1, 60.0) {
+                app.run("object.setLiveShape", json!({ key: a })).ok();
+            }
+        });
+    }
+    if widgets::flat_button(ui, tl!("Invert Pie"), 90.0).clicked() {
+        app.run("object.setLiveShape", json!({"invertPie": true})).ok();
+    }
+}
+
+/// The Control bar's underlined "Transform" link: a click toggles the Transform panel in a
+/// popover under it, as the Stroke link does with the Stroke panel.
+pub fn link(app: &mut VectorcraftApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let resp = ui.link(egui::RichText::new(tl!("Transform")).size(12.0).color(t.text).underline()).on_hover_text(tl!("Transform options"));
+    widgets::popover(&resp, resp.clicked(), |ui| {
+        ui.set_width(300.0);
+        show(app, ui);
+    });
 }
 
 /// The link between W and H (Transform panel, Properties panel, Control bar): one toggle, the

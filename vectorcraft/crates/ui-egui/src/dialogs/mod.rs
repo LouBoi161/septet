@@ -60,6 +60,7 @@ pub mod print;
 pub mod print_presets;
 mod psd_options;
 pub mod raster_effects;
+pub mod rearrange_artboards;
 pub mod recolor;
 mod recovery;
 pub mod saturate;
@@ -94,6 +95,7 @@ pub use export_for_screens::open as open_export_for_screens;
 pub(crate) use export_for_screens::{
     KIND as EXPORT_FOR_SCREENS, formats as screen_formats, open_assets as open_export_for_screens_assets, saved_rows as screen_saved_rows,
 };
+pub(crate) use new_document::preset_name;
 pub use new_document::{open as open_new_document, preset_card};
 pub use png_options::open as open_raster_options;
 pub use save_pdf::{open as open_save_pdf, open_preset as open_pdf_preset};
@@ -277,6 +279,7 @@ registry! {
     PerspectivePlane: [perspective_plane::KIND] => perspective_plane::SPEC,
     LayerOptions: [layer_options::KIND] => layer_options::SPEC,
     LayersPanelOptions: [layers_panel_options::KIND] => layers_panel_options::SPEC,
+    RearrangeArtboards: [rearrange_artboards::KIND] => rearrange_artboards::SPEC,
 }
 
 /// The button labels the shared dialog frame can show (OK, discard and the fixed Cancel/Close),
@@ -315,7 +318,8 @@ pub fn cancel(app: &mut VectorcraftApp) {
 /// Apply the open dialog (OK).
 pub fn confirm(app: &mut VectorcraftApp) -> DialogResult {
     let Some(d) = app.ui.dialog.clone() else { return Err("no dialog open".into()) };
-    (spec(&d.kind).confirm)(app, &d)
+    // A file dialog it shows off the UI thread confirms the dialog as it is again.
+    crate::picks::as_entry(app, || crate::picks::Entry::Confirm(Box::new(d.clone())), |app| (spec(&d.kind).confirm)(app, &d))
 }
 
 pub fn show(app: &mut VectorcraftApp, ctx: &egui::Context) {

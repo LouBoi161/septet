@@ -23,11 +23,12 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod control_server;
+mod logging;
 #[cfg(target_os = "macos")]
 mod native_menu;
 
 use lightcraft_embed::alloc_release;
-use lightcraft_embed::prefs::{PrefsWriter, config_dir, load_prefs};
+use lightcraft_embed::prefs::{PrefsWriter, config_dir, load_prefs, prefs_path};
 use lightcraft_embed::services::services;
 use lightcraft_embed::session::{configure_segmenter, open_session};
 use lightcraft_ui_egui::LightcraftApp;
@@ -50,8 +51,15 @@ struct App(LightcraftApp, PrefsWriter, #[cfg(target_os = "macos")] Option<native
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         #[cfg(target_os = "macos")]
-        if let Some(m) = self.2.as_mut() {
-            m.update(&mut self.0, ctx);
+        if let Some(m) = self.2.as_mut()
+            && m.update(&mut self.0, ctx)
+            && lightcraft_ui_egui::panels::notices::may_close(&mut self.0)
+        {
+            // Quit from the menu bar: save exactly what closing the window saves (settings and
+            // library, after the unsaved-changes check; otherwise its prompt shows), then end the
+            // process instead of closing the viewport while AppKit is terminating (PR #444).
+            eframe::App::on_exit(self);
+            std::process::exit(0);
         }
         self.0.logic(ctx);
         self.1.tick(&mut self.0, ctx);
@@ -64,21 +72,23 @@ impl eframe::App for App {
     }
     fn on_exit(&mut self) {
         if let Err(e) = self.1.save(&self.0) {
-            eprintln!("lightcraft: {e}");
+            log::error!("{e}");
         }
         if let Err(e) = self.0.session.close_library() {
-            eprintln!("lightcraft: saving the library failed: {e}");
+            log::error!("saving the library failed: {e}");
         }
     }
 }
 
 /// The window's renderer (egui-wgpu): eframe's defaults, with LightCraft's backend choice — DX12
 /// alone on Windows unless `LIGHTCRAFT_GPU_BACKEND` / `WGPU_BACKEND` say otherwise (issue #136:
-/// with Vulkan in the set, wgpu loads the Vulkan driver even when it then picks DX12).
+/// with Vulkan in the set, wgpu loads the Vulkan driver even when it then picks DX12) — and DX12
+/// shaders compiled with FXC, never a stray `dxcompiler.dll` (issue #471).
 fn window_wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
     let mut c = eframe::egui_wgpu::WgpuConfiguration::default();
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(n) = &mut c.wgpu_setup {
         n.instance_descriptor.backends = lightcraft_engine::gpu::backend::window_backends();
+        n.instance_descriptor.backend_options = lightcraft_engine::gpu::backend::backend_options();
     }
     c
 }
@@ -94,10 +104,23 @@ fn gpu_marker_path() -> Option<std::path::PathBuf> {
 
 /// Arm the GPU crash sentinel; if the previous launch left it behind (it died inside the GPU
 /// driver while creating the device), the notice to show — GPU rendering then starts off.
-fn gpu_crash_check() -> Option<String> {
-    let marker = gpu_marker_path();
-    let left = marker.as_deref().and_then(lightcraft_engine::gpu::backend::take_init_marker);
-    lightcraft_engine::gpu::backend::set_init_marker(marker);
+///
+/// A `--memory` session writes nothing (issue #169): it neither arms the sentinel — which would
+/// create the settings folder — nor removes a marker it finds. It still honours one, so the GPU
+/// starts off there too, and the next ordinary launch reports and clears it.
+fn gpu_crash_check(in_memory: bool) -> Option<String> {
+    gpu_crash_check_at(gpu_marker_path(), in_memory)
+}
+
+fn gpu_crash_check_at(marker: Option<std::path::PathBuf>, in_memory: bool) -> Option<String> {
+    use lightcraft_engine::gpu::backend;
+    let left = if in_memory {
+        marker.as_deref().and_then(backend::read_init_marker)
+    } else {
+        let left = marker.as_deref().and_then(backend::take_init_marker);
+        backend::set_init_marker(marker);
+        left
+    };
     left.map(|what| gpu_crash_notice(&what))
 }
 
@@ -128,41 +151,65 @@ ENVIRONMENT:
   LIGHTCRAFT_SAM3_DIR=DIR   the SAM 3 model for Object / Describe masks (default: <settings folder>/models/sam3;
                    optional: LightCraft offers to download it when first needed)
   LIGHTCRAFT_SAM3_MIRRORS=URL,…   where to download the SAM 3 model from (base URLs, tried in order)
+  LIGHTCRAFT_LOG=info|debug   more log detail from LightCraft itself (default: info from LightCraft, warnings
+                   from other crates); else RUST_LOG=<env_logger directives>. Records go to stderr and to
+                   <settings folder>/logs/lightcraft.log (previous runs: lightcraft.1.log, lightcraft.2.log)
 ";
 
-/// Warnings and errors (failed commands, AI mask analysis) on stderr; `LIGHTCRAFT_LOG=info`
-/// (or `debug`) shows more.
-struct StderrLog(log::LevelFilter);
-
-impl log::Log for StderrLog {
-    fn enabled(&self, m: &log::Metadata) -> bool {
-        m.level() <= self.0 && (m.level() <= log::Level::Warn || m.target().starts_with("lightcraft"))
-    }
-    fn log(&self, r: &log::Record) {
-        if self.enabled(r.metadata()) {
-            eprintln!("lightcraft: {} {}: {}", r.level(), r.target(), r.args());
-        }
-    }
-    fn flush(&self) {}
+/// The launch arguments' files and folders to import (absolute), and a notice for each one that
+/// is not imported (see [`lightcraft_engine::import::launch_path`]; issue #374).
+fn launch_imports(args: &[String]) -> (Vec<String>, Vec<String>) {
+    let cwd = std::env::current_dir().ok();
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|h| !h.is_empty()).map(std::path::PathBuf::from);
+    launch_imports_in(args, cwd.as_deref(), home.as_deref())
 }
 
-fn install_log() {
-    let level = match std::env::var("LIGHTCRAFT_LOG").unwrap_or_default().as_str() {
-        "debug" => log::LevelFilter::Debug,
-        "info" => log::LevelFilter::Info,
-        _ => log::LevelFilter::Warn,
-    };
-    static LOGGER: std::sync::OnceLock<StderrLog> = std::sync::OnceLock::new();
-    if log::set_logger(LOGGER.get_or_init(|| StderrLog(level))).is_ok() {
-        log::set_max_level(level);
+fn launch_imports_in(args: &[String], cwd: Option<&std::path::Path>, home: Option<&std::path::Path>) -> (Vec<String>, Vec<String>) {
+    use lightcraft_engine::import::{LaunchPath, launch_path};
+    let (mut files, mut notices) = (Vec::new(), Vec::new());
+    for a in args {
+        match launch_path(a, cwd, home, lightcraft_engine::devices::dcim_in) {
+            Some(LaunchPath::Import(p)) => files.push(p),
+            Some(LaunchPath::Refused { path, why }) => {
+                log::warn!("not importing {path} given at launch: {why}");
+                notices
+                    .push(format!("{path} was not imported: it is {why}. To import from it, choose a folder inside it with File ▸ Import Photos…"));
+            }
+            None => {}
+        }
     }
+    (files, notices)
+}
+
+/// Where the log files live: `logs` in the settings folder, next to `ui.json` (see `logging`).
+/// None with `LIGHTCRAFT_NO_PREFS` (tests, scripts), so those runs don't rotate away the user's logs.
+fn log_dir() -> Option<std::path::PathBuf> {
+    if std::env::var_os("LIGHTCRAFT_NO_PREFS").is_some() {
+        return None;
+    }
+    config_dir().map(|d| d.join("logs"))
+}
+
+/// The control port `value` names; a value that isn't a port is logged and ignored (`what` is
+/// the option or variable it came from). Logged before the log file opens, so it is kept for it.
+fn control_port_from(what: &str, value: Option<String>) -> Option<u16> {
+    let value = value?;
+    let port = value.trim().parse().ok();
+    if port.is_none() {
+        log::warn!("{what} {value:?} is not a port number; no control server");
+    }
+    port
 }
 
 fn main() -> eframe::Result {
+    // First, so every start-up record is kept for the log file (`logging`).
+    let logger = logging::install();
     lightcraft_engine::guard::install_hook(lightcraft_engine::paths::data_root().unwrap_or_else(std::env::temp_dir).join("lightcraft-panics.log"));
-    install_log();
+    if let Some(logger) = logger {
+        logging::record_panics(logger);
+    }
     alloc_release::install();
-    let mut control_port: Option<u16> = std::env::var("LIGHTCRAFT_CONTROL_PORT").ok().and_then(|p| p.parse().ok());
+    let mut control_port = control_port_from("LIGHTCRAFT_CONTROL_PORT", std::env::var("LIGHTCRAFT_CONTROL_PORT").ok().filter(|v| !v.is_empty()));
     let mut files = Vec::new();
     let mut seed_demo = true;
     let mut in_memory = false;
@@ -170,7 +217,7 @@ fn main() -> eframe::Result {
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
+            "--control" => control_port = control_port_from("--control", Some(args.next().unwrap_or_default())),
             "--library" => library_dir = args.next().map(std::path::PathBuf::from),
             "--no-demo" => seed_demo = false,
             "--memory" | "--demo" => in_memory = true,
@@ -189,12 +236,36 @@ fn main() -> eframe::Result {
             _ => files.push(a),
         }
     }
-    let (prefs, prefs_warning, keep_prefs_file) = load_prefs();
+    // The log file: opened after the arguments, so `--version`, `--help` and a usage error leave
+    // no file behind. Records logged until now are written to it first.
+    let mut log_file = None;
+    if let Some(logger) = logger {
+        // a --memory session writes nothing (issue #164), a log file included
+        match log_dir().filter(|_| !in_memory) {
+            Some(dir) => match logger.attach_dir(&dir) {
+                Ok(path) => {
+                    log::info!("LightCraft {}, log file {}", env!("CARGO_PKG_VERSION"), path.display());
+                    log_file = Some(path);
+                }
+                // The file sink has given up by now, so this goes to standard error only.
+                Err(e) => log::warn!("no log file: {e}"),
+            },
+            None => logger.no_file(),
+        }
+    }
+    // what the arguments name, resolved now: an empty or relative argument never becomes a drive
+    // root, and a whole drive or home folder is not walked (issue #374)
+    let (files, launch_notices) = launch_imports(&files);
+    let (prefs, prefs_warning, keep_prefs_file) = load_prefs(in_memory);
+    // the saved language from the start, so a failed start is reported in it too
+    if let Some(ui) = &prefs {
+        lightcraft_ui_egui::i18n::set_language(ui.language);
+    }
     // --library, else the library last opened from Settings, else the default location
     let library_dir = library_dir.or_else(|| lightcraft_embed::session::library_dir(prefs.as_ref()));
     // GPU compute: off if the preference says so, or if the last launch died creating the device
     // (issue #136) — before anything can create it
-    let gpu_crash = gpu_crash_check();
+    let gpu_crash = gpu_crash_check(in_memory);
     let gpu_on = prefs.as_ref().is_none_or(|u| u.settings.gpu) && gpu_crash.is_none();
     lightcraft_engine::gpu::set_enabled(gpu_on);
     let options = eframe::NativeOptions {
@@ -212,21 +283,24 @@ fn main() -> eframe::Result {
         wgpu_options: window_wgpu_options(),
         ..Default::default()
     };
-    eframe::run_native(
+    // the app's copy: `log_file` is still named in the message of a start that fails
+    let app_log_file = log_file.clone();
+    let started = eframe::run_native(
         "LightCraft",
         options,
         Box::new(move |cc| {
             let (mut session, problem) = open_session(in_memory, library_dir, seed_demo && files.is_empty());
             configure_segmenter(&mut session);
-            let mut app = LightcraftApp::new(session, services());
+            let mut app = LightcraftApp::new(session, services(cc.egui_ctx.clone(), app_log_file.as_deref()));
             if let Some(ui) = prefs {
                 app.ui = ui;
             }
             lightcraft_ui_egui::i18n::set_language(app.ui.language);
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.notices.extend(prefs_warning);
+            app.notices.extend(launch_notices);
             // what's on disk now: only changes are written
-            let writer = PrefsWriter::new(&app, keep_prefs_file);
+            let writer = PrefsWriter::new(&app, keep_prefs_file, if in_memory { None } else { prefs_path() });
             // after the snapshot above, so the writer saves the switched-off preference
             if let Some(notice) = gpu_crash {
                 app.ui.settings.gpu = false;
@@ -241,7 +315,12 @@ fn main() -> eframe::Result {
                 p.pending_import = files;
                 app.library_problem = Some(p);
             } else if !files.is_empty() {
-                let _ = app.run("library.import", serde_json::json!({"paths": files}));
+                // listed and read on the import worker once the window shows (issue #374: never
+                // here, before the first frame, where a large folder kept the window from
+                // appearing)
+                if let Err(e) = lightcraft_ui_egui::import::start_paths(&mut app, files) {
+                    log::warn!("import at launch: {e}");
+                }
                 app.ui.view = lightcraft_ui_egui::state::ViewMode::PhotoGrid;
             }
             // native menu bar generated from the command registry (macOS; elsewhere the menus are
@@ -255,7 +334,28 @@ fn main() -> eframe::Result {
                 menu,
             )))
         }),
-    )
+    );
+    if let Err(e) = &started {
+        startup_failed(&e.to_string(), log_file.as_deref());
+    }
+    started
+}
+
+/// The window could not start (e.g. no usable graphics device): say so in the log and in a native
+/// message box naming the log file, instead of exiting without a trace — the release builds have
+/// no console on Windows, and an app started from Finder shows no standard error (issue #260).
+fn startup_failed(error: &str, log_file: Option<&std::path::Path>) {
+    log::error!("LightCraft could not open its window: {error}");
+    if std::env::var_os("LIGHTCRAFT_NO_PREFS").is_some() {
+        return; // tests and scripts: no dialog to click away
+    }
+    let (title, text) = lightcraft_ui_egui::i18n::startup_failed_message(error, log_file.map(|p| p.display().to_string()).as_deref());
+    let _ = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title(title)
+        .set_description(text)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
 }
 
 #[cfg(test)]
@@ -268,6 +368,53 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// Issue #374: launch arguments that would walk a whole drive or home folder are reported,
+    /// not imported; empty ones are ignored; the rest are imported as absolute paths.
+    #[test]
+    fn launch_arguments_never_walk_a_drive_or_the_home_folder() {
+        let home = dir("launch");
+        std::fs::create_dir_all(home.join("Trip")).unwrap();
+        let args: Vec<String> = ["", "  ", ".", "Trip", &home.to_string_lossy()].iter().map(|s| s.to_string()).collect();
+        let (files, notices) = launch_imports_in(&args, Some(&home), Some(&home));
+        assert_eq!(files, [home.join("Trip").to_string_lossy().to_string()]);
+        assert_eq!(notices.len(), 2, "{notices:?}");
+        assert!(notices.iter().all(|n| n.contains("was not imported")), "{notices:?}");
+        // the working folder is a drive root (a launcher's choice): `.` is never the whole drive
+        let root = home.ancestors().last().unwrap().to_path_buf();
+        let (files, notices) = launch_imports_in(&[".".to_string()], Some(&root), None);
+        assert!(files.iter().all(|f| f.ends_with("DCIM")) && files.len() + notices.len() == 1, "{files:?} {notices:?}");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+
+
+
+    /// Issue #169: a `--memory` session neither arms the GPU crash sentinel (which would create
+    /// the settings folder) nor removes a marker a crashed launch left; it still reports it, and
+    /// the next ordinary launch finds it, reports it and clears it.
+    #[test]
+    fn memory_session_leaves_the_gpu_marker_and_folder_alone() {
+        let d = dir("gpu-marker-memory");
+        let _ = std::fs::remove_dir_all(&d);
+        let m = d.join("gpu-init.marker");
+        // nothing left behind: no notice, and the folder is not created
+        assert_eq!(gpu_crash_check_at(Some(m.clone()), true), None);
+        assert!(!d.exists(), "a --memory session must not create the settings folder");
+        // a marker left by a crashed launch: reported, kept
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(&m, "GPU device creation started (backends METAL)").unwrap();
+        let notice = gpu_crash_check_at(Some(m.clone()), true).unwrap();
+        assert!(notice.contains("GPU rendering is now off"), "{notice}");
+        assert!(m.exists(), "the marker stays for the next ordinary launch");
+        // the next ordinary launch reports it once and removes it
+        assert!(gpu_crash_check_at(Some(m.clone()), false).is_some());
+        lightcraft_engine::gpu::backend::set_init_marker(None);
+        assert!(!m.exists());
+        assert_eq!(gpu_crash_check_at(Some(m.clone()), false), None);
+        lightcraft_engine::gpu::backend::set_init_marker(None);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// Issue #136: a GPU init marker left by a crashed launch is reported once and removed.
@@ -298,4 +445,27 @@ mod tests {
         }
         assert!(!b.is_empty());
     }
+
+    /// Issue #471: the window's DX12 shaders compile with FXC — wgpu's default loaded any
+    /// `dxcompiler.dll` on the search path, and one without `dxil.dll` kept the window from opening.
+    #[test]
+    fn window_compiles_dx12_shaders_with_fxc() {
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(n) = window_wgpu_options().wgpu_setup else { panic!("expected CreateNew") };
+        if std::env::var_os("WGPU_DX12_COMPILER").is_none() {
+            assert!(matches!(n.instance_descriptor.backend_options.dx12.shader_compiler, eframe::wgpu::Dx12Compiler::Fxc));
+        }
+    }
+
+
+
+    #[test]
+    fn a_control_port_that_is_not_a_number_is_ignored() {
+        assert_eq!(control_port_from("--control", Some("7980".into())), Some(7980));
+        assert_eq!(control_port_from("--control", Some(" 18001 ".into())), Some(18001));
+        assert_eq!(control_port_from("--control", Some("nope".into())), None);
+        assert_eq!(control_port_from("--control", Some(String::new())), None);
+        assert_eq!(control_port_from("--control", Some("70000".into())), None);
+        assert_eq!(control_port_from("LIGHTCRAFT_CONTROL_PORT", None), None);
+    }
+
 }

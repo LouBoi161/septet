@@ -43,6 +43,8 @@ pub fn open_bytes(app: &mut VectorcraftApp, name: &str, bytes: &[u8], path: Opti
     if swatches || ext == vectorcraft_doc::style_libs::STYLES_EXT {
         let p = match path {
             Some(path) => serde_json::json!({ "path": path }),
+            // `.ase` swatch libraries are binary.
+            None if swatches => serde_json::json!({"name": name, "dataBase64": vectorcraft_format::base64_encode(bytes)}),
             None => serde_json::json!({"name": name, "data": String::from_utf8_lossy(bytes)}),
         };
         let load = if swatches { crate::panels::swatches::load_library } else { crate::panels::graphic_styles::load_library };
@@ -72,7 +74,7 @@ pub fn open_document(app: &mut VectorcraftApp, name: &str, bytes: &[u8], path: O
 
 /// A path from the open dialog, or "cancelled".
 fn pick_open(app: &mut VectorcraftApp, pick: &FilePick) -> Result<String, String> {
-    app.services.pick_open.as_mut().and_then(|f| f(pick)).ok_or_else(|| "cancelled".into())
+    crate::picks::open(app, pick).ok_or_else(|| "cancelled".into())
 }
 
 /// Object › Plug-ins › Install Plug-in…: installs the `.wasm` at `path`, else a picked one (the
@@ -119,7 +121,7 @@ pub fn new_from_template(app: &mut VectorcraftApp, path: Option<String>) -> Resu
         None if app.services.open_async.is_some() => return open_dialog(app).map(|_| Value::Null),
         None => {
             let filters = std::iter::once(("Templates", TEMPLATE_EXTS)).chain(fileio::open_filters()).collect();
-            pick_open(app, &FilePick { folder: fileio::templates_folder(&app.session.prefs), filters, ..Default::default() })?
+            pick_open(app, &FilePick { folder: fileio::templates_dialog_folder(&app.session.prefs), filters, ..Default::default() })?
         }
     };
     let bytes = read(app, &path)?;
@@ -164,7 +166,7 @@ fn pick_path(app: &mut VectorcraftApp, pick: &FilePick) -> Result<String, String
     if is_web(app) {
         return Ok(pick.name.clone());
     }
-    let picked = app.services.pick_save.as_mut().and_then(|f| f(pick)).ok_or("cancelled")?;
+    let picked = crate::picks::save(app, pick).ok_or("cancelled")?;
     Ok(with_extension(&picked, &fileio::extension(&pick.name), |_| true))
 }
 
@@ -237,9 +239,13 @@ fn plan(app: &VectorcraftApp, mode: SaveMode, p: &Value) -> Result<SavePlan, Str
 /// path?}` while a dialog is open.
 pub fn save(app: &mut VectorcraftApp, mode: SaveMode, p: &Value, ask_options: bool) -> Result<Value, String> {
     remember_view(app);
-    let first = plan(app, mode, p)?;
+    // Writing over the file the document was read from is asked about here, not refused.
+    let first = plan(app, mode, &acknowledged(p))?;
     let ask = ask_options && !has_options(p);
     if let Some(path) = first.path.clone() {
+        if let Some(r) = ask_before_losing(app, &path, save_command(mode), p) {
+            return Ok(r);
+        }
         if ask && matches!(mode, SaveMode::SaveAs | SaveMode::Copy) && matches!(first.format.id, "svg" | "svgz") {
             return ask_format_options(app, mode, first.format, &path);
         }
@@ -259,12 +265,51 @@ pub fn save(app: &mut VectorcraftApp, mode: SaveMode, p: &Value, ask_options: bo
         o.remove("format");
         o.insert("path".into(), json!(with_save_extension(&picked, first.format)));
     }
-    let chosen = plan(app, mode, &q)?;
+    let chosen = plan(app, mode, &acknowledged(&q))?;
+    if let Some(r) = chosen.path.as_deref().and_then(|path| ask_before_losing(app, path, save_command(mode), &q)) {
+        return Ok(r);
+    }
     if ask && asks_options(mode, chosen.format) {
         let path = chosen.path.clone().unwrap_or_default();
         return ask_format_options(app, mode, chosen.format, &path);
     }
     write_plan(app, chosen)
+}
+
+/// The UI command that runs a save in `mode`.
+fn save_command(mode: SaveMode) -> &'static str {
+    match mode {
+        SaveMode::Save => "file.save",
+        SaveMode::SaveAs => "file.saveAs",
+        SaveMode::Copy => "file.saveCopy",
+        SaveMode::Template => "file.saveAsTemplate",
+    }
+}
+
+/// `p` with `acknowledgeLoss: true`.
+fn acknowledged(p: &Value) -> Value {
+    let mut p = if p.is_object() { p.clone() } else { json!({}) };
+    p["acknowledgeLoss"] = json!(true);
+    p
+}
+
+/// Writing `path` over the file the active document was read from, when reading it left things
+/// out (hidden text, art or layers VectorCraft can't read yet): asks first, and OK runs `command`
+/// with `params` and `acknowledgeLoss` → `{pending}` while it asks, `None` when nothing is lost.
+fn ask_before_losing(app: &mut VectorcraftApp, path: &str, command: &str, params: &Value) -> Option<Value> {
+    let what = fileio::losses_summary(fileio::overwrite_losses(app.session.active()?, path, params)?);
+    let name = fileio::file_name(path);
+    let message = crate::i18n::fmt(tl!("Replace “{name}”, the file this document was opened from?"), &[("name", &name)]);
+    let detail = crate::i18n::fmt(
+        tl!("Opening it left out what VectorCraft can't read yet ({what}), so replacing it loses that for good. Save under another name to keep it."),
+        &[("what", &what)],
+    );
+    let mut params = acknowledged(params);
+    if command != "file.save" {
+        params["path"] = json!(path);
+    }
+    dialogs::confirm::ask(app, &message, &detail, command, params);
+    Some(json!({ "pending": dialogs::confirm::KIND }))
 }
 
 /// Does a save (`mode`) to a picked file of format `f` ask for its options first? Native and `.ai`
@@ -419,6 +464,13 @@ pub fn export(app: &mut VectorcraftApp, format: Option<&str>, path: Option<Strin
         std::borrow::Cow::Owned(d) => std::sync::Arc::new(d),
     };
     let path = target_path(app, path, f.extensions[0])?;
+    let mut again = params.clone();
+    if let Some(o) = again.as_object_mut() {
+        o.insert("format".into(), json!(f.id));
+    }
+    if let Some(r) = ask_before_losing(app, &path, "file.exportAs", &again) {
+        return Ok(r);
+    }
     // An SVG given a .svgz name is written compressed.
     let f = match fileio::format_for_name(&path) {
         Some(z) if f.id == "svg" && z.id == "svgz" => z,
@@ -464,6 +516,29 @@ pub fn save_command_output(app: &mut VectorcraftApp, id: &str, ext: &str, params
     Ok(path)
 }
 
+/// Run an engine command that returns `{data}` or `{dataBase64}` and write the bytes to a file
+/// picked with file name `name` suggested next to the document (the web downloads them as `name`)
+/// → where they went.
+pub(crate) fn save_command_output_named(app: &mut VectorcraftApp, id: &str, name: &str, params: Value) -> Result<String, String> {
+    let mut v = app.session.execute(id, &params).map_err(|e| e.to_string())?;
+    let bytes = take_output(&mut v)?;
+    let path = write_named(app, None, name, &bytes)?;
+    app.status(format!("Saved {path}"));
+    Ok(path)
+}
+
+/// The bytes a command returned, taken out of its result `v`, which keeps the rest: binary output
+/// comes as base64, text (swatch libraries) as is.
+fn take_output(v: &mut Value) -> Result<Vec<u8>, String> {
+    let o = v.as_object_mut().ok_or("no data")?;
+    let bytes = match (o.remove("dataBase64"), o.remove("data")) {
+        (Some(Value::String(b64)), _) => vectorcraft_format::base64_decode(&b64),
+        (_, Some(Value::String(text))) => Some(text.into_bytes()),
+        _ => None,
+    };
+    bytes.ok_or_else(|| "no data".into())
+}
+
 /// Run an engine command that returns `{dataBase64}` without its `path` and write the bytes to
 /// that path (else a picked or suggested name) → (path, the command's result without the data).
 /// The command runs before a path is asked for, so bad params never open a save dialog, except
@@ -480,14 +555,7 @@ pub(crate) fn run_to_file(app: &mut VectorcraftApp, id: &str, ext: &str, mut par
         path = Some(picked);
     }
     let mut v = app.session.execute(id, &params).map_err(|e| e.to_string())?;
-    // Binary output comes as base64, text (swatch libraries) as is; the result keeps the rest.
-    let o = v.as_object_mut().ok_or("no data")?;
-    let bytes = match (o.remove("dataBase64"), o.remove("data")) {
-        (Some(Value::String(b64)), _) => vectorcraft_format::base64_decode(&b64),
-        (_, Some(Value::String(text))) => Some(text.into_bytes()),
-        _ => None,
-    };
-    let bytes = bytes.ok_or("no data")?;
+    let bytes = take_output(&mut v)?;
     let path = match path {
         Some(p) => p,
         None => target_path(app, None, ext)?,
