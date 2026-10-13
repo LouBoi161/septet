@@ -36,3 +36,31 @@ display_name = "ShirokoWaWu"
 [people.sanyamsingh001]
 display_name = "sanyamsingh001"
 sync_github_name = false
+
+[people.Aavirash]
+display_name = "Asquareportal"
+
+[people.tylerjenningsw]
+real_name = "Tyler Jennings"
+display_name = "tylerjenningsw"
+sync_github_name = false
+
+[people.llopjulen]
+real_name = "Julen Llop"
+display_name = "Julen Llop"
+sync_github_name = false
+
+[people.vbasky]
+real_name = "Vikram Bhaskaran"
+display_name = "Vikram Bhaskaran"
+sync_github_name = false
+
+[people.vangel76]
+real_name = "Valentin Klein"
+display_name = "Valentin Klein"
+
+[people.Losminek]
+sync_github_name = true
+
+[people.webdevtodayjason]
+display_name = "Jason Brashear"

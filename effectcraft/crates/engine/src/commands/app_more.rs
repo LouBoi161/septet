@@ -128,7 +128,7 @@ fn clear_recent_presets(s: &mut Session, _: &Value) -> Result<Value> {
 
 fn save_copy_xml(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_p(p, "path").ok_or_else(|| bad("file.saveCopyAsXml", "missing `path` (.ecprojx)"))?;
-    let xml = crate::xml_project::to_xml(&s.project.to_file_json()?).map_err(EngineError::Other)?;
+    let xml = crate::xml_project::to_xml(&s.project.to_file_json_with_view(&s.saved_view())?).map_err(EngineError::Other)?;
     s.services.write_file(path, xml.as_bytes()).map_err(|e| EngineError::Other(format!("cannot write {path}: {e}")))?;
     s.toast(format!("Saved an XML copy to {path}"));
     Ok(json!({"path": path, "bytes": xml.len()}))
@@ -194,7 +194,7 @@ fn execute_file(s: &mut Session, p: &Value) -> Result<Value> {
         s.events.push(Event::Frontend { command: "app.confirmExecute".into(), params: json!({"path": path}) });
         return Ok(json!({"needsConfirmation": path}));
     }
-    let url = format!("file://{}", path.replace(' ', "%20"));
+    let url = super::layer_menu::file_url(path);
     s.events.push(Event::OpenUrl(url));
     Ok(json!({"opened": path}))
 }
@@ -288,7 +288,12 @@ fn enable_logging(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn reveal_log(s: &mut Session, _: &Value) -> Result<Value> {
-    let file = crate::logging::current_file().unwrap_or_else(|| log_file(s));
+    // Enable Logging's file while it is on, else this run's session log.
+    let file = crate::logging::current_file()
+        .filter(|_| crate::logging::is_enabled())
+        .or_else(crate::logging::session_file)
+        .or_else(crate::logging::current_file)
+        .unwrap_or_else(|| log_file(s));
     let path = file.to_string_lossy().to_string();
     let url = super::layer_menu::folder_url(&path);
     s.events.push(Event::OpenUrl(url.clone()));
@@ -316,6 +321,8 @@ pub const IMPORT_FORMATS: &[&str] = &[
     "Opus",
     "glTF/GLB",
     "OBJ",
+    "STL",
+    "FBX",
     "Lottie JSON",
 ];
 
@@ -328,7 +335,10 @@ pub fn system_report(s: &Session) -> Value {
     let budgets = s.prefs.cache_budgets(mem.or(s.sys_memory));
     let mut issues = vec![];
     if gpu.is_none() {
-        issues.push("No GPU compositor: rendering uses the CPU (all features still work).".to_string());
+        issues.push(match &s.accel_note {
+            Some(why) => format!("No GPU compositor ({why}): rendering uses the CPU (all features still work)."),
+            None => "No GPU compositor: rendering uses the CPU (all features still work).".to_string(),
+        });
     }
     if mem.is_some_and(|m| m.total < 8 << 30) {
         issues.push("Less than 8 GB of memory: use lower preview resolutions for long or large comps.".to_string());
@@ -344,6 +354,8 @@ pub fn system_report(s: &Session) -> Value {
         "cores": crate::sysinfo::cpu_cores(),
         "memory": mem.map(|m| json!({"total": gb(m.total), "available": gb(m.available)})),
         "gpu": gpu,
+        "gpuNote": if gpu.is_none() { s.accel_note.clone() } else { None },
+        "windowGraphics": s.window_adapter,
         "caches": {"layer": gb(budgets.layer as u64), "footage": gb(budgets.media as u64), "preview": gb(budgets.preview as u64)},
         "import": IMPORT_FORMATS,
         "export": export,
@@ -369,7 +381,14 @@ pub fn report_text(r: &Value) -> String {
         Some(m) => t.push_str(&format!("Memory: {} ({} available)\n", m["total"].as_str().unwrap_or("?"), m["available"].as_str().unwrap_or("?"))),
         None => t.push_str("Memory: unknown\n"),
     }
-    t.push_str(&format!("GPU: {}\n", r.get("gpu").and_then(Value::as_str).unwrap_or("none (CPU compositing)")));
+    match (r.get("gpu").and_then(Value::as_str), r.get("gpuNote").and_then(Value::as_str)) {
+        (Some(gpu), _) => t.push_str(&format!("GPU: {gpu}\n")),
+        (None, Some(why)) => t.push_str(&format!("GPU: none (CPU compositing): {why}\n")),
+        (None, None) => t.push_str("GPU: none (CPU compositing)\n"),
+    }
+    if let Some(w) = r.get("windowGraphics").and_then(Value::as_str) {
+        t.push_str(&format!("Window graphics: {w}\n"));
+    }
     let c = &r["caches"];
     t.push_str(&format!(
         "Cache budgets: layer {}, footage {}, preview {}\n",
@@ -601,4 +620,26 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("comp.vr.extractCubemap", "Extract Cubemap...", ["Composition", "VR"], None, "{comp?, faceSize?}", has_comp, extract_cubemap),
         query!("help.systemInfo", "System Information", "{}", |s, _| Ok(system_report(s))),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    /// `File.execute()` opens the file as a well-formed `file://` URL (spaces, `#`, `%`).
+    #[test]
+    fn execute_file_opens_an_encoded_file_url() {
+        let dir = std::env::temp_dir().join(format!("ec-exec-url-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("run #1 100%.txt");
+        std::fs::write(&f, "x").unwrap();
+        let mut s = crate::Session::default();
+        s.execute("prefs.set", json!({"key": "scripting.allowScriptsWriteFiles", "value": true})).unwrap();
+        s.drain_events();
+        s.execute("file.executeFile", json!({"path": f.to_string_lossy(), "confirmed": true})).unwrap();
+        let expected = super::super::layer_menu::file_url(&f.to_string_lossy());
+        assert!(expected.ends_with("/run%20%231%20100%25.txt"), "{expected}");
+        assert!(s.drain_events().iter().any(|e| matches!(e, crate::Event::OpenUrl(u) if *u == expected)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
