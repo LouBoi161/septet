@@ -197,6 +197,68 @@ fn curvature_click_first_point_closes() {
     assert_eq!(p.anchor_count(), 3);
 }
 
+/// The Curvature tool edits a path another tool drew (#798), one undo step per edit, keeping its
+/// shape except where edited.
+#[test]
+fn curvature_edits_any_selected_path() {
+    let mut s = session();
+    let v = view();
+    let anchors = json!([
+        {"x": 100, "y": 300},
+        {"x": 200, "y": 200, "in": [160, 210], "out": [260, 185]},
+        {"x": 350, "y": 280, "in": [320, 230], "out": [380, 330]},
+        {"x": 450, "y": 350, "in": [420, 360], "out": [480, 300]},
+        {"x": 550, "y": 260, "in": [520, 290]}
+    ]);
+    let id = NodeId(s.execute("path.create", &json!({ "anchors": anchors })).unwrap()["id"].as_u64().unwrap());
+    s.execute("select.set", &json!({"ids": [id.0]})).unwrap();
+    s.select_tool("curvature", v).unwrap();
+    let before = path(&s, id).subpaths[0].clone();
+    // Drag a point: only its two segments change.
+    assert_eq!(gesture(&mut s, &[(350.0, 280.0), (360.0, 320.0), (370.0, 340.0)], Mods::default()), 1);
+    let sp = path(&s, id).subpaths[0].clone();
+    assert_eq!(sp.anchors[2].p, Point::new(370.0, 340.0));
+    assert_eq!((sp.segment(0), sp.segment(3)), (before.segment(0), before.segment(3)));
+    assert_eq!(s.doc().unwrap().selection.anchors.get(&id).map(|a| a.len()), Some(1), "the point is current");
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(path(&s, id).subpaths[0], before);
+    // Alt-click toggles it, Delete removes the current point: one step each.
+    let (alt, steps) = (Mods { alt: true, ..Default::default() }, undo_steps(&s));
+    assert_eq!(gesture(&mut s, &[(200.0, 200.0)], alt), 1);
+    assert!(!path(&s, id).subpaths[0].anchors[1].has_out());
+    s.tool_key(ToolKey::Delete, Mods::default(), v).unwrap();
+    assert_eq!(path(&s, id).anchor_count(), 4);
+    assert_eq!(undo_steps(&s), steps + 2);
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(path(&s, id).subpaths[0], before);
+    // A press on a segment adds a point, the drag moving it: one step.
+    s.execute("select.set", &json!({"ids": [id.0]})).unwrap();
+    let on = kurbo::ParamCurve::eval(&before.segment(3), 0.5);
+    assert_eq!(gesture(&mut s, &[(on.x, on.y), (on.x, on.y + 20.0), (on.x, on.y + 30.0)], Mods::default()), 1);
+    let sp = path(&s, id).subpaths[0].clone();
+    assert_eq!(sp.anchors.len(), 6);
+    assert_eq!(sp.anchors[4].p, Point::new(on.x, on.y + 30.0));
+    assert_eq!((sp.segment(0), sp.segment(1), sp.segment(2)), (before.segment(0), before.segment(1), before.segment(2)));
+    s.execute("edit.undo", &json!({})).unwrap();
+    // A click on an end, then two more: the path goes on, its old segments unchanged.
+    let steps = undo_steps(&s);
+    for (x, y) in [(550.0, 260.0), (650.0, 300.0), (720.0, 220.0)] {
+        gesture(&mut s, &[(x, y)], Mods::default());
+    }
+    assert_eq!(undo_steps(&s), steps + 2, "selecting the end is no step");
+    let sp = path(&s, id).subpaths[0].clone();
+    assert_eq!(sp.anchors.len(), 7);
+    assert!((0..4).all(|i| sp.segment(i) == before.segment(i)));
+    assert_eq!(sp.anchors[6].p, Point::new(720.0, 220.0));
+    // The other end closes it; Esc and a click away start a new path.
+    gesture(&mut s, &[(100.0, 300.0)], Mods::default());
+    assert!(path(&s, id).is_closed());
+    s.tool_key(ToolKey::Escape, Mods::default(), v).unwrap();
+    gesture(&mut s, &[(700.0, 550.0)], Mods::default());
+    assert_eq!(paths(&s).len(), 2);
+}
+
 #[test]
 fn add_and_delete_anchor_tools() {
     let mut s = session();
@@ -627,6 +689,131 @@ fn cut_at_anchors_splits_paths_and_leaves_one_end_selected() {
 }
 
 #[test]
+fn direct_segment_delete_keeps_the_other_rectangle_edges_and_one_undo() {
+    for initially_selected in [false, true] {
+        let mut s = session();
+        let id = rect(&mut s, 100.0, 100.0, 200.0, 150.0);
+        if !initially_selected {
+            s.execute("select.none", &json!({})).unwrap();
+        }
+        let before = s.doc().unwrap().doc.clone();
+        let original = path(&s, id).subpaths[0].clone();
+        let undo = undo_steps(&s);
+        drag(&mut s, "directSelection", &[(200.0, 100.0)], Mods::default());
+        assert_eq!(s.doc().unwrap().doc, before, "a click never edits the document");
+        assert_eq!(undo_steps(&s), undo);
+        assert_eq!(s.doc().unwrap().selection.segments[&id], [(0, 0)].into());
+        s.execute("edit.clear", &json!({})).unwrap();
+        let after = s.doc().unwrap().doc.clone();
+        let remainder = path(&s, id).subpaths[0].clone();
+        assert!(!remainder.closed);
+        assert_eq!(remainder.anchors.len(), 4, "the endpoints and neighboring edges survive");
+        for i in 0..3 {
+            assert_eq!(remainder.segment(i), original.segment(i + 1));
+        }
+        assert_eq!(undo_steps(&s), undo + 1);
+        assert_eq!(s.doc().unwrap().selection.objects, vec![id]);
+        assert!(s.doc().unwrap().selection.anchors.is_empty() && s.doc().unwrap().selection.segments.is_empty());
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc().unwrap().doc, before);
+        assert_eq!(s.doc().unwrap().selection.segments[&id], [(0, 0)].into());
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert_eq!(s.doc().unwrap().doc, after);
+        s.execute("edit.clear", &json!({})).unwrap();
+        assert!(s.doc().unwrap().doc.node(id).is_none(), "a second Delete removes the rest");
+    }
+}
+
+/// A segment pick's endpoints are hollow: Shift-clicking or Shift-marqueeing one selects that
+/// anchor, rather than toggling it off and leaving the other endpoint selected.
+#[test]
+fn selecting_an_anchor_after_a_segment_pick_starts_from_no_anchors() {
+    let mut s = session();
+    let id = rect(&mut s, 100.0, 100.0, 200.0, 150.0);
+    let segment = json!({"id": id.0, "segments": [[0, 0]]});
+    s.execute("select.segments", &segment).unwrap();
+    s.execute("select.anchors", &json!({"id": id.0, "anchors": [[0, 0]], "mode": "toggle"})).unwrap();
+    let sel = &s.doc().unwrap().selection;
+    assert_eq!(sel.partial(id), Some(&[(0, 0)].into()));
+    assert!(sel.segments.is_empty());
+    s.execute("select.segments", &segment).unwrap();
+    s.execute("select.anchorsMany", &json!({"items": [{"id": id.0, "anchors": [[0, 1]]}], "mode": "add"})).unwrap();
+    let sel = &s.doc().unwrap().selection;
+    assert_eq!(sel.partial(id), Some(&[(0, 1)].into()));
+    assert!(sel.segments.is_empty());
+}
+
+#[test]
+fn segment_delete_preserves_curves_appearance_and_unrelated_contours() {
+    let data = "M100 100C110 70 150 130 170 100C180 75 230 125 250 100C270 140 280 80 310 100C320 120 140 140 100 100Z M400 100L500 100L500 200Z";
+    for closed in [false, true] {
+        for cuts in [vec![0], vec![1], vec![3], vec![0, 2], vec![0, 3], vec![0, 1, 2, 3]] {
+            let mut s = session();
+            let id = NodeId(s.execute("path.create", &json!({"d": data})).unwrap()["id"].as_u64().unwrap());
+            s.edit("Fixture", |d, _| {
+                if let NodeKind::Path { path, .. } = &mut d.node_mut(id).unwrap().kind {
+                    path.subpaths[0].closed = closed;
+                }
+                Ok(())
+            })
+            .unwrap();
+            s.execute("paint.setStroke", &json!({"color":"#123456"})).unwrap();
+            let original = path(&s, id);
+            let cuts: Vec<_> = cuts.into_iter().filter(|&i| i < original.subpaths[0].segment_count()).collect();
+            if cuts.is_empty() {
+                continue;
+            }
+            let refs: Vec<_> = cuts.iter().map(|i| json!([0, i])).collect();
+            s.execute("select.segments", &json!({"id":id.0,"segments":refs})).unwrap();
+            let before = s.doc().unwrap().doc.clone();
+            s.execute("edit.clear", &json!({})).unwrap();
+            let result = path(&s, id);
+            assert_eq!(result.subpaths.last().unwrap(), original.subpaths.last().unwrap(), "the other contour stays exact");
+            let expected: Vec<_> =
+                (0..original.subpaths[0].segment_count()).filter(|i| !cuts.contains(i)).map(|i| original.subpaths[0].segment(i)).collect();
+            let actual: Vec<_> =
+                result.subpaths.iter().take(result.subpaths.len() - 1).flat_map(|sp| (0..sp.segment_count()).map(|i| sp.segment(i))).collect();
+            assert_eq!(actual.len(), expected.len());
+            assert!(expected.iter().all(|curve| actual.contains(curve)), "{closed} {cuts:?}");
+            for sp in result.subpaths.iter().take(result.subpaths.len() - 1) {
+                assert!(
+                    !sp.anchors.first().unwrap().has_in() && !sp.anchors.last().unwrap().has_out(),
+                    "deleted-edge handles do not remain at open endpoints"
+                );
+            }
+            let mut restored = s.doc().unwrap().doc.clone();
+            std::sync::Arc::make_mut(&mut restored).node_mut(id).unwrap().kind = before.node(id).unwrap().kind.clone();
+            assert_eq!(restored, before, "only the edited path kind changes");
+            s.execute("edit.undo", &json!({})).unwrap();
+            assert_eq!(s.doc().unwrap().doc, before);
+        }
+    }
+}
+
+#[test]
+fn segment_picks_and_deliberate_anchor_picks_delete_different_components() {
+    let mut s = session();
+    let id = rect(&mut s, 100.0, 100.0, 200.0, 150.0);
+    s.execute("select.segments", &json!({"id":id.0,"segments":[[0,0]]})).unwrap();
+    let before = s.doc().unwrap().doc.clone();
+    let selection = s.doc().unwrap().selection.clone();
+    for refs in [json!([[0, 99]]), json!([[99, 0]]), json!([[-1, 0]]), json!([[0, 0.5]])] {
+        assert!(s.execute("select.segments", &json!({"id":id.0,"segments":refs})).is_err());
+        assert_eq!(s.doc().unwrap().selection, selection);
+        assert_eq!(s.doc().unwrap().doc, before);
+    }
+    s.execute("select.anchors", &json!({"id":id.0,"anchors":[[0,0],[0,1]]})).unwrap();
+    assert!(s.doc().unwrap().selection.segments.is_empty());
+    s.execute("edit.clear", &json!({})).unwrap();
+    assert_eq!(path(&s, id).anchor_count(), 2, "deliberate anchor Delete keeps its existing behavior");
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("select.segments", &json!({"id":id.0,"segments":[[0,0]]})).unwrap();
+    drag(&mut s, "directSelection", &[(100.0, 100.0)], Mods::default());
+    assert!(s.doc().unwrap().selection.segments.is_empty());
+    assert_eq!(s.doc().unwrap().selection.anchors[&id], [(0, 0)].into(), "clicking an endpoint picks the anchor itself");
+}
+
+#[test]
 fn pen_with_alt_moves_one_handle_and_converts_anchors() {
     // Discord feedback: Alt held with the Pen moves a direction handle on its own (and works as
     // the Anchor Point tool on a selected path's anchors), while a path is being drawn too.
@@ -808,6 +995,10 @@ fn the_pen_continues_any_open_path_and_joins_another() {
     assert_eq!(s.doc().unwrap().selection.objects, vec![a]);
     assert_eq!(s.cursor(Point::new(300.0, 200.0), none, v), Cursor::PenJoin);
     assert_eq!(s.cursor(Point::new(350.0, 200.0), none, v), Cursor::Pen, "the middle of the other path");
+    // #1009: Use Precise Cursors makes the join pointer a crosshair too.
+    s.execute("prefs.set", &json!({"key": "usePreciseCursors", "value": true})).unwrap();
+    assert_eq!(s.cursor(Point::new(300.0, 200.0), none, v), Cursor::Crosshair);
+    s.execute("prefs.set", &json!({"key": "usePreciseCursors", "value": false})).unwrap();
     assert_eq!(gesture(&mut s, &[(300.0, 200.0)], none), 1);
     let pts = |s: &Session, id| path(s, id).subpaths.iter().flat_map(|sp| sp.anchors.iter().map(|x| (x.p.x, x.p.y))).collect::<Vec<_>>();
     assert_eq!(pts(&s, a), [(100.0, 100.0), (200.0, 100.0), (300.0, 200.0), (400.0, 200.0)]);
@@ -842,5 +1033,31 @@ fn join_takes_the_paths_and_the_ends_to_join() {
         json!({"ids": [a.0, b.0], "ends": ["first", "middle"]}),
     ] {
         assert!(s.execute("path.join", &bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn pen_with_alt_converts_the_anchors_of_a_path_in_a_selected_group() {
+    // #1273: a selected group (or compound path) shows its paths' anchors, so Alt with the Pen
+    // converts them as it does a selected path's, rather than starting a new path there.
+    let alt = Mods { alt: true, ..Mods::default() };
+    let v = view();
+    for wrap in ["object.group", "object.compoundPath.make"] {
+        let mut s = session();
+        let anchors = json!([{"x": 100, "y": 200}, {"x": 200, "y": 100, "in": [150, 100], "out": [250, 100]}, {"x": 300, "y": 200}]);
+        let id = NodeId(s.execute("path.create", &json!({"anchors": anchors})).unwrap()["id"].as_u64().unwrap());
+        s.execute(wrap, &json!({})).unwrap();
+        assert!(!s.doc().unwrap().selection.objects.contains(&id), "{wrap}: the wrapper is selected, not the path");
+        s.select_tool("pen", v).unwrap();
+        // Alt-click the smooth anchor: a corner, in one step, and no new path.
+        assert_eq!(gesture(&mut s, &[(200.0, 100.0)], alt), 1, "{wrap}");
+        let a = path(&s, id).subpaths[0].anchors[1];
+        assert!(!a.has_in() && !a.has_out(), "{wrap}: a corner: {a:?}");
+        assert_eq!(paths(&s).len(), 1, "{wrap}: no new path");
+        // Alt-drag it: smooth again.
+        assert_eq!(gesture(&mut s, &[(200.0, 100.0), (220.0, 100.0), (240.0, 110.0)], alt), 1, "{wrap}");
+        let a = path(&s, id).subpaths[0].anchors[1];
+        assert_eq!((a.h_in, a.h_out), (Point::new(160.0, 90.0), Point::new(240.0, 110.0)), "{wrap}");
+        assert_eq!(paths(&s).len(), 1, "{wrap}: no new path");
     }
 }

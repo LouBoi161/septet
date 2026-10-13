@@ -2,23 +2,31 @@
 //!
 //! - Art space has y up; the first artboard's top left corner is the document's origin.
 //! - Layers: `%AI5_BeginLayer`, `visible preview unlocked printing dimmed … colorIndex r g b …
-//!   dimPercent … Lb`, `(name) Ln`, its art, `LB`.
+//!   dimPercent … Lb` (ten operands in the legacy format, without the one before the colour
+//!   index), `(name) Ln`, its art, `LB`.
 //! - Groups `u` … `U`, compound paths `*u` … `*U`, clipping groups `q` … `Q` (the path painted
 //!   with `W` clips); a group's transparency and name follow its end.
 //! - Paths: `m`, `l`/`L`, `c`/`C`, `v`/`V`, `y`/`Y`, painted by `N n F f S s B b` (lower case
 //!   closes), `(op) *` for a guide. Stroke `w J j M d`, fill rule `XR`, overprint `O`/`R`.
 //! - State: hidden `Xw`, locked `A`, transparency `mode opacity isolate knockout shape Xy`.
 //! - Names: an `/ArtDictionary` after an object, its `AI10_ArtUID` the name's XML id.
-//! - Artboards: the `ArtboardArray` of the `/Document` dictionary, else `%AI3_Cropmarks`.
+//! - Artboards: the `ArtboardArray` of the `/Document` dictionary, else `%AI3_Cropmarks`, else
+//!   the art size around the template box's centre, else (a file in the legacy format another
+//!   app wrote) the bounding box.
 //! - Images: `%AI5_BeginRaster`, the colour space `XN`, `[matrix] bounds w h bits type alpha …`
 //!   and the samples after `XI`.
 //! - Art with an appearance the format can't write as plain art (several fills or strokes,
 //!   effects, brushes) comes first as that look, drawn (a group), then the object itself on `%_`
 //!   lines and `1 (style) XW`: the drawn look is kept, named after the object.
+//! - Patterns: `%AI3_BeginPattern: (name)`, `(name) llx lly urx ury` (the tile, in the pattern's
+//!   space, y up), the tile's art (on `%_` lines in newer files), `E`, `%AI3_EndPattern`; each is
+//!   read by a reader of its own and becomes a pattern swatch. A fill or stroke with one:
+//!   `(name) x y scaleX scaleY angle reflect axis shear shearAxis [matrix] p` (`P`), the matrix
+//!   taking the pattern's space to art space (the other operands are what it is made of).
 //!
-//! Sections the reader doesn't need (patterns, brushes, symbols, styles, swatches, filters) are
-//! skipped; type, symbols, pattern fills, placed files, legacy type and operators it doesn't know
-//! are errors.
+//! Sections the reader doesn't need (brushes, symbols, styles, swatches, filters) are skipped;
+//! type, symbols, fills with a pattern it can't read, placed files, legacy type and operators it
+//! doesn't know are errors.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
@@ -30,13 +38,14 @@ use vectorcraft_color::swatch::Swatch;
 use vectorcraft_color::{BlendMode, Paint};
 use vectorcraft_doc::{
     Appearance, AppearanceItem, Artboard, ColorMode, Dash, Document, FillLayer, ImageBlob, ImageObject, Knockout, LayerColor, LineCap, LineJoin,
-    Node, NodeId, NodeKind, StrokeLayer,
+    Node, NodeId, NodeKind, PatternDef, StrokeLayer,
 };
 use vectorcraft_geom::{FillRule, PathData};
 
 use super::lex::{Lexer, Tok};
 use super::obj::{self, Obj, V};
 use super::paint::{self, GradientDef, Instance, Named};
+use crate::ps;
 
 /// Deepest nesting of layers, groups and dictionaries.
 const MAX_DEPTH: usize = 256;
@@ -50,6 +59,10 @@ const MAX_POINTS: usize = 4_000_000;
 const MAX_PIXELS: u64 = 1 << 25;
 /// Largest side of the document and its artboards (points).
 const MAX_SIDE: f64 = 1e6;
+/// Art space (y up) → a pattern's space in the document's terms (y down).
+const FLIP: Affine = Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, 0.0]);
+/// Most patterns read (others can't fill art).
+const MAX_PATTERNS: usize = 4096;
 
 /// What the editing data holds: the document of its art, and where its art space is.
 #[derive(Debug)]
@@ -78,7 +91,12 @@ pub(crate) const TEXT_SLOT: &str = "\u{0}text";
 
 /// Is `name` that of a text slot, and which story is it of?
 pub(crate) fn slot_of(name: Option<&str>) -> Option<Option<u32>> {
-    name?.strip_prefix(TEXT_SLOT).map(|rest| rest.parse().ok())
+    name?.strip_prefix(TEXT_SLOT).map(|rest| rest.split(':').next().and_then(|s| s.parse().ok()))
+}
+
+/// Which of its story's frames a text slot named `name` is (0 when it doesn't say).
+pub(crate) fn slot_frame(name: Option<&str>) -> usize {
+    name.and_then(|n| n.strip_prefix(TEXT_SLOT)).and_then(|rest| rest.split_once(':')).and_then(|(_, f)| f.parse().ok()).unwrap_or(0)
 }
 
 /// Read the structure of the editing data `data`.
@@ -86,6 +104,15 @@ pub fn read(data: &[u8]) -> Result<Structure, String> {
     let mut r = Reader::new(data);
     r.run()?;
     r.finish()
+}
+
+/// The artboards (art space) of the editing data `data` that [`read`] can't read as a whole, as far
+/// as it gets: where to put the pages of its PDF part instead (#1068).
+pub fn artboards(data: &[u8]) -> Vec<Rect> {
+    let mut r = Reader::new(data);
+    // Artboards read before an error still say where they are.
+    let _ = r.run();
+    r.artboards.into_iter().map(|(_, rect)| rect).collect()
 }
 
 #[derive(Clone, Debug)]
@@ -191,6 +218,16 @@ struct Frame {
     clips: Vec<usize>,
 }
 
+/// What a reader of a pattern's definition has of its head, `(name) llx lly urx ury`: the operands
+/// before its first operator.
+#[derive(Debug, Default)]
+struct PatternHead {
+    taken: bool,
+    name: String,
+    /// The tile in the pattern's space (y up).
+    tile: Option<Rect>,
+}
+
 /// An image's operands, from `XN` and before `XI`.
 #[derive(Debug, Default)]
 struct Raster {
@@ -243,6 +280,8 @@ struct Reader<'a> {
     hidden_ids: HashSet<NodeId>,
     /// CMYK samples converted, by value.
     cmyk_cache: HashMap<[u8; 4], [u8; 3]>,
+    /// A `/ForeignObject`'s `/Data`: its PDF as ASCII85 in comment lines, until the object closes.
+    foreign_data: Option<Vec<u8>>,
     /// The page ended: what follows isn't art.
     done: bool,
     /// The dictionary closed last was opened on a `%_` line.
@@ -252,6 +291,10 @@ struct Reader<'a> {
     /// The artboard's size and centre in files without artboards or crop marks.
     art_size: Option<(f64, f64)>,
     template_center: Option<(f64, f64)>,
+    /// This reader reads a pattern's definition (see [`Reader::define_pattern`]).
+    pattern: Option<PatternHead>,
+    /// The tile's top left (y down) of each pattern read, by name.
+    pattern_tiles: HashMap<String, Point>,
 }
 
 /// Operators that change nothing the reader keeps.
@@ -273,6 +316,8 @@ const IGNORED: &[&str] = &[
     "Xm",
     "XP",
     "Np",
+    // Flatness (`i`): how finely curves print.
+    "i",
     "TE",
     "TZ",
     "Xs",
@@ -311,6 +356,12 @@ const SKIPPED: &[(&str, &str)] = &[
     ("Alternate_Content", "End_Versioned_Content"),
 ];
 
+/// The note for a `/ForeignObject` (non-native art, the content of a placed PDF, which the editor
+/// shows but doesn't edit) whose PDF can't be read.
+pub const NON_NATIVE_ART_UNREAD: &str = "non-native art (a placed PDF's content) that VectorCraft can't read is left out";
+/// The name of the group a `/ForeignObject`'s art comes in as.
+pub const NON_NATIVE_ART: &str = "Non-native art";
+
 /// A section comment's marker without its `AI<version>_` prefix and value (`AI14_BeginSymbol` →
 /// `BeginSymbol`); DSC comments (`%%BeginProlog`) keep their `%`.
 fn marker(c: &str) -> &str {
@@ -342,6 +393,7 @@ impl<'a> Reader<'a> {
             pending_stroke: None,
             spots: Vec::new(),
             raster: None,
+            foreign_data: None,
             after_object: false,
             nodes: 0,
             unsupported: BTreeSet::new(),
@@ -362,6 +414,8 @@ impl<'a> Reader<'a> {
             slot_names: HashMap::new(),
             art_size: None,
             template_center: None,
+            pattern: None,
+            pattern_tiles: HashMap::new(),
         }
     }
 
@@ -414,6 +468,12 @@ impl<'a> Reader<'a> {
         let line = String::from_utf8_lossy(c);
         let line = line.trim_end();
         let m = marker(line);
+        // A pattern's definition (one inside another's isn't read).
+        if m == "BeginPattern" && self.pattern.is_none() {
+            let section = self.section("EndPattern")?;
+            self.define_pattern(section);
+            return Ok(());
+        }
         if let Some((_, end)) = SKIPPED.iter().find(|(b, _)| *b == m) {
             return self.skip_to(end);
         }
@@ -466,10 +526,18 @@ impl<'a> Reader<'a> {
     /// Skip to the comment with marker `end` (sections of the same kind nested in it count, and
     /// versioned content in an alternate).
     fn skip_to(&mut self, end: &str) -> Result<(), String> {
+        self.section(end).map(|_| ())
+    }
+
+    /// [`Self::skip_to`] → what was skipped, up to the comment that ends it.
+    fn section(&mut self, end: &str) -> Result<&'a [u8], String> {
         let begin = SKIPPED.iter().find(|(_, e)| *e == end).map_or("", |(b, _)| *b);
         let begin = if end == "End_Versioned_Content" { "Begin_Content_if_version_gt" } else { begin };
+        let start = self.lex.offset();
         let mut depth = 0usize;
-        while let Some(t) = self.lex.next_token() {
+        loop {
+            let before = self.lex.offset();
+            let Some(t) = self.lex.next_token() else { break };
             if let Tok::Comment(c) = t.tok {
                 let line = String::from_utf8_lossy(c);
                 let m = marker(&line);
@@ -477,13 +545,65 @@ impl<'a> Reader<'a> {
                     depth += 1;
                 } else if m == end {
                     if depth == 0 {
-                        return Ok(());
+                        return Ok(self.lex.slice(start, before));
                     }
                     depth -= 1;
                 }
             }
         }
         Err(format!("its section ending with `%{end}` doesn't end"))
+    }
+
+    /// A pattern's definition (`section`: what follows `%AI3_BeginPattern`), read by a reader of its
+    /// own into a pattern swatch, its art in the pattern's space (y down). A definition it can't
+    /// read whole (an operator it doesn't know, type, unbalanced groups, no tile) isn't kept: art
+    /// filled with it can't be read.
+    fn define_pattern(&mut self, section: &[u8]) {
+        if self.pattern_tiles.len() >= MAX_PATTERNS {
+            return;
+        }
+        let mut sub = Reader::new(section);
+        sub.pattern = Some(PatternHead::default());
+        // The gradients defined so far, lent (and those it defines kept).
+        sub.gradients = std::mem::take(&mut self.gradients);
+        sub.nodes = self.nodes;
+        let read = sub.open(Kind::Group, false).and_then(|()| sub.run());
+        self.nodes = sub.nodes;
+        self.gradients = std::mem::take(&mut sub.gradients);
+        let whole = read.is_ok() && sub.unsupported.is_empty() && sub.unknown.is_empty() && sub.frames.len() == 1;
+        let (Some(head), Some(frame)) = (sub.pattern.take(), sub.frames.pop()) else { return };
+        let Some(tile) = head.tile.filter(|t| whole && sane(*t) && t.width() > 0.0 && t.height() > 0.0 && !frame.children.is_empty()) else {
+            return;
+        };
+        let art: Vec<Arc<Node>> = frame.children.iter().map(|n| Arc::new(self.doc.reid(n))).collect();
+        let mut def = PatternDef::new(&head.name, art);
+        def.tile = FLIP.transform_rect_bbox(tile);
+        if self.pattern_tiles.insert(def.name.clone(), def.tile.origin()).is_some() {
+            self.doc.patterns.retain(|p| p.name != def.name);
+        }
+        self.doc.patterns.push(def);
+        for (key, blob) in sub.doc.images {
+            self.doc.images.entry(key).or_insert(blob);
+        }
+        self.spots.extend(sub.spots);
+        self.cmyk_colors += sub.cmyk_colors;
+        self.rgb_colors += sub.rgb_colors;
+        for w in &sub.warnings {
+            self.warn(w);
+        }
+    }
+
+    /// In a pattern's definition, the operands of its first operator start with its head,
+    /// `(name) llx lly urx ury`: taken off them.
+    fn take_head(&mut self, mut vals: Vec<V>) -> Vec<V> {
+        let Some(head) = self.pattern.as_mut().filter(|h| !h.taken) else { return vals };
+        head.taken = true;
+        let Some(at) = vals.iter().position(|v| matches!(v, V::Str(_))) else { return vals };
+        let tile = Self::nums(vals.get(at + 1..at + 5).unwrap_or_default());
+        let ([x0, y0, x1, y1], Some(name)) = (tile.as_slice(), vals.get(at).and_then(V::text)) else { return vals };
+        head.name = name;
+        head.tile = Some(Rect::new(*x0, *y0, *x1, *y1));
+        vals.split_off(at + 5)
     }
 
     // ---- frames ----------------------------------------------------------------------------
@@ -645,9 +765,16 @@ impl<'a> Reader<'a> {
             "," => {
                 if let Some(Frame { kind: Kind::Obj(o), base, .. }) = self.frames.last_mut() {
                     obj::add_entry(o, &mut self.stack, *base);
-                    // Binary data in ASCII85 follows, up to its `~>`.
-                    if o.ty == "Binary" && o.entries.last().is_some_and(|(k, _)| k.as_deref() == Some("ASCII85Decode")) {
+                    // Binary data in ASCII85 follows, up to its `~>`: a `/Binary` dictionary's
+                    // (`/ASCII85Decode ,`) or a non-native art object's (`/ForeignObject`'s
+                    // `/Data ,`, the PDF it keeps), in comment lines. ASCII85 has `_`, so a line
+                    // of it may start with `%_` and read as hidden tokens: a `(` there would open
+                    // a string that swallows the rest of the layer.
+                    let key = o.entries.last().and_then(|(k, _)| k.as_deref());
+                    if o.ty == "Binary" && key == Some("ASCII85Decode") {
                         self.lex.skip_past(b"~>");
+                    } else if o.ty == "ForeignObject" && key == Some("Data") {
+                        self.foreign_data = Some(self.lex.skip_past(b"~>").to_vec());
                     }
                 }
                 return Ok(());
@@ -660,6 +787,7 @@ impl<'a> Reader<'a> {
             self.after_object = false;
         }
         let vals = self.operands();
+        let vals = self.take_head(vals);
         if let Some(d) = self.gradient_def.as_mut() {
             match w {
                 "Bs" => d.stop(&vals, &mut self.spots),
@@ -706,8 +834,10 @@ impl<'a> Reader<'a> {
                 self.paint(&op, hidden, true)?;
             }
             // Colours.
-            "g" | "G" | "k" | "K" | "x" | "X" | "Xa" | "XA" | "Xx" | "XX" => self.color(w, &vals),
-            "p" | "P" => self.unreadable("pattern fills"),
+            "g" | "G" | "k" | "K" | "x" | "X" | "Xa" | "XA" | "Xx" | "XX" | "Xk" | "XK" => self.color(w, &vals),
+            "p" | "P" => self.pattern_paint(w, &vals),
+            // A pattern's definition ends.
+            "E" if self.pattern.is_some() => self.done = true,
             "O" => self.gs.overprint_fill = Self::nums(&vals).last() == Some(&1.0),
             "R" => self.gs.overprint_stroke = Self::nums(&vals).last() == Some(&1.0),
             "XR" => self.gs.rule = if Self::nums(&vals).last() == Some(&1.0) { FillRule::EvenOdd } else { FillRule::NonZero },
@@ -826,6 +956,7 @@ impl<'a> Reader<'a> {
             "Document" => self.document(&o),
             "AI11Text" => self.text_slot(&o)?,
             "SymbolInstance" => self.unreadable("symbols"),
+            "ForeignObject" => self.foreign_art(&o)?,
             _ => {}
         }
         Ok(())
@@ -833,12 +964,104 @@ impl<'a> Reader<'a> {
 
     /// A text object (`/AI11Text`): an empty group standing for it, named after its story.
     fn text_slot(&mut self, o: &Obj) -> Result<(), String> {
-        let story = o.nums("StoryIndex").first().copied().filter(|v| (0.0..f64::from(u32::MAX)).contains(v)).map(|v| v as u32);
+        if self.pattern.is_some() {
+            self.unreadable("type in a pattern");
+        }
+        let index = |key: &str| o.nums(key).first().copied().filter(|v| (0.0..f64::from(u32::MAX)).contains(v)).map(|v| v as u32);
+        let (story, frame) = (index("StoryIndex"), index("FrameIndex").unwrap_or(0));
         let gs = self.gs.clone();
         let mut n = self.new_node(NodeKind::Group { children: vec![], clip: false }, &gs);
-        n.name = Some(story.map_or_else(|| TEXT_SLOT.to_string(), |s| format!("{TEXT_SLOT}{s}")));
+        n.name = Some(story.map_or_else(|| TEXT_SLOT.to_string(), |s| format!("{TEXT_SLOT}{s}:{frame}")));
         let hidden = self.obj_hidden;
         self.add(n, hidden)
+    }
+
+    /// Non-native art (`/ForeignObject`): the content of a placed PDF, which Illustrator shows but
+    /// doesn't edit. Its `/Data` is that PDF (ASCII85 in comment lines, kept by the `,` handler),
+    /// `/Bounds` the art's box in a space measured from `/Origin` with y down, and `/RTransform`
+    /// maps that space onto the art (both read off files: the box lands on the clipping paths
+    /// around it). The PDF importer reads the PDF, and its art is fitted to the box, as one
+    /// group. Without data, or with a PDF that can't be read, nothing is drawn.
+    fn foreign_art(&mut self, o: &Obj) -> Result<(), String> {
+        let Some(text) = self.foreign_data.take() else { return Ok(()) };
+        // One `%` starts each line; the rest, `_` included, is data.
+        let mut encoded = String::with_capacity(text.len());
+        for line in text.split(|b| matches!(b, b'\r' | b'\n')) {
+            encoded.push_str(&String::from_utf8_lossy(line.strip_prefix(b"%").unwrap_or(line)));
+        }
+        let Some(pdf) = ps::ascii85_decode(&encoded) else {
+            self.warn(NON_NATIVE_ART_UNREAD);
+            return Ok(());
+        };
+        let (rt, origin, bounds) = (o.get("RTransform").map(Self::nums), o.get("Origin").map(Self::nums), o.get("Bounds").map(Self::nums));
+        let (Some([a, b, c, d, tx, ty]), Some([ox, oy]), Some([x0, y0, x1, y1])) = (rt.as_deref(), origin.as_deref(), bounds.as_deref()) else {
+            self.warn(NON_NATIVE_ART_UNREAD);
+            return Ok(());
+        };
+        let place = Affine::new([*a, *b, *c, *d, *tx, *ty]) * Affine::new([1.0, 0.0, 0.0, -1.0, *ox, *oy]);
+        let art_box = place.transform_rect_bbox(Rect::new(*x0, *y0, *x1, *y1));
+        if !sane(art_box) || art_box.width() <= 0.0 || art_box.height() <= 0.0 {
+            self.warn(NON_NATIVE_ART_UNREAD);
+            return Ok(());
+        }
+        let target = self.space().transform_rect_bbox(art_box);
+        let opts = vectorcraft_pdf::ImportOptions { layers: false, ..Default::default() };
+        let read = match vectorcraft_pdf::import_with_report(&pdf, &opts) {
+            Ok(r) => r,
+            Err(e) => {
+                self.warn(&format!("{NON_NATIVE_ART_UNREAD} ({e})"));
+                return Ok(());
+            }
+        };
+        let mut art: Vec<Node> = read.document.layers.iter().filter_map(|l| l.children()).flatten().map(|n| n.as_ref().clone()).collect();
+        let Some(bbox) = art.iter().fold(None, |acc, n| vectorcraft_geom::union_opt(acc, n.geometric_bounds())) else { return Ok(()) };
+        if bbox.width() <= 0.0 || bbox.height() <= 0.0 {
+            return Ok(());
+        }
+        // The art's own box onto the object's box (its measure of the same art), upside down:
+        // the object's space has y down, and the PDF's content is kept in its own y-up
+        // coordinates, so the PDF's bottom is the top of the box.
+        let fit = Affine::translate((target.x0, target.y1))
+            * Affine::scale_non_uniform(target.width() / bbox.width(), -target.height() / bbox.height())
+            * Affine::translate((-bbox.x0, -bbox.y0));
+        for n in &mut art {
+            n.transform(fit, true);
+            // The PDF's swatches stay with it: its colours keep their values, unlinked.
+            self.reid(n);
+        }
+        for (key, blob) in read.document.images {
+            self.doc.images.entry(key).or_insert(blob);
+        }
+        let gs = self.gs.clone();
+        let mut group = self.new_node(NodeKind::Group { children: art.into_iter().map(Arc::new).collect(), clip: false }, &gs);
+        group.name = Some(NON_NATIVE_ART.into());
+        self.add(group, self.obj_hidden)
+    }
+
+    /// Give `n` and its descendants ids of this document, and unlink their swatches.
+    fn reid(&mut self, n: &mut Node) {
+        n.id = self.doc.alloc_id();
+        for it in &mut n.appearance.items {
+            let p = match it {
+                AppearanceItem::Fill(f) => &mut f.paint,
+                AppearanceItem::Stroke(s) => &mut s.paint,
+            };
+            if let Paint::Gradient(g) = p {
+                g.swatch = None;
+            }
+            p.map_links(&mut |_, link, _| {
+                *link = None;
+                true
+            });
+        }
+        if let Some(m) = n.extras_if_any().and_then(|e| e.mask.as_mut()) {
+            self.reid(Arc::make_mut(&mut m.art));
+        }
+        if let Some(children) = n.children_mut() {
+            for c in children {
+                self.reid(Arc::make_mut(c));
+            }
+        }
     }
 
     /// Note something the data has that isn't read: an error on a layer that shows, left out of a
@@ -889,7 +1112,8 @@ impl<'a> Reader<'a> {
         }
     }
 
-    /// `… Lb`: a layer's options.
+    /// `… Lb`: a layer's options. The legacy format's has ten operands, its colour index one place
+    /// earlier (`visible preview unlocked printing dimmed masks colorIndex r g b`).
     fn layer_attrs(&mut self, vals: &[V]) {
         let n = Self::nums(vals);
         let Some(Frame { kind: Kind::Layer(a), .. }) = self.frames.last_mut() else { return };
@@ -900,13 +1124,42 @@ impl<'a> Reader<'a> {
         a.printable = flag(3, true);
         let dim_pct = n.get(12).copied().filter(|v| v.is_finite()).unwrap_or(50.0).clamp(0.0, 100.0);
         a.dim = flag(4, false).then_some(dim_pct.round() as u8);
-        let index = n.get(7).copied().unwrap_or(0.0);
-        let rgb = |i: usize| n.get(i).map_or(0, |v| v.clamp(0.0, 255.0) as u8);
+        let at = if n.len() <= 10 { 6 } else { 7 };
+        let index = n.get(at).copied().unwrap_or(0.0);
+        let rgb = |i: usize| n.get(at + i).map_or(0, |v| v.clamp(0.0, 255.0) as u8);
         a.color = Some(if (0.0..vectorcraft_doc::LAYER_COLORS.len() as f64).contains(&index) && index.fract() == 0.0 {
             LayerColor::Preset(index as u8)
         } else {
-            LayerColor::Custom([rgb(8), rgb(9), rgb(10)])
+            LayerColor::Custom([rgb(1), rgb(2), rgb(3)])
         });
+    }
+
+    /// `(name) x y scaleX scaleY angle reflect axis shear shearAxis [matrix] p` (`P`: the stroke's):
+    /// the pattern swatch `name`, its space taken to art space by the matrix. A pattern this hasn't
+    /// read can't be drawn.
+    fn pattern_paint(&mut self, w: &str, vals: &[V]) {
+        // In the setup it paints nothing (and the art's space isn't fixed yet).
+        if self.frames.is_empty() {
+            return;
+        }
+        let name = vals.iter().find_map(|v| if let V::Str(_) = v { v.text() } else { None });
+        let Some(origin) = name.as_deref().and_then(|n| self.pattern_tiles.get(n)).map(|p| p.to_vec2()) else {
+            self.unreadable("pattern fills");
+            return;
+        };
+        let matrix = vals.iter().rev().find_map(|v| if let V::Arr(a) = v { paint::affine(&Self::nums(a)) } else { None });
+        // The tile's art (y down from the tile's top left) → the pattern's space → art space.
+        let xf = self.space() * matrix.unwrap_or(Affine::IDENTITY) * FLIP * Affine::translate(origin);
+        if xf.determinant().abs() < 1e-12 || !xf.as_coeffs().iter().all(|v| v.is_finite()) {
+            self.unreadable("pattern fills");
+            return;
+        }
+        let p = Paint::Pattern { pattern: name.unwrap_or_default(), xf };
+        if w == "p" {
+            self.gs.fill = p;
+        } else {
+            self.gs.stroke = p;
+        }
     }
 
     fn color(&mut self, w: &str, vals: &[V]) {
@@ -919,7 +1172,7 @@ impl<'a> Reader<'a> {
         if let Some(n) = named {
             self.spots.push(n);
         }
-        if w.chars().all(|c| c.is_ascii_lowercase()) || w == "Xa" || w == "Xx" {
+        if w.ends_with(|c: char| c.is_ascii_lowercase()) {
             self.gs.fill = p;
         } else {
             self.gs.stroke = p;
@@ -1053,7 +1306,7 @@ impl<'a> Reader<'a> {
         if op.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
             close(&mut bp);
         }
-        let to_doc = self.ensure_space();
+        let to_doc = self.space();
         let path = PathData::from_bezpath(&(to_doc * bp));
         let gs = self.gs.clone();
         let (fill, stroke) = match op.to_ascii_lowercase().as_str() {
@@ -1077,7 +1330,7 @@ impl<'a> Reader<'a> {
         }
         let kind = NodeKind::Path { path, rule: gs.rule, live: None, clipping: clip, guide };
         let mut node = self.new_node(kind, &gs);
-        node.appearance = Appearance { items, ..Appearance::default() };
+        node.appearance = Appearance { items, ..Appearance::default() }.into();
         node.opacity = gs.opacity;
         node.blend = gs.blend;
         node.knockout_shape = gs.knockout_shape;
@@ -1088,7 +1341,7 @@ impl<'a> Reader<'a> {
     }
 
     fn set_instance(&mut self, i: &Instance) {
-        let to_doc = self.ensure_space();
+        let to_doc = self.space();
         match i.paint(&self.gradients, to_doc) {
             Some(p) if i.stroke => self.pending_stroke = Some(p),
             Some(p) => self.pending_fill = Some(p),
@@ -1174,9 +1427,8 @@ impl<'a> Reader<'a> {
         }
         // The matrix maps pixels (y down) into art space with its y flipped.
         let [a, b, c, d, tx, ty] = m.as_slice() else { return Ok(()) };
-        let to_doc = self.ensure_space();
-        let flip = Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, 0.0]);
-        let xf = to_doc * flip * Affine::new([*a, *b, *c, *d, *tx, -*ty]);
+        let to_doc = self.space();
+        let xf = to_doc * FLIP * Affine::new([*a, *b, *c, *d, *tx, -*ty]);
         if !xf.as_coeffs().iter().all(|v| v.is_finite()) || xf.determinant().abs() < 1e-12 {
             return Ok(());
         }
@@ -1185,7 +1437,7 @@ impl<'a> Reader<'a> {
         self.doc.images.entry(key.clone()).or_insert(blob);
         let gs = self.gs.clone();
         let im = ImageObject { key, width: w as u32, height: h as u32, xf, link: None, placement: Default::default() };
-        let mut node = self.new_node(NodeKind::Image(im), &gs);
+        let mut node = self.new_node(NodeKind::Image(Box::new(im)), &gs);
         node.opacity = gs.opacity;
         node.blend = gs.blend;
         self.add(node, false)
@@ -1202,16 +1454,34 @@ impl<'a> Reader<'a> {
         (sane(r) && w > 0.0 && h > 0.0).then_some(r)
     }
 
+    /// The first artboard: the `/Document`'s first, else the crop marks, else [`Self::sized_board`].
+    fn first_board(&self) -> Option<Rect> {
+        self.artboards.first().map(|(_, r)| *r).or(self.cropmarks).or_else(|| self.sized_board())
+    }
+
+    /// The page of a file that says nothing of its artboard (the legacy format as other apps write
+    /// it): its art's bounding box.
+    fn bbox_board(&self) -> Option<Rect> {
+        let [x0, y0, x1, y1] = self.hires.or(self.bbox)?;
+        Some(Rect::new(x0, y0, x1, y1)).filter(|r| r.width() > 0.0 && r.height() > 0.0)
+    }
+
     /// Art space → the document (fixed when the art starts, from the artboards read by then).
     fn ensure_space(&mut self) -> Affine {
         if let Some(m) = self.to_doc {
             return m;
         }
-        let first = self.artboards.first().map(|(_, r)| *r).or(self.cropmarks).or_else(|| self.sized_board());
+        let first = self.first_board().or_else(|| self.bbox_board());
         let top_left = first.map_or(Point::new(0.0, 792.0), |r| Point::new(r.x0, r.y1));
         let m = Affine::new([1.0, 0.0, 0.0, -1.0, -top_left.x, top_left.y]);
         self.to_doc = Some(m);
         m
+    }
+
+    /// Art space → where the art being read goes: the document, or while a pattern's definition is
+    /// read, the pattern's space (y down).
+    fn space(&mut self) -> Affine {
+        if self.pattern.is_some() { FLIP } else { self.ensure_space() }
     }
 
     fn warn(&mut self, w: &str) {
@@ -1233,11 +1503,11 @@ impl<'a> Reader<'a> {
             return Err("it has no layers".into());
         }
         let to_doc = self.ensure_space();
-        let artboard = self.artboards.first().map(|(_, r)| *r).or(self.cropmarks).or_else(|| self.sized_board());
+        let artboard = self.first_board();
         drop_commented_copies(&mut self.doc.layers, &self.hidden_ids);
         let mut doc = std::mem::replace(&mut self.doc, Document::new(1.0, 1.0));
         let boards: Vec<(String, Rect)> = if self.artboards.is_empty() {
-            self.cropmarks.or_else(|| self.sized_board()).map(|r| vec![("Artboard 1".to_string(), r)]).unwrap_or_default()
+            artboard.or_else(|| self.bbox_board()).map(|r| vec![("Artboard 1".to_string(), r)]).unwrap_or_default()
         } else {
             self.artboards.clone()
         };
@@ -1258,11 +1528,17 @@ impl<'a> Reader<'a> {
         }
         if self.color_model.unwrap_or(self.cmyk_colors > self.rgb_colors) {
             doc.color_mode = ColorMode::Cmyk;
-            (doc.swatches, doc.swatch_groups) = vectorcraft_color::default_swatches(ColorMode::Cmyk.model());
+            let (swatches, groups) = vectorcraft_color::default_swatches(ColorMode::Cmyk.model());
+            (doc.swatches, doc.swatch_groups) = (swatches.into(), groups.into());
         }
         for n in &self.spots {
             if doc.swatch(&n.name).is_none() {
-                doc.swatches.push(Swatch { name: n.name.clone(), paint: Paint::solid(n.color), global: true, spot: true });
+                doc.swatches.push(Swatch { name: n.name.clone(), paint: Paint::solid(n.color), global: true, spot: n.spot });
+            }
+        }
+        for name in doc.patterns.iter().map(|p| p.name.clone()).collect::<Vec<_>>() {
+            if doc.swatch(&name).is_none() {
+                doc.swatches.push(Swatch { paint: Paint::Pattern { pattern: name.clone(), xf: Affine::IDENTITY }, name, global: false, spot: false });
             }
         }
         let mut warnings = self.warnings;

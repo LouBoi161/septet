@@ -55,11 +55,15 @@ impl Embedded {
     pub fn new(ctx: &egui::Context, render_state: Option<&eframe::egui_wgpu::RenderState>, _storage: Option<&dyn eframe::Storage>) -> Self {
         vectorcraft_ui_egui::hosted::set_hosted(true);
         vectorcraft_ui_egui::i18n::detect_system_lang_in_background();
-        // Before the first font scan: the fonts font services load in place (#579).
+        // Before the first font scan: the fonts font services load in place (#579), and
+        // VectorCraft's own Fonts folder (in the data root, if any), which text.addFontFiles
+        // copies fonts into.
         desktop::install_platform_fonts();
+        prefs::install_fonts();
         let open_externally: Rc<RefCell<Option<OpenExternally>>> = Rc::default();
-        // The host owns the window: file dialogs open on their own (and, on Linux, off the UI thread).
-        let mut services = desktop::services(None);
+        // The host owns the window: file dialogs open on their own (modal on macOS, on Linux off
+        // the UI thread).
+        let mut services = desktop::services(None, ctx.clone());
         let hook = open_externally.clone();
         // Edit Original: the host may open the file itself (in another of its tabs). A folder
         // (Show Package) always opens in the file manager.
@@ -86,7 +90,6 @@ impl Embedded {
             app.graphics_adapter = Some(desktop::adapter_summary(&rs.adapter.get_info()));
         }
         // The host draws the window's title bar, caption buttons and edges.
-        app.integrated_titlebar = false;
         app.custom_titlebar = false;
         Self { app, ctx: ctx.clone(), open_externally, open_app, outgoing: None }
     }

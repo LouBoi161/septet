@@ -9,12 +9,11 @@ use vectorcraft_ui_egui::{ClipboardProbeFactory, FilePick, Services, Vectorcraft
 use crate::{clipboard, prefs, printing};
 
 /// Open files handed to the app (command line, macOS Finder and Dock) as documents. A file that
-/// can't be opened is reported in the status bar and on stderr; the others still open.
+/// can't be opened is reported to the user and on stderr; the others still open.
 pub fn open_files(app: &mut VectorcraftApp, files: Vec<String>) {
     for f in files {
-        if let Err(e) = vectorcraft_ui_egui::io::open_path(app, &f) {
+        if let Err(e) = vectorcraft_ui_egui::io::open_reporting(app, &f) {
             eprintln!("vectorcraft: {f}: {e}");
-            app.status(format!("Couldn't open {}: {e}", fileio::file_name(&f)));
         }
     }
 }
@@ -51,46 +50,108 @@ pub fn set_user_folders(app: &mut VectorcraftApp) {
 /// The window file dialogs belong to (none in a host's window, which the app doesn't own).
 pub type Parent = Option<std::sync::Arc<winit::window::Window>>;
 
-/// A native file dialog for `request` over `parent` (Windows and Linux, where the portal then
-/// shows it over the window and keeps it in front; macOS shows them as before).
-fn file_dialog(request: &PickRequest, parent: &Parent) -> rfd::FileDialog {
-    let d = match parent {
-        Some(w) if !cfg!(target_os = "macos") => rfd::FileDialog::new().set_parent(&**w),
-        _ => rfd::FileDialog::new(),
-    };
+/// What rfd's blocking and asynchronous file dialogs are both set up with.
+trait DialogSettings: Sized {
+    fn parent(self, window: &winit::window::Window) -> Self;
+    fn title(self, title: &str) -> Self;
+    fn filter(self, name: &str, exts: &[&str]) -> Self;
+    fn folder(self, folder: &str) -> Self;
+    fn file_name(self, name: &str) -> Self;
+}
+
+macro_rules! dialog_settings {
+    ($($dialog:ty),*) => {$(
+        impl DialogSettings for $dialog {
+            fn parent(self, window: &winit::window::Window) -> Self {
+                self.set_parent(window)
+            }
+            fn title(self, title: &str) -> Self {
+                self.set_title(title)
+            }
+            fn filter(self, name: &str, exts: &[&str]) -> Self {
+                self.add_filter(name, exts)
+            }
+            fn folder(self, folder: &str) -> Self {
+                self.set_directory(folder)
+            }
+            fn file_name(self, name: &str) -> Self {
+                self.set_file_name(name)
+            }
+        }
+    )*};
+}
+
+dialog_settings!(rfd::FileDialog, rfd::AsyncFileDialog);
+
+/// `d` set up for `request`: its title, file types, folder and suggested name.
+fn dialog_for<D: DialogSettings>(d: D, request: &PickRequest) -> D {
     let pick = match request {
         PickRequest::Open(pick) | PickRequest::Save(pick) => pick,
-        PickRequest::OpenMany => return fileio::place_filters().fold(d.set_title("Place"), |d, (name, exts)| d.add_filter(name, exts)),
+        PickRequest::OpenMany => {
+            return fileio::place_filters().fold(d.title(vectorcraft_ui_egui::i18n::t("Place")), |d, (name, exts)| {
+                d.filter(vectorcraft_ui_egui::i18n::tr_ctx(vectorcraft_ui_egui::i18n::current(), "file-filter", name), exts)
+            });
+        }
         PickRequest::Folder => return d,
     };
-    let d = pick.filters.iter().fold(d, |d, (name, exts)| d.add_filter(*name, exts));
+    let d = pick
+        .filters
+        .iter()
+        .fold(d, |d, (name, exts)| d.filter(vectorcraft_ui_egui::i18n::tr_ctx(vectorcraft_ui_egui::i18n::current(), "file-filter", name), exts));
     let d = match &pick.folder {
-        Some(folder) => d.set_directory(folder),
+        Some(folder) => d.folder(folder),
         None => d,
     };
-    if pick.name.is_empty() { d } else { d.set_file_name(&pick.name) }
+    if pick.name.is_empty() { d } else { d.file_name(&pick.name) }
+}
+
+/// A native file dialog for `request` over `parent` (on Linux the portal then shows it over the
+/// window and keeps it in front). macOS shows one only in a host's window, without a parent
+/// ([`pick_now`]).
+fn file_dialog(request: &PickRequest, parent: &Parent) -> rfd::FileDialog {
+    match parent {
+        Some(w) => dialog_for(rfd::FileDialog::new().parent(w), request),
+        None => dialog_for(rfd::FileDialog::new(), request),
+    }
+}
+
+/// Before `request`'s dialog shows: a save dialog's folder (the Templates folder) may not exist yet.
+fn make_folder(request: &PickRequest) {
+    if let PickRequest::Save(FilePick { folder: Some(folder), .. }) = request {
+        let _ = std::fs::create_dir_all(folder);
+    }
 }
 
 /// Show `dialog` for `request` (on the calling thread, until it closes) → the paths picked.
 fn show_dialog(dialog: rfd::FileDialog, request: &PickRequest) -> Vec<String> {
+    make_folder(request);
     let paths = match request {
         PickRequest::Open(_) => dialog.pick_file().into_iter().collect(),
         PickRequest::OpenMany => dialog.pick_files().unwrap_or_default(),
-        PickRequest::Save(pick) => {
-            // The Templates folder may not exist yet.
-            if let Some(folder) = &pick.folder {
-                let _ = std::fs::create_dir_all(folder);
-            }
-            dialog.save_file().into_iter().collect()
-        }
+        PickRequest::Save(_) => dialog.save_file().into_iter().collect(),
         PickRequest::Folder => dialog.pick_folder().into_iter().collect(),
     };
     paths.into_iter().map(|p| p.to_string_lossy().to_string()).collect()
 }
 
 /// Show the dialog for `request` over `parent` now → the paths picked.
+#[cfg(not(target_os = "macos"))]
 fn pick_now(request: PickRequest, parent: &Parent) -> Vec<String> {
     show_dialog(file_dialog(&request, parent), &request)
+}
+
+/// macOS shows no dialog in line on the app's own window: its modal loop would run inside winit's
+/// event handler, and an event winit held back meanwhile aborts the app (#867). Dialogs are sheets
+/// there ([`start_pick`]); one asked for any other way (a bug: outside a command, a dialog's OK or
+/// a button) picks nothing. In a host's window (no `parent`, so no sheets) the panel is modal, as
+/// before.
+#[cfg(target_os = "macos")]
+fn pick_now(request: PickRequest, parent: &Parent) -> Vec<String> {
+    if parent.is_none() {
+        return show_dialog(file_dialog(&request, parent), &request);
+    }
+    log::error!("no file dialog shown for {request:?}: macOS shows them as sheets, from commands, dialogs' OK and buttons only");
+    Vec::new()
 }
 
 /// File → Show in Folder: select `path` in Finder / Explorer, or open its folder elsewhere.
@@ -131,33 +192,107 @@ fn write_file(path: &str, bytes: &[u8]) -> Result<(), String> {
 /// Linux: show the dialog for `request` over `parent` on a thread of its own, answering on the
 /// receiver. Shown on the UI thread, nothing would answer the compositor meanwhile, which then
 /// offers to kill the window as not responding (#592).
-fn start_pick(request: PickRequest, parent: &Parent) -> Option<std::sync::mpsc::Receiver<Vec<String>>> {
+#[cfg(not(target_os = "macos"))]
+fn start_pick(request: PickRequest, parent: &Parent, ui: &egui::Context) -> Option<std::sync::mpsc::Receiver<Vec<String>>> {
     let dialog = file_dialog(&request, parent);
     let (tx, rx) = std::sync::mpsc::channel();
+    let ui = ui.clone();
     std::thread::Builder::new()
         .name("file-dialog".into())
         .spawn(move || {
             // The app gone meanwhile has no use for the answer.
             let _ = tx.send(show_dialog(dialog, &request));
+            ui.request_repaint();
         })
         .ok()?;
     Some(rx)
 }
 
-/// The desktop's services, file dialogs over `parent`.
-pub fn services(parent: Parent) -> Services {
+/// The paths a dialog shown as a sheet picks, once it closes.
+#[cfg(target_os = "macos")]
+type SheetAnswer = std::pin::Pin<Box<dyn std::future::Future<Output = Vec<String>> + Send>>;
+
+/// macOS: show the dialog for `request` as a sheet on `parent`'s window, answering on the receiver
+/// (#867). Shown in line, the panel ran AppKit's modal event loop inside winit's event handler: an
+/// event winit had held back meanwhile (one came as a resize of the panel ended) then re-entered
+/// the handler, and winit's panic there, inside an AppKit callback, aborted the app. The sheet
+/// returns at once and the window keeps running; a thread of its own waits for the answer.
+#[cfg(target_os = "macos")]
+fn start_pick(request: PickRequest, parent: &Parent, ui: &egui::Context) -> Option<std::sync::mpsc::Receiver<Vec<String>>> {
+    use winit::raw_window_handle::HasWindowHandle as _;
+    // rfd runs the panel modally after all unless it has the running app's window to hold the
+    // sheet (and from another thread it can't reach the window): no dialog then (`pick_now`).
+    let mtm = objc2::MainThreadMarker::new();
+    let running = mtm.is_some_and(|mtm| objc2_app_kit::NSApplication::sharedApplication(mtm).isRunning());
+    let Some(window) = parent.as_ref().filter(|w| running && w.window_handle().is_ok()) else {
+        log::error!("no window to show the file dialog on (main thread: {}, running: {running})", mtm.is_some());
+        return None;
+    };
+    // The thread first, so the answer of a sheet once shown always has somewhere to go.
+    let (sheet_tx, sheet_rx) = std::sync::mpsc::channel::<SheetAnswer>();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let ui = ui.clone();
+    std::thread::Builder::new()
+        .name("file-dialog".into())
+        .spawn(move || {
+            if let Ok(answer) = sheet_rx.recv() {
+                // The app gone meanwhile has no use for the answer.
+                let _ = tx.send(pollster::block_on(answer));
+                ui.request_repaint();
+            }
+        })
+        .ok()?;
+    make_folder(&request);
+    // rfd builds the panel and begins the sheet here, on the main thread (as it must).
+    let dialog = dialog_for(rfd::AsyncFileDialog::new().parent(window), &request);
+    let path = |f: &rfd::FileHandle| f.path().to_string_lossy().to_string();
+    let answer: SheetAnswer = match request {
+        PickRequest::Open(_) => {
+            let picked = dialog.pick_file();
+            Box::pin(async move { picked.await.iter().map(path).collect() })
+        }
+        PickRequest::OpenMany => {
+            let picked = dialog.pick_files();
+            Box::pin(async move { picked.await.unwrap_or_default().iter().map(path).collect() })
+        }
+        PickRequest::Save(pick) => {
+            let picked = dialog.save_file();
+            crate::mac_save_format::attach(window, &pick);
+            Box::pin(async move { picked.await.iter().map(path).collect() })
+        }
+        PickRequest::Folder => {
+            let picked = dialog.pick_folder();
+            Box::pin(async move { picked.await.iter().map(path).collect() })
+        }
+    };
+    // The thread can't be gone: it waits for this. If it were, its receiver answers as cancelled.
+    let _ = sheet_tx.send(answer);
+    Some(rx)
+}
+
+/// The desktop's services, file dialogs over `parent`; `ui` is woken when a file dialog answers.
+pub fn services(parent: Parent, ui: egui::Context) -> Services {
+    // macOS shows dialogs as sheets on the app's own window (#867); in a host's window, which it
+    // doesn't have, they are modal panels as before.
+    let sheets = cfg!(target_os = "macos") && parent.is_some();
     let (p1, p2, p3, p4, p5) = (parent.clone(), parent.clone(), parent.clone(), parent.clone(), parent);
     Services {
         pick_open: Some(Box::new(move |pick: &FilePick| pick_now(PickRequest::Open(pick.clone()), &p1).into_iter().next())),
         pick_open_multi: Some(Box::new(move || pick_now(PickRequest::OpenMany, &p2))),
         pick_save: Some(Box::new(move |pick: &FilePick| pick_now(PickRequest::Save(pick.clone()), &p3).into_iter().next())),
-        // Windows and macOS dialogs run the window's events while they are open; Linux's don't.
-        start_pick: cfg!(all(unix, not(target_os = "macos")))
-            .then(|| Box::new(move |request: PickRequest| start_pick(request, &p5)) as vectorcraft_ui_egui::picks::StartPick),
+        // Linux shows dialogs on a thread of their own (#592), macOS as sheets (#867); Windows
+        // dialogs run the window's events while they are open.
+        start_pick: (cfg!(all(unix, not(target_os = "macos"))) || sheets)
+            .then(|| Box::new(move |request: PickRequest| start_pick(request, &p5, &ui)) as vectorcraft_ui_egui::picks::StartPick),
+        dialogs_are_sheets: sheets,
         read: Some(Box::new(|p: &str| std::fs::read(p).map_err(|e| e.to_string()))),
         write: Some(Box::new(write_file)),
         // Background Save and Export write from a worker thread.
         write_shared: Some(std::sync::Arc::new(write_file)),
+        // Native saves stream into the file as they are encoded.
+        stream_shared: Some(std::sync::Arc::new(|p: &str, fill: &mut dyn FnMut(&mut dyn std::io::Write) -> std::io::Result<()>| {
+            fileio::write_file_with(p, fill).map_err(|e| e.to_string())
+        })),
         // Every format Copy offers and Paste reads (menu-bar Paste never sees egui's Paste event).
         system_clipboard: Some(clipboard::system_clipboard()),
         // Linux checks whether Paste has something to take on a background thread: an X11 clipboard

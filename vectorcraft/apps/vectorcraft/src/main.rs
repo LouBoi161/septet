@@ -1,13 +1,17 @@
 //! VectorCraft desktop app.
 //!
-//! Usage: `vectorcraft [--control <port>] [--in-window-menus] [files…]`
+//! Usage: `vectorcraft [--control <port> [--automation-read-root <dir>] [--automation-write-root <dir>]]
+//! [--in-window-menus] [files…]`
 //!
 //! `--in-window-menus` (or `VECTORCRAFT_IN_WINDOW_MENUS=1`) keeps the menus inside the window on
 //! macOS instead of the macOS menu bar (`mac_menu`).
 //!
 //! `--control <port>` (or `VECTORCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control server:
 //! `{"id":1,"method":"ui.inspect","params":{}}` → `{"id":1,"ok":true,"result":…}`.
-//! See `vectorcraft_ui_egui::control` for the methods.
+//! See `vectorcraft_ui_egui::control` for the methods. `--automation-read-root` and
+//! `--automation-write-root` (or `VECTORCRAFT_AUTOMATION_READ_ROOT` / `_WRITE_ROOT`) confine the
+//! files its requests read and write (`vectorcraft_engine::file_access`); the person at the
+//! keyboard isn't confined.
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
 #[cfg(all(feature = "windows7", any(feature = "wgpu", feature = "accessibility")))]
@@ -17,6 +21,9 @@ compile_error!("windows7 requires --target x86_64-win7-windows-msvc; the ordinar
 #[cfg(all(target_vendor = "win7", not(feature = "windows7")))]
 compile_error!("the win7 target requires --no-default-features --features windows7");
 
+mod automation_args;
+#[cfg(feature = "wgpu")]
+mod compositor_gpu;
 mod control_server;
 #[cfg(feature = "wgpu")]
 mod gpu;
@@ -24,12 +31,16 @@ mod logging;
 #[cfg(target_os = "macos")]
 mod mac_menu;
 #[cfg(target_os = "macos")]
+mod mac_window;
+#[cfg(target_os = "macos")]
 mod open_documents;
 mod window;
+mod xwayland;
 
 use vectorcraft_embed::desktop::{open_files, services};
 use vectorcraft_embed::prefs::{load_prefs, prefs_enabled, read_prefs, save_prefs};
 use vectorcraft_engine::Session;
+use vectorcraft_engine::file_access::{self, AutomationRoots};
 use vectorcraft_ui_egui::VectorcraftApp;
 use vectorcraft_ui_egui::graphics::GraphicsLoss;
 
@@ -44,7 +55,47 @@ struct App {
 }
 
 impl eframe::App for App {
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    // Each frame runs unconfined: it is the person at the keyboard's. The app confines what the
+    // control channel asks for, and the frames carrying input it injected, to the automation roots
+    // (`VectorcraftApp::with_automation_roots`), which are in force elsewhere in the process.
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        file_access::unconfined(|| self.logic_frame(ctx, frame));
+    }
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        #[cfg(target_os = "macos")]
+        if self.app.services.native_menu.is_some() {
+            mac_menu::raw_input_hook(raw);
+        }
+        file_access::unconfined(|| self.app.raw_input_hook(raw));
+    }
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        {
+            let bar = vectorcraft_ui_egui::chrome::APP_BAR_HEIGHT;
+            let inset = mac_window::center_buttons(frame, ui.ctx().zoom_factor(), bar);
+            self.app.titlebar_inset = inset.unwrap_or(mac_window::DEFAULT_INSET);
+        }
+        file_access::unconfined(|| self.app.ui(ui));
+        // Not while a file dialog's sheet has the keyboard: its name field's composition would go.
+        #[cfg(target_os = "macos")]
+        if !self.app.file_dialog_open() && self.app.take_ime_discard() {
+            vectorcraft_embed::desktop::discard_marked_text();
+        }
+    }
+    #[cfg(not(feature = "windows7"))]
+    fn on_exit(&mut self) {
+        file_access::unconfined(|| save_prefs(&self.app));
+        end_before_teardown(self.frames);
+    }
+    #[cfg(feature = "windows7")]
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        file_access::unconfined(|| save_prefs(&self.app));
+    }
+}
+
+impl App {
+    fn logic_frame(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frames = ctx.cumulative_frame_nr();
         if let Some(why) = self.graphics_loss.take() {
             // eframe can't give a window a new device: the user saves and starts again.
@@ -61,36 +112,21 @@ impl eframe::App for App {
             vectorcraft_ui_egui::background::wait_all(&mut self.app);
             return;
         }
+        // Files from the Finder and the Dock wait while a file dialog is open: what asked for it runs
+        // again on its document when it answers.
         #[cfg(target_os = "macos")]
-        open_files(&mut self.app, open_documents::take());
+        if !self.app.file_dialog_open() {
+            // Files from the Finder and the Dock wait while a file dialog is open: what asked for it runs
+            // again on its document when it answers.
+            if !self.app.file_dialog_open() {
+                open_files(&mut self.app, open_documents::take());
+            }
+        }
         self.app.logic(ctx);
         window::track(ctx, &mut self.app.ui.window);
         if self.app.ui.status == "quit" {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-    }
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
-        #[cfg(target_os = "macos")]
-        if self.app.services.native_menu.is_some() {
-            mac_menu::raw_input_hook(raw);
-        }
-        self.app.raw_input_hook(raw);
-    }
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.app.ui(ui);
-        #[cfg(target_os = "macos")]
-        if self.app.take_ime_discard() {
-            vectorcraft_embed::desktop::discard_marked_text();
-        }
-    }
-    #[cfg(not(feature = "windows7"))]
-    fn on_exit(&mut self) {
-        save_prefs(&self.app);
-        end_before_teardown(self.frames);
-    }
-    #[cfg(feature = "windows7")]
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        save_prefs(&self.app);
     }
 }
 
@@ -142,17 +178,51 @@ fn set_taskbar_icon(w: &winit::window::Window) {
 /// macOS keeps its traffic lights over the integrated title strip.
 const CUSTOM_TITLEBAR: bool = !cfg!(target_os = "macos");
 
+/// Whether this start draws its own title bar: Windows and Linux do, unless Preferences ›
+/// User Interface › System Title Bar asks for the system's. Read from the saved preferences
+/// before the window opens; a missing or unreadable value keeps the default.
+fn custom_titlebar(saved: Option<&vectorcraft_ui_egui::UiState>) -> bool {
+    CUSTOM_TITLEBAR && !saved.map(|ui| ui.engine_prefs.get("systemTitleBar").and_then(serde_json::Value::as_bool).unwrap_or(false)).unwrap_or(false)
+}
+
+fn native_options(custom_titlebar: bool) -> eframe::NativeOptions {
+    eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title("VectorCraft")
+            .with_inner_size(window::DEFAULT_SIZE)
+            .with_min_inner_size(window::MIN_SIZE)
+            .with_drag_and_drop(true)
+            .with_decorations(!custom_titlebar)
+            .with_fullsize_content_view(true)
+            .with_titlebar_shown(false)
+            .with_title_shown(false)
+            .with_icon(app_icon())
+            .with_app_id("ai.storyteller.vectorcraft"),
+        #[cfg(feature = "windows7")]
+        renderer: eframe::Renderer::Glow,
+        ..Default::default()
+    }
+}
+
 fn main() -> std::process::ExitCode {
-    // First, so every start-up warning is recorded (`logging`).
-    let logger = logging::install();
-    vectorcraft_ui_egui::i18n::detect_system_lang_in_background();
-    // Before the first font scan (the app's start): the fonts font services load (#579).
-    vectorcraft_embed::desktop::install_platform_fonts();
+    // Validate roots before logging, font scans, preferences or the window: a missing value
+    // must not clear an environment root and start the control channel without confinement.
     let mut control_port: Option<u16> = std::env::var("VECTORCRAFT_CONTROL_PORT").ok().and_then(|p| p.parse().ok());
+    let root_env = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
+    let mut roots_args =
+        automation_args::AutomationArgs::new(root_env("VECTORCRAFT_AUTOMATION_READ_ROOT"), root_env("VECTORCRAFT_AUTOMATION_WRITE_ROOT"));
     let mut files = Vec::new();
     let mut in_window_menus = std::env::var_os("VECTORCRAFT_IN_WINDOW_MENUS").is_some_and(|v| !v.is_empty() && v != "0");
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
+        match roots_args.consume(&a, &mut args) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!("vectorcraft: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
         match a.as_str() {
             "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
             "--in-window-menus" => in_window_menus = true,
@@ -163,6 +233,14 @@ fn main() -> std::process::ExitCode {
             _ => files.push(a),
         }
     }
+    let automation_args::AutomationArgs { read_root, write_root, .. } = roots_args;
+    // Before desktop services, so every start-up warning is recorded (`logging`).
+    let logger = logging::install();
+    vectorcraft_ui_egui::i18n::detect_system_lang_in_background();
+    // Before the first font scan (the app's start): the fonts font services load (#579).
+    vectorcraft_embed::desktop::install_platform_fonts();
+    // VectorCraft's own Fonts folder, which text.addFontFiles copies fonts into.
+    vectorcraft_embed::prefs::install_fonts();
     // The log file lives in the settings directory, next to the preferences; opened after the
     // arguments, so `--version` leaves no file behind. Records logged until now are written to it
     // first. Runs without preferences (agents' test runs) log to standard error only, so they
@@ -177,6 +255,23 @@ fn main() -> std::process::ExitCode {
             None => logger.no_file(),
         }
     }
+    // The roots confine the control channel: a bad one keeps the app from starting rather than
+    // leaving agents unconfined. Without a control port there is nothing to confine.
+    let roots = if control_port.is_none() {
+        if read_root.is_some() || write_root.is_some() {
+            log::warn!("--automation-read-root and --automation-write-root confine the control channel: ignored without --control");
+        }
+        None
+    } else {
+        match AutomationRoots::new(read_root.as_deref(), write_root.as_deref()) {
+            Ok(roots) => roots,
+            Err(e) => {
+                log::error!("{e}");
+                eprintln!("vectorcraft: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+    };
     let saved = read_prefs();
     let saved_window = saved.as_ref().and_then(|ui| ui.window);
     #[cfg(feature = "wgpu")]
@@ -190,8 +285,13 @@ fn main() -> std::process::ExitCode {
     // every black-window report.
     #[cfg(feature = "wgpu")]
     let displays = gpu::preferred_displays(gpu_pref, power_env);
+    // Under Wayland, the GPU the compositor draws with comes even before those (src/compositor_gpu.rs).
     #[cfg(feature = "wgpu")]
-    if gpu::automatic(gpu_pref, power_env) {
+    let compositor = gpu::preferred_compositor(gpu_pref, power_env);
+    #[cfg(feature = "wgpu")]
+    let chosen_gpu = !gpu::automatic(gpu_pref, power_env);
+    #[cfg(feature = "wgpu")]
+    if !chosen_gpu {
         let listed: Vec<String> = displays.iter().map(ToString::to_string).collect();
         log::info!("display GPUs (PCI vendor:device): {}", if listed.is_empty() { "unknown".to_string() } else { listed.join(", ") });
     } else {
@@ -199,21 +299,26 @@ fn main() -> std::process::ExitCode {
     }
     #[cfg(feature = "wgpu")]
     let startup = std::sync::Arc::new(gpu::Startup::default());
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("VectorCraft")
-            .with_inner_size(window::DEFAULT_SIZE)
-            .with_min_inner_size(window::MIN_SIZE)
-            .with_drag_and_drop(true)
-            .with_decorations(!CUSTOM_TITLEBAR)
-            .with_fullsize_content_view(true)
-            .with_titlebar_shown(false)
-            .with_title_shown(false)
-            .with_icon(app_icon())
-            .with_app_id("ai.storyteller.vectorcraft"),
-        #[cfg(feature = "windows7")]
-        renderer: eframe::Renderer::Glow,
-        ..Default::default()
+    let custom_titlebar = custom_titlebar(saved.as_ref());
+    let options = native_options(custom_titlebar);
+    // winit picks Wayland whenever `WAYLAND_DISPLAY` is set; Preferences › Performance › Linux
+    // Display Server › X11 opens the window through XWayland instead, where file drops work (#1151).
+    #[cfg(target_os = "linux")]
+    let options = {
+        let mut options = options;
+        let pref = saved.as_ref().and_then(|ui| ui.engine_prefs.get("linuxDisplayServer")).and_then(serde_json::Value::as_str);
+        if xwayland::wanted(pref, |name| std::env::var_os(name)) {
+            if xwayland::x11_libraries_found() {
+                log::info!("opening the window through XWayland (Preferences › Performance › Linux Display Server)");
+                use winit::platform::x11::EventLoopBuilderExtX11 as _;
+                options.event_loop_builder = Some(Box::new(|builder| {
+                    builder.with_x11();
+                }));
+            } else {
+                log::warn!("Linux Display Server is X11, but the X11 libraries aren't all installed: opening the window on Wayland");
+            }
+        }
+        options
     };
     #[cfg(feature = "wgpu")]
     let options = {
@@ -223,17 +328,25 @@ fn main() -> std::process::ExitCode {
         options.wgpu_options.surface = eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY;
         // Only adapters that can show the window, in the order `gpu` gives (#306, #502).
         if let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup {
-            create.native_adapter_selector = Some(gpu::selector(power, displays, startup.clone()));
+            create.native_adapter_selector = Some(gpu::selector(power, displays, compositor, startup.clone()));
             // Nothing draws or dispatches indirectly, so wgpu's check of indirect arguments only
             // costs a compute shader at start-up, one some drivers can't compile (OCLP-patched
             // Metal on an Iris Pro, #651). `WGPU_VALIDATION_INDIRECT_CALL=1` turns it back on.
             create.instance_descriptor.flags =
                 (eframe::wgpu::InstanceFlags::from_build_config() - eframe::wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL).with_env();
+            create.instance_descriptor.backends = gpu::backends(create.instance_descriptor.backends, std::env::var_os("WGPU_BACKEND").is_some());
+            // DX12 shaders compile with FXC, part of Windows: wgpu's default loads whichever
+            // dxcompiler.dll the search path finds, and one without its dxil.dll fails every shader,
+            // losing the device before the first frame (#1194). `WGPU_DX12_COMPILER` picks another.
+            create.instance_descriptor.backend_options.dx12.shader_compiler =
+                eframe::wgpu::Dx12Compiler::from_env().unwrap_or(eframe::wgpu::Dx12Compiler::Fxc);
         }
         options
     };
     #[cfg(feature = "wgpu")]
     gpu::watch_panics();
+    #[cfg(feature = "wgpu")]
+    gpu::watch_first_frame(startup.clone());
     // Files opened from Finder and the Dock arrive as events, not arguments.
     #[cfg(target_os = "macos")]
     open_documents::install();
@@ -245,7 +358,7 @@ fn main() -> std::process::ExitCode {
             "VectorCraft",
             options,
             Box::new(move |cc| {
-                let mut app = VectorcraftApp::new(Session::new(), services(cc.winit_window().cloned()));
+                let mut app = VectorcraftApp::new(Session::new(), services(cc.winit_window().cloned(), cc.egui_ctx.clone()));
                 load_prefs(&mut app, saved);
                 // Fit the window to its monitor, or put it back where it was (still hidden).
                 if let Some(w) = cc.winit_window() {
@@ -262,7 +375,15 @@ fn main() -> std::process::ExitCode {
                     log::info!("rendering with {summary} (power preference {power:?})");
                     created.created(&cc.egui_ctx);
                     if !gpu::skipped().is_empty() {
-                        app.status(format!("The graphics processor tried first couldn't show the window, so VectorCraft started again on {summary}"));
+                        // A processor chosen in Settings can be the one that can't show the window.
+                        let hint = if chosen_gpu {
+                            " (Settings › Performance › Graphics Processor › Automatic uses the one that drives your display)"
+                        } else {
+                            ""
+                        };
+                        app.status(format!(
+                            "The graphics processor tried first couldn't show the window, so VectorCraft started again on {summary}{hint}"
+                        ));
                     }
                     app.graphics_adapter = Some(summary);
                     let (loss, ctx) = (graphics_loss.clone(), cc.egui_ctx.clone());
@@ -272,11 +393,16 @@ fn main() -> std::process::ExitCode {
                 {
                     app.graphics_adapter = Some("OpenGL (Windows 7 compatibility)".into());
                 }
-                app.integrated_titlebar = cfg!(target_os = "macos");
-                app.custom_titlebar = CUSTOM_TITLEBAR;
+                app.custom_titlebar = custom_titlebar;
                 if let Some(port) = control_port {
                     let rx = control_server::start(port, cc.egui_ctx.clone());
-                    app = app.with_control(rx);
+                    app = app.with_control(rx).with_automation_roots(roots.clone());
+                    if let Some(roots) = &roots {
+                        // Everywhere the app doesn't say whose work it is (worker threads), the
+                        // roots hold: unconfined is only what the person at the keyboard does.
+                        file_access::confine_process(roots.clone());
+                        log::info!("control channel confined to the automation roots: read {:?}, write {:?}", roots.read_root(), roots.write_root());
+                    }
                 }
                 #[cfg(target_os = "macos")]
                 {
@@ -288,7 +414,10 @@ fn main() -> std::process::ExitCode {
                 }
                 #[cfg(not(target_os = "macos"))]
                 let _ = in_window_menus;
-                open_files(&mut app, files);
+                file_access::unconfined(|| open_files(&mut app, files));
+                // The first frame is due from now (`gpu::watch_first_frame`).
+                #[cfg(feature = "wgpu")]
+                created.ready();
                 Ok(Box::new(App { app, graphics_loss, graphics_lost: false, frames: 0 }))
             }),
         )
@@ -310,6 +439,25 @@ fn main() -> std::process::ExitCode {
 mod tests {
     use vectorcraft_engine::cmd::fileio;
 
+    fn ui_state_with_prefs(engine_prefs: serde_json::Value) -> vectorcraft_ui_egui::UiState {
+        vectorcraft_ui_egui::UiState { engine_prefs, ..Default::default() }
+    }
+
+    #[test]
+    fn the_system_title_bar_preference_keeps_the_window_decorations() {
+        // Preferences › User Interface › System Title Bar gives the window back its system
+        // decorations on Windows and Linux; macOS always has them.
+        assert_eq!(super::custom_titlebar(None), super::CUSTOM_TITLEBAR, "no preferences: the default");
+        let off = ui_state_with_prefs(serde_json::json!({"systemTitleBar": false}));
+        assert_eq!(super::custom_titlebar(Some(&off)), super::CUSTOM_TITLEBAR);
+        let on = ui_state_with_prefs(serde_json::json!({"systemTitleBar": true}));
+        assert!(!super::custom_titlebar(Some(&on)));
+        assert_eq!(super::native_options(false).viewport.decorations, Some(true));
+        if super::CUSTOM_TITLEBAR {
+            assert_eq!(super::native_options(true).viewport.decorations, Some(false));
+        }
+    }
+
     /// The file extensions the macOS bundle declares: its document types and its own exported type.
     fn plist_extensions(plist: &str) -> Vec<&str> {
         ["<key>CFBundleTypeExtensions</key>", "<key>public.filename-extension</key>"]
@@ -321,13 +469,14 @@ mod tests {
             .collect()
     }
 
-    /// Finder offers the app for every file File › Open reads (#295, #354), takes over no other
-    /// app's files, and hands them to the app rather than to AppKit's document machinery.
+    /// Finder offers the app for every file File › Open reads (#295, #354) but Photoshop documents
+    /// (`UNASSOCIATED_EXTS`), takes over no other app's files, and hands them to the app rather than
+    /// to AppKit's document machinery.
     #[test]
     fn the_macos_bundle_opens_every_readable_format() {
         let plist = include_str!("../../../packaging/macos/Info.plist.in");
         let declared = plist_extensions(plist);
-        for e in fileio::OPEN_EXTS {
+        for e in fileio::OPEN_EXTS.iter().filter(|e| !fileio::UNASSOCIATED_EXTS.contains(e)) {
             assert!(declared.contains(e), "Info.plist.in doesn't declare .{e}");
         }
         for e in &declared {
