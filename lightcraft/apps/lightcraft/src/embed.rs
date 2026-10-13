@@ -601,7 +601,11 @@ fn photo_file(session: &mut lightcraft_engine::Session, id: PhotoId, accept: &[&
             Err(e) => log::warn!("sending photo {}: copying {path}: {e}; rendering it instead", id.0),
         }
     }
-    let (ext, format) = accept.iter().find_map(|a| ExportFormat::parse(a).filter(|f| f.is_rendered()).map(|f| (a.to_ascii_lowercase(), f)))?;
+    // TIFF when the target takes it (what Edit in External Editor hands over), else the first
+    // format LightCraft can render: since upstream's PSD writer, PhotoCraft's `psd` would win.
+    let rendered = |a: &str| ExportFormat::parse(a).filter(|f| f.is_rendered()).map(|f| (a.to_ascii_lowercase(), f));
+    let tif = accept.iter().filter(|a| same_extension(a, "tif")).find_map(|a| rendered(a));
+    let (ext, format) = tif.or_else(|| accept.iter().find_map(|a| rendered(a)))?;
     let opts = ExportOptions { format, quality: 95, ..Default::default() };
     let name = opts.file_name_for(p, 1);
     let stem = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem);
