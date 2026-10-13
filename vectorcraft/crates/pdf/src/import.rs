@@ -167,6 +167,10 @@ pub fn import_with_report(bytes: &[u8], opts: &ImportOptions) -> Result<ImportRe
             let msg = match w {
                 InterpreterWarning::UnsupportedFont => "a font could not be read; its text was skipped",
                 InterpreterWarning::ImageDecodeFailure => "an image could not be decoded and was skipped",
+                // Septet builds hayro with PdfCraft's patches (pdfcraft/vendor), which add a warning
+                // for a page whose content ran past its safety budget; crates.io's hayro has none.
+                #[allow(unreachable_patterns)]
+                _ => "a page's content was too large and was cut short",
             };
             if let Ok(mut v) = sink2.lock()
                 && !v.iter().any(|x| x == msg)

@@ -2,10 +2,11 @@
 //!
 //! [`Embedded`] builds the app the way `main.rs` does for a plain launch with no arguments, minus
 //! everything that belongs to the process or the window: no logger or panic hook, no GPU
-//! selection or OpenGL fallback (nor the software-renderer notice), no update checks, no Apple
-//! events, no UI control channel, no portable mode (`pdfcraft_ui_egui::portable`: the host's data
-//! root decides). The host owns the window, its chrome, the fonts and the UI zoom
-//! (`pdfcraft_ui_egui::hosted`).
+//! selection (nor the compositor's GPU) or OpenGL fallback (nor the software-renderer notice), no
+//! update checks, no Apple events, no single-instance hand-off (Windows), no UI control channel,
+//! no portable mode (`pdfcraft_ui_egui::portable`: the host's data root decides). The host owns
+//! the window, its chrome, the fonts, the UI zoom (Preferences ▸ Interface size and the system's
+//! text scale don't apply) and egui's wheel speed (`pdfcraft_ui_egui::hosted`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -47,7 +48,8 @@ pub struct Embedded {
 impl Embedded {
     /// Before [`Self::new`]: keep everything PdfCraft stores per user under `root` (created if
     /// missing) instead of the user's data folders: crash recovery in `<root>/Recovery`, the
-    /// digital IDs it creates in `<root>/Digital IDs`. `None`: the user's folders (the default).
+    /// digital IDs it creates in `<root>/Digital IDs`, the files Copy Image in Original Format
+    /// puts on the clipboard in `<root>/Clipboard`. `None`: the user's folders (the default).
     /// Its settings are in the host's eframe storage either way.
     pub fn set_data_root(root: Option<PathBuf>) {
         pdfcraft_ui_egui::hosted::set_data_root(root);
@@ -55,16 +57,29 @@ impl Embedded {
 
     /// Build the app as `main.rs` does without arguments: settings from `storage` (the host's),
     /// autosave and crash recovery in PdfCraft's own recovery folder, OS key-store identities on
-    /// macOS and Windows, last session's files when the preference asks for them. Fonts are the host's: install [`Self::font_definitions`] among them.
+    /// macOS and Windows, the system's printers and (Windows) animation setting, last session's
+    /// files when the preference asks for them. Fonts are the host's: install [`Self::font_definitions`] among them.
     pub fn new(_ctx: &egui::Context, _render_state: Option<&eframe::egui_wgpu::RenderState>, storage: Option<&dyn eframe::Storage>) -> Self {
         pdfcraft_ui_egui::hosted::set_hosted(true);
         settings::migrate_legacy_folders();
         let mut app = PdfCraftApp::new();
+        // As main.rs: the region's unit, the desktop's dark style (Linux) and the system's
+        // reopen-windows choice (macOS) start the preferences; saved choices replace them.
+        app.units = pdfcraft_ui_egui::units::Unit::system();
+        #[cfg(target_os = "linux")]
+        app.enable_desktop_theme();
+        app.reopen_last_session = crate::reopen::system_default();
         settings::restore(&mut app, storage);
         // The host draws the window's chrome; there are no traffic lights over our tab strip.
         app.integrated_titlebar = false;
         // No update checks: without `update_source`, Help ▸ Check for updates opens the releases page.
         app.os_key_store_ids = cfg!(any(target_os = "macos", target_os = "windows"));
+        // Windows' Animation effects setting, which Preferences ▸ Animation effects follows.
+        #[cfg(target_os = "windows")]
+        {
+            app.motion.source = Some(crate::motion::source());
+        }
+        app.printer_source = Some(pdfcraft_ui_egui::system_printers());
         // Autosave unsaved changes; offer to recover documents a crashed session left behind.
         if let Some(dir) = RecoveryStore::default_dir() {
             app.enable_recovery(RecoveryStore::new(dir));
@@ -79,8 +94,8 @@ impl Embedded {
     /// JetBrains Mono first, egui's defaults, the CJK and Arabic faces, the installed
     /// "system-fallback" face last, and the "medium" and "semibold" families.
     pub fn font_definitions() -> egui::FontDefinitions {
-        let hans = i18n::Lang::from_pref(i18n::AUTO).code() == "zh-hans";
-        pdfcraft_ui_egui::theme::installed_font_definitions(hans)
+        let cjk = pdfcraft_ui_egui::theme::CjkPreference::for_language(i18n::Lang::from_pref(i18n::AUTO).code());
+        pdfcraft_ui_egui::theme::installed_font_definitions(cjk)
     }
 
     /// The active document's name (or the title it asks to be shown by); `None` on Home.
@@ -110,7 +125,8 @@ impl Embedded {
     }
 
     /// The host tab was shown or hidden: hiding stops middle-button scrolling and autosaves
-    /// unsaved changes; showing redraws (PdfCraft doesn't reload files on focus).
+    /// unsaved changes; showing redraws, which also reloads the documents whose files changed
+    /// on disk meanwhile (PdfCraft watches its open files all along, not on focus).
     pub fn set_visible(&mut self, visible: bool) {
         self.app.set_visible(visible);
     }
@@ -243,7 +259,7 @@ impl Embedded {
         let bytes = doc.bytes.clone();
         let job: AgentRender = Box::new(move || {
             let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                PageRenderer::new(bytes, config).render(RenderRequest { page, kind: RequestKind::Pixels, tile: None, scale, tag: 0 })
+                PageRenderer::new(bytes, config).render(RenderRequest { page, kind: RequestKind::Pixels, tile: None, scale, tag: 0, preview: false })
             }))
             .map_err(|_| "internal error while rendering".to_string())?;
             if let Some(e) = out.error {

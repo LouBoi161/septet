@@ -18,5 +18,5 @@ egui = { workspace = true }
 # desktop app's eframe in a workspace build and change `eframe::App::on_exit` there (Septet).
 eframe = { workspace = true, features = ["default_fonts", "glow", "persistence", "accesskit"] }
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "HtmlElement", "Location", "Url", "UrlSearchParams", "Response"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "HtmlElement", "Location", "Url", "UrlSearchParams", "Response", "Event", "MessageEvent", "EventTarget"] }
 js-sys = "0.3"
