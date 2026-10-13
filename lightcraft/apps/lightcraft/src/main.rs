@@ -26,11 +26,12 @@ mod control_server;
 mod logging;
 #[cfg(target_os = "macos")]
 mod native_menu;
+mod window_gpu;
 
 use lightcraft_embed::alloc_release;
 use lightcraft_embed::prefs::{PrefsWriter, config_dir, load_prefs, prefs_path};
 use lightcraft_embed::services::services;
-use lightcraft_embed::session::{configure_segmenter, open_session};
+use lightcraft_embed::session::open_session;
 use lightcraft_ui_egui::LightcraftApp;
 
 /// Reverse-DNS app id: Wayland app id, `.desktop` file and hicolor icon name.
@@ -58,7 +59,7 @@ impl eframe::App for App {
             // Quit from the menu bar: save exactly what closing the window saves (settings and
             // library, after the unsaved-changes check; otherwise its prompt shows), then end the
             // process instead of closing the viewport while AppKit is terminating (PR #444).
-            eframe::App::on_exit(self);
+            self.quit();
             std::process::exit(0);
         }
         self.0.logic(ctx);
@@ -70,27 +71,51 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.0.ui(ui);
     }
+    // eframe's `glow` feature (`gl-fallback`, for the standalone binary only) adds the GL context.
+    #[cfg(feature = "gl-fallback")]
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.quit();
+    }
+    #[cfg(not(feature = "gl-fallback"))]
     fn on_exit(&mut self) {
+        self.quit();
+    }
+}
+
+impl App {
+    /// What quitting saves: the settings and the library, then waits for running renders.
+    fn quit(&mut self) {
         if let Err(e) = self.1.save(&self.0) {
             log::error!("{e}");
         }
         if let Err(e) = self.0.session.close_library() {
             log::error!("saving the library failed: {e}");
         }
+        // last, with everything saved: no render may be inside the GPU driver when the process ends
+        if !self.0.shutdown(EXIT_WAIT) {
+            log::warn!("quit: background work was still running after {EXIT_WAIT:?}");
+        }
     }
 }
+
+/// How long quitting waits for renders that are running (issue #620). A GPU render takes well under
+/// a second; anything slower gives way to quitting.
+const EXIT_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// The window's renderer (egui-wgpu): eframe's defaults, with LightCraft's backend choice — DX12
 /// alone on Windows unless `LIGHTCRAFT_GPU_BACKEND` / `WGPU_BACKEND` say otherwise (issue #136:
 /// with Vulkan in the set, wgpu loads the Vulkan driver even when it then picks DX12) — and DX12
 /// shaders compiled with FXC, never a stray `dxcompiler.dll` (issue #471).
+/// The fallback chain on top of it (DX12 → Vulkan → GL → glow) is in `window_gpu`.
+#[cfg(test)]
 fn window_wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
-    let mut c = eframe::egui_wgpu::WgpuConfiguration::default();
-    if let eframe::egui_wgpu::WgpuSetup::CreateNew(n) = &mut c.wgpu_setup {
-        n.instance_descriptor.backends = lightcraft_engine::gpu::backend::window_backends();
-        n.instance_descriptor.backend_options = lightcraft_engine::gpu::backend::backend_options();
-    }
-    c
+    window_gpu::base_options()
+}
+
+/// Where the window's renderer files live (`window_gpu::Files`): nothing for `--memory` sessions
+/// and `LIGHTCRAFT_NO_PREFS`.
+fn window_files(in_memory: bool) -> window_gpu::Files {
+    window_gpu::Files::new(config_dir().filter(|_| !in_memory && std::env::var_os("LIGHTCRAFT_NO_PREFS").is_none()))
 }
 
 /// Written while the GPU compute device is created, removed once that returned
@@ -146,6 +171,7 @@ OPTIONS:
   --version, --help
 
 ENVIRONMENT:
+  LIGHTCRAFT_CONFIG_DIR=DIR   use this settings folder instead of the platform default (empty = no settings folder)
   LIGHTCRAFT_GPU_BACKEND=dx12|vulkan|metal|auto|off   graphics backend (default: DX12 on Windows, Metal on macOS,
                    Vulkan on Linux; off = render on the CPU); else WGPU_BACKEND. LIGHTCRAFT_GPU=0: CPU rendering.
   LIGHTCRAFT_SAM3_DIR=DIR   the SAM 3 model for Object / Describe masks (default: <settings folder>/models/sam3;
@@ -201,10 +227,21 @@ fn control_port_from(what: &str, value: Option<String>) -> Option<u16> {
     port
 }
 
+/// An isolated profile keeps the emergency crash log with its other app data. With no
+/// override (or an empty override), retain the historical system-temp location.
+fn panic_log_path_with(env: impl Fn(&str) -> Option<std::ffi::OsString>, temp: std::path::PathBuf) -> std::path::PathBuf {
+    env("LIGHTCRAFT_CONFIG_DIR").filter(|value| !value.is_empty()).map(std::path::PathBuf::from).unwrap_or(temp).join("lightcraft-panics.log")
+}
+
 fn main() -> eframe::Result {
     // First, so every start-up record is kept for the log file (`logging`).
     let logger = logging::install();
-    lightcraft_engine::guard::install_hook(lightcraft_engine::paths::data_root().unwrap_or_else(std::env::temp_dir).join("lightcraft-panics.log"));
+    // under the host's data root when one is set, else upstream's choice (`LIGHTCRAFT_CONFIG_DIR`, else temp)
+    lightcraft_engine::guard::install_hook(
+        lightcraft_engine::paths::data_root()
+            .map(|root| root.join("lightcraft-panics.log"))
+            .unwrap_or_else(|| panic_log_path_with(|name| std::env::var_os(name), std::env::temp_dir())),
+    );
     if let Some(logger) = logger {
         logging::record_panics(logger);
     }
@@ -268,7 +305,14 @@ fn main() -> eframe::Result {
     let gpu_crash = gpu_crash_check(in_memory);
     let gpu_on = prefs.as_ref().is_none_or(|u| u.settings.gpu) && gpu_crash.is_none();
     lightcraft_engine::gpu::set_enabled(gpu_on);
+    // the window's renderer: probed (Windows) and with a fallback chain, so a driver that can't
+    // build egui's pipeline never kills the start-up
+    let win_files = std::sync::Arc::new(window_files(in_memory));
+    let window_gpu::Chosen { renderer, wgpu_options, which: window_renderer, notice: window_notice } = window_gpu::choose(&win_files);
+    win_files.arm(window_renderer);
+    let win_files_app = win_files.clone();
     let options = eframe::NativeOptions {
+        renderer,
         viewport: egui::ViewportBuilder::default()
             .with_title("LightCraft")
             .with_inner_size([1600.0, 1000.0])
@@ -280,62 +324,92 @@ fn main() -> eframe::Result {
             .with_icon(app_icon())
             // Wayland matches the window to packaging/linux/ai.storyteller.lightcraft.desktop by this id
             .with_app_id(APP_ID),
-        wgpu_options: window_wgpu_options(),
+        wgpu_options,
         ..Default::default()
     };
     // the app's copy: `log_file` is still named in the message of a start that fails
     let app_log_file = log_file.clone();
-    let started = eframe::run_native(
-        "LightCraft",
-        options,
-        Box::new(move |cc| {
-            let (mut session, problem) = open_session(in_memory, library_dir, seed_demo && files.is_empty());
-            configure_segmenter(&mut session);
-            let mut app = LightcraftApp::new(session, services(cc.egui_ctx.clone(), app_log_file.as_deref()));
-            if let Some(ui) = prefs {
-                app.ui = ui;
-            }
-            lightcraft_ui_egui::i18n::set_language(app.ui.language);
-            app.integrated_titlebar = cfg!(target_os = "macos");
-            app.notices.extend(prefs_warning);
-            app.notices.extend(launch_notices);
-            // what's on disk now: only changes are written
-            let writer = PrefsWriter::new(&app, keep_prefs_file, if in_memory { None } else { prefs_path() });
-            // after the snapshot above, so the writer saves the switched-off preference
-            if let Some(notice) = gpu_crash {
-                app.ui.settings.gpu = false;
-                app.notices.push(notice);
-            }
-            if let Some(port) = control_port {
-                let rx = control_server::start(port, cc.egui_ctx.clone());
-                app = app.with_control(rx);
-            }
-            if let Some(mut p) = problem {
-                // imported once the user has chosen where (into the library, or the temporary session)
-                p.pending_import = files;
-                app.library_problem = Some(p);
-            } else if !files.is_empty() {
-                // listed and read on the import worker once the window shows (issue #374: never
-                // here, before the first frame, where a large folder kept the window from
-                // appearing)
-                if let Err(e) = lightcraft_ui_egui::import::start_paths(&mut app, files) {
-                    log::warn!("import at launch: {e}");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut options = options;
+    // winit has no file drag-and-drop on Wayland (only on X11), so dropping files from the file
+    // manager showed a "no" cursor. Run through XWayland when it's there; LIGHTCRAFT_WAYLAND=1
+    // keeps the native Wayland backend.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if std::env::var_os("DISPLAY").is_some() && std::env::var_os("LIGHTCRAFT_WAYLAND").is_none() {
+        options.event_loop_builder = Some(Box::new(|b| {
+            use winit::platform::x11::EventLoopBuilderExtX11;
+            b.with_x11();
+        }));
+    }
+    let started = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        eframe::run_native(
+            "LightCraft",
+            options,
+            Box::new(move |cc| {
+                // the window's renderer is up (eframe calls this after creating it)
+                win_files_app.started(window_renderer);
+                lightcraft_embed::services::set_dialog_parent(cc);
+                let (mut session, problem) = open_session(in_memory, library_dir, seed_demo && files.is_empty());
+                // AI masks: the SAM 3 checkpoint (facebook/sam3) in <config>/models/sam3, or LIGHTCRAFT_SAM3_DIR
+                // (never required: without it, AI masks offer to download it; see docs/ai-masks.md)
+                // and the user's own download locations, one base URL per line (LIGHTCRAFT_SAM3_MIRRORS too)
+                session = session.with_default_sam3_model();
+                let mut app = LightcraftApp::new(session, services(cc.egui_ctx.clone(), app_log_file.as_deref()));
+                if let Some(ui) = prefs {
+                    app.ui = ui;
                 }
-                app.ui.view = lightcraft_ui_egui::state::ViewMode::PhotoGrid;
-            }
-            // native menu bar generated from the command registry (macOS; elsewhere the menus are
-            // drawn in the window's top bar). LIGHTCRAFT_NO_NATIVE_MENU=1 keeps the in-window menus.
-            #[cfg(target_os = "macos")]
-            let menu = (std::env::var_os("LIGHTCRAFT_NO_NATIVE_MENU").is_none()).then(|| native_menu::NativeMenu::install(&mut app, &cc.egui_ctx));
-            Ok(Box::new(App(
-                app,
-                writer,
+                lightcraft_ui_egui::i18n::set_language(app.ui.language);
+                app.integrated_titlebar = cfg!(target_os = "macos");
+                app.notices.extend(prefs_warning);
+                app.notices.extend(launch_notices);
+                app.notices.extend(window_notice);
+                // what's on disk now: only changes are written
+                let writer = PrefsWriter::new(&app, keep_prefs_file, if in_memory { None } else { prefs_path() });
+                // after the snapshot above, so the writer saves the switched-off preference
+                if let Some(notice) = gpu_crash {
+                    app.ui.settings.gpu = false;
+                    app.notices.push(notice);
+                }
+                if let Some(port) = control_port {
+                    let rx = control_server::start(port, cc.egui_ctx.clone());
+                    app = app.with_control(rx);
+                }
+                if let Some(mut p) = problem {
+                    // imported once the user has chosen where (into the library, or the temporary session)
+                    p.pending_import = files;
+                    app.library_problem = Some(p);
+                } else if !files.is_empty() {
+                    // listed and read on the import worker once the window shows (issue #374: never
+                    // here, before the first frame, where a large folder kept the window from
+                    // appearing)
+                    if let Err(e) = lightcraft_ui_egui::import::start_paths(&mut app, files) {
+                        log::warn!("import at launch: {e}");
+                    }
+                    app.ui.view = lightcraft_ui_egui::state::ViewMode::PhotoGrid;
+                }
+                // native menu bar generated from the command registry (macOS; elsewhere the menus are
+                // drawn in the window's top bar). LIGHTCRAFT_NO_NATIVE_MENU=1 keeps the in-window menus.
                 #[cfg(target_os = "macos")]
-                menu,
-            )))
-        }),
-    );
+                let menu =
+                    (std::env::var_os("LIGHTCRAFT_NO_NATIVE_MENU").is_none()).then(|| native_menu::NativeMenu::install(&mut app, &cc.egui_ctx));
+                Ok(Box::new(App(
+                    app,
+                    writer,
+                    #[cfg(target_os = "macos")]
+                    menu,
+                )))
+            }),
+        )
+    }));
+    // a panic that still escaped the renderer's start (the probe and error handler should
+    // prevent it): an error like any other failed start
+    let started = started.unwrap_or_else(|_| Err(eframe::Error::AppCreation("the window's renderer panicked while starting".into())));
     if let Err(e) = &started {
+        // the renderer never came up: start again, which tries the next one in the chain
+        if window_gpu::relaunch_after_failure(&win_files) {
+            log::error!("LightCraft could not open its window with {}: {e}; trying the next renderer", window_renderer.name());
+            return Ok(());
+        }
         startup_failed(&e.to_string(), log_file.as_deref());
     }
     started
@@ -456,6 +530,16 @@ mod tests {
         }
     }
 
+    /// Issue #250: the window's device is created without wgpu's indirect-call validation pipeline,
+    /// which Intel Macs' Metal compiler fails to build (the device was lost, the window never opened).
+    #[test]
+    fn window_has_no_indirect_call_validation_pipeline() {
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(n) = window_wgpu_options().wgpu_setup else { panic!("expected CreateNew") };
+        if std::env::var_os("WGPU_VALIDATION_INDIRECT_CALL").is_none() {
+            assert!(!n.instance_descriptor.flags.contains(eframe::wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL));
+        }
+    }
+
 
 
     #[test]
@@ -468,4 +552,17 @@ mod tests {
         assert_eq!(control_port_from("LIGHTCRAFT_CONTROL_PORT", None), None);
     }
 
+}
+
+#[cfg(test)]
+mod config_path_tests {
+    use super::*;
+
+    #[test]
+    fn config_override_keeps_panic_log_in_isolated_profile() {
+        let temp = std::path::PathBuf::from("temp");
+        assert_eq!(panic_log_path_with(|_| Some("isolated".into()), temp.clone()), std::path::PathBuf::from("isolated/lightcraft-panics.log"));
+        assert_eq!(panic_log_path_with(|_| None, temp.clone()), temp.join("lightcraft-panics.log"));
+        assert_eq!(panic_log_path_with(|_| Some("".into()), temp.clone()), temp.join("lightcraft-panics.log"));
+    }
 }

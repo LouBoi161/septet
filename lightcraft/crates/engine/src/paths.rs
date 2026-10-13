@@ -5,7 +5,8 @@
 //! face and denoise models, the GPU init marker) is the root itself, and the default library is
 //! `<root>/Library` ([`crate::library::default_dir`]). Explicit overrides (`LIGHTCRAFT_LIBRARY`,
 //! `LIGHTCRAFT_CAMERA_PROFILES`, `LIGHTCRAFT_SAM3_DIR`, `LIGHTCRAFT_FACE_MODELS`,
-//! `LIGHTCRAFT_DENOISE_MODELS`) still win.
+//! `LIGHTCRAFT_DENOISE_MODELS`) still win; `LIGHTCRAFT_CONFIG_DIR` (the whole settings folder)
+//! does not: the data root replaces it.
 
 use std::path::PathBuf;
 use std::sync::{PoisonError, RwLock};

@@ -75,6 +75,14 @@ let
     "lightcraft"
     "lightcraft-cli"
   ];
+
+  # HEIC/HEIF decoding (opt-in upstream: HEVC patents are the distributor's call), as the release builds.
+  buildFeatures = [
+    "lightcraft/heif"
+    "lightcraft-cli/heif"
+    # the window's OpenGL fallback renderer (window_gpu), as the release builds
+    "lightcraft/gl-fallback"
+  ];
 in
 rustPlatform.buildRustPackage {
   pname = "lightcraft";

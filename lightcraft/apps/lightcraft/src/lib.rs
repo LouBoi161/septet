@@ -5,9 +5,13 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod alloc_release;
+mod appearance;
 mod dialog_filter;
+mod editors;
 mod embed;
 pub mod prefs;
+#[cfg(target_os = "macos")]
+mod screen_profile;
 pub mod services;
 pub mod session;
 
