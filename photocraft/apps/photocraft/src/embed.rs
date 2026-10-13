@@ -64,7 +64,15 @@ impl Embedded {
         let _ = storage;
         let open_externally = OpenExternally::default();
         let open_app = OpenApp::default();
-        // Read the displays' ICC profiles (macOS) and load the brush presets in the background.
+        // The system font scan can take seconds: run it off the UI thread, as main.rs does.
+        photocraft_ui_egui::type_tool::warm_fonts();
+        // Read the displays' ICC profiles (macOS, X11) and load the brush presets in the
+        // background.
+        #[cfg(target_os = "linux")]
+        let native_session = native_session();
+        #[cfg(target_os = "linux")]
+        let monitor = monitor_profile::detect_async_for_session(native_session);
+        #[cfg(not(target_os = "linux"))]
         let monitor = monitor_profile::detect_async();
         let presets = services::presets_dir().map(photocraft_engine::preset_store::open_dir_async);
         let mut services = services::native(None);
@@ -75,6 +83,9 @@ impl Embedded {
         #[cfg(target_os = "linux")]
         {
             services.is_wayland = display == Some(tablet::DisplayKind::Wayland);
+            // Why an empty File › Open answer came back (#3354); one probe per process.
+            static PROBE: std::sync::Once = std::sync::Once::new();
+            PROBE.call_once(crate::file_dialog_probe::start);
         }
         let mut app = PhotocraftApp::new(Session::new(), services);
         // The host draws the window chrome: no integrated title strip, caption buttons or edge
@@ -86,7 +97,14 @@ impl Embedded {
         // Displays and their profiles (#569), as main.rs: the first frames already use the right
         // profile when the reading is quick, a slower one is applied when it arrives.
         if let Some(rx) = monitor {
-            app.services.read_displays = Some(std::sync::Arc::new(monitor_profile::detect_async));
+            #[cfg(target_os = "linux")]
+            {
+                app.services.read_displays = Some(std::sync::Arc::new(move || monitor_profile::detect_async_for_session(native_session)));
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                app.services.read_displays = Some(std::sync::Arc::new(monitor_profile::detect_async));
+            }
             match rx.recv_timeout(std::time::Duration::from_secs(2)) {
                 Ok(r) => monitor_status::apply(&mut app, r),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => monitor_status::pending(&mut app, rx),
@@ -493,6 +511,17 @@ fn attach_gpu(app: &mut PhotocraftApp, render_state: Option<&eframe::egui_wgpu::
     if let Some(reason) = fallback {
         gpu_status::queue_fallback_notice(app, &reason);
     }
+}
+
+/// The desktop's own display server, for the display profiles (`monitor_profile`): a host that
+/// opened its window through Xwayland may have cleared `WAYLAND_DISPLAY` already (Septet does),
+/// and a Wayland desktop's output profiles must not be applied a second time.
+#[cfg(target_os = "linux")]
+fn native_session() -> crate::linux_libs::DisplaySession {
+    if std::env::var("XDG_SESSION_TYPE").is_ok_and(|t| t.eq_ignore_ascii_case("wayland")) {
+        return crate::linux_libs::DisplaySession::Wayland;
+    }
+    crate::linux_libs::session_from_env(|name| std::env::var(name).ok())
 }
 
 /// The windowing system the host's winit uses, from the environment (it picks Wayland when
