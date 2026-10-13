@@ -57,8 +57,9 @@ impl Embedded {
     /// the per-user one), the project Settings ▸
     /// General ▸ At Startup asks for (the demo project by default), the offer to recover unsaved
     /// changes a crashed session left, the GPU compositor on the host's wgpu device (unless
-    /// `FILMCRAFT_CPU_COMPOSITE` is set), cpal audio in and out and the native file dialogs.
-    /// FilmCraft keeps nothing in eframe's storage.
+    /// `FILMCRAFT_CPU_COMPOSITE` is set) and GPU exports, cpal audio in and out, the native file
+    /// dialogs and the OS hooks (links, clipboard media, system appearance). FilmCraft keeps nothing
+    /// in eframe's storage.
     pub fn new(ctx: &egui::Context, render_state: Option<&eframe::egui_wgpu::RenderState>, _storage: Option<&dyn eframe::Storage>) -> Self {
         filmcraft_ui_egui::hosted::set_hosted(true);
         // the OS hardware decoders are registered for the whole process
@@ -66,8 +67,15 @@ impl Embedded {
         HARDWARE_DECODERS.call_once(|| {
             desktop::register_hardware_decoders();
         });
+        // exports with GPU rendering Auto composite on the GPU, as in `filmcraft`; only when the
+        // host has a wgpu device (`filmcraft` registers it only when its window started on the
+        // default graphics mode)
+        if render_state.is_some() {
+            static GPU_EXPORT: Once = Once::new();
+            GPU_EXPORT.call_once(desktop::register_gpu_frame_renderer);
+        }
         let mut session = desktop::session(None);
-        desktop::open_at_startup(&mut session, &[], true, false);
+        desktop::open_at_startup(&mut session, None, Vec::new(), true, false);
         let mut app = FilmcraftApp::new(session);
         // the host draws the window chrome
         app.integrated_titlebar = false;
@@ -80,6 +88,7 @@ impl Embedded {
         app.audio = Some(Box::new(audio::CpalOut::new()));
         desktop::install_file_dialogs(&mut app);
         desktop::install_system_languages(&mut app);
+        desktop::install_os_hooks(&mut app);
         Self::with_app(ctx, app)
     }
 
@@ -115,7 +124,8 @@ impl Embedded {
 
     /// The fonts FilmCraft installs at startup (Inter, Inter Medium / SemiBold as the "medium" and
     /// "semibold" families, JetBrains Mono, the Japanese craft-fonts when built with them, then a
-    /// Chinese fallback: the Chinese craft-fonts, else one installed system face).
+    /// Chinese fallback: the Chinese craft-fonts, else one installed system face, then Arabic and
+    /// Hebrew fallbacks the same way).
     pub fn font_definitions() -> egui::FontDefinitions {
         filmcraft_ui_egui::theme::font_definitions()
     }
@@ -125,8 +135,8 @@ impl Embedded {
         Some(self.app.session.project.name.clone()).filter(|n| !n.trim().is_empty())
     }
 
-    /// The project has changes that are not saved. (FilmCraft itself doesn't ask on quit: they stay
-    /// in its crash-recovery journal and are offered at the next start.)
+    /// The project has changes that are not saved. (A close request then asks Save / Don't Save /
+    /// Cancel first, #266; Cancel vetoes it with `CancelClose`.)
     pub fn has_unsaved_changes(&self) -> bool {
         self.app.session.is_dirty()
     }
@@ -690,7 +700,6 @@ mod tests {
     use super::*;
     use egui::{Rect, pos2};
     use filmcraft_engine::Session;
-    use filmcraft_ui_egui::automation::Element;
     use filmcraft_ui_egui::panels::timeline::{Layout, Row};
 
     /// The demo project, without the data folder, audio devices or file dialogs of `new`.
@@ -734,7 +743,7 @@ mod tests {
     fn draw_timeline(e: &mut Embedded) {
         let seq = e.app.session.active_sequence().unwrap();
         let (v1, a1) = (seq.video_tracks[0].id, seq.audio_tracks[0].id);
-        let row = |track, kind, y: f32| Row { track, kind, index: 0, rect: Rect::from_min_max(pos2(200.0, y), pos2(1600.0, y + 100.0)) };
+        let row = |track, kind, y: f32| Row { track, kind, index: 0, rect: Rect::from_min_max(pos2(200.0, y), pos2(1600.0, y + 100.0)), lane: false };
         e.app.tl.layout = Some(Layout {
             content: Rect::from_min_max(pos2(200.0, 500.0), pos2(1600.0, 900.0)),
             ruler: Rect::from_min_max(pos2(200.0, 470.0), pos2(1600.0, 500.0)),
@@ -743,7 +752,7 @@ mod tests {
             scroll: 0.0,
             split_y: 600.0,
         });
-        e.app.auto.elements.push(Element { id: "panel.Timeline".into(), label: "Timeline".into(), rect: [0.0, 440.0, 1600.0, 460.0] });
+        e.app.auto.add("panel.Timeline", Rect::from_min_max(pos2(0.0, 440.0), pos2(1600.0, 900.0)), "Timeline");
     }
 
     fn clips_on_a1(e: &Embedded) -> Vec<(Tick, Tick)> {

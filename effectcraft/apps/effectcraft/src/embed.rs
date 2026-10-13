@@ -64,6 +64,9 @@ impl Embedded {
             app.offer_recovery(r);
         }
         desktop::install_hooks(&mut app);
+        // The commands' file dialogs open as sheets instead of nested modal loops (#511).
+        #[cfg(target_os = "macos")]
+        desktop::install_sheet_dialogs(&mut app, ctx);
         Embedded { app, ctx: ctx.clone(), requests: Vec::new(), outgoing: None }
     }
 

@@ -36,7 +36,7 @@ fn harness(options: &'static [(&'static str, &'static str)]) -> Harness<'static,
     pdfcraft_ui_egui::hosted::set_hosted(true);
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
         // The host installs the fonts, PdfCraft's among them.
-        cc.egui_ctx.set_fonts(pdfcraft_ui_egui::theme::installed_font_definitions(false));
+        cc.egui_ctx.set_fonts(pdfcraft_ui_egui::theme::installed_font_definitions(pdfcraft_ui_egui::theme::CjkPreference::Default));
         let mut app = PdfCraftApp::new();
         app.open_bytes("doc.pdf", None, fixture(4)).expect("fixture opens");
         for (k, v) in options {
@@ -181,7 +181,7 @@ fn thumbnails_in_the_pages_panel_drag_out() {
 fn a_host_build_leaves_out_the_community_links() {
     pdfcraft_ui_egui::hosted::set_hosted(true);
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|cc| {
-        cc.egui_ctx.set_fonts(pdfcraft_ui_egui::theme::installed_font_definitions(false));
+        cc.egui_ctx.set_fonts(pdfcraft_ui_egui::theme::installed_font_definitions(pdfcraft_ui_egui::theme::CjkPreference::Default));
         PdfCraftApp::new()
     });
     h.run_steps(4);

@@ -284,7 +284,15 @@ fn place_gun_click_drag_and_into_frame() {
     let f = s.execute("frame.create", &json!({"rect": [300, 300, 400, 400], "content": "graphic"})).unwrap()["id"].as_u64().unwrap();
     s.execute("place.load", &json!({"base64": b64})).unwrap();
     s.execute("place.drop", &json!({"frame": f})).unwrap();
-    assert!(matches!(s.doc().unwrap().doc.item(designcraft_doc::ItemId(f)).unwrap().content, designcraft_doc::Content::Graphic(_)));
+    let graphic_xf = |s: &Session| match &s.doc().unwrap().doc.item(designcraft_doc::ItemId(f)).unwrap().content {
+        designcraft_doc::Content::Graphic(g) => g.xf,
+        _ => panic!("not a graphic"),
+    };
+    let placed = graphic_xf(&s);
+    // Dragging the top edge down crops the top only: the image stays where it is.
+    s.execute("selection.set", &json!({"ids": [f]})).unwrap();
+    s.execute("transform.resize", &json!({"from": [300, 300, 400, 400], "to": [300, 340, 400, 400]})).unwrap();
+    assert_eq!(graphic_xf(&s), placed);
 }
 
 #[test]
@@ -370,6 +378,30 @@ fn step_and_repeat_grid() {
     let last = s.doc().unwrap().doc.spreads[0].items.last().unwrap().bounds();
     assert_eq!(last.x0, 36.0 + 3.0 * 40.0);
     assert_eq!(last.y0, 36.0 + 2.0 * 40.0);
+}
+
+/// rows × columns once overflowed: a panic in debug builds, and in release builds a product that
+/// wrapped to 0 passed the 1000-copy limit and started a grid of 2⁶⁴ copies.
+#[test]
+fn step_and_repeat_with_a_huge_grid_makes_no_grid() {
+    let mut s = session();
+    s.execute("frame.create", &json!({"rect": [36, 36, 66, 66], "content": "unassigned"})).unwrap();
+    let items = |s: &Session| s.doc().unwrap().doc.spreads[0].items.len();
+    let before = items(&s);
+    // Counts past the limit are an error, and nothing is copied.
+    assert!(s.execute("edit.stepAndRepeat", &json!({"rows": 4_294_967_296_u64, "columns": 4_294_967_296_u64})).is_err());
+    assert_eq!(items(&s), before);
+}
+
+/// The column count is the caller's and sizes a list every time the page's columns are laid out.
+#[test]
+fn new_document_caps_the_column_count() {
+    let mut s = Session::new();
+    s.execute("file.new", &json!({"columns": 4_000_000_000_u64})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.spreads[0].pages[0].columns.count, 216);
+    // Past u32 the count wrapped (2³² + 3 became 3).
+    s.execute("file.new", &json!({"columns": 4_294_967_299_u64})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.spreads[0].pages[0].columns.count, 216);
 }
 
 #[test]

@@ -1,9 +1,13 @@
 //! Whether PdfCraft runs as a tab inside a host window (Septet) instead of in its own window.
 //!
-//! A host owns the window: its chrome, the fonts (one merged set for every app it shows) and the
-//! UI zoom. While hosted, PdfCraft leaves those alone: it never calls `ctx.set_fonts` (the host
-//! installed [`crate::theme::installed_font_definitions`] among its own) and its tab strip
-//! doesn't move or maximize the window.
+//! A host owns the window: its chrome, the fonts (one merged set for every app it shows), the
+//! UI zoom and egui's input options. While hosted, PdfCraft leaves those alone: it never calls
+//! `ctx.set_fonts` with fonts of its own (the host installed
+//! [`crate::theme::installed_font_definitions`] among its own; the text editor only adds a
+//! document's fonts to the host's set), never sets the zoom factor (Preferences ▸ Interface size
+//! is hidden) or `line_scroll_speed` (the Scroll speed preference scales PdfCraft's own wheel
+//! input instead, [`crate::scroll_speed`]), and its tab strip doesn't move or maximize the
+//! window.
 //!
 //! In a host build PdfCraft doesn't invite people to the original authors' community (their
 //! Discord, their website) ([`shows_community_links`]); PdfCraft's own page and source repository
@@ -29,9 +33,9 @@ pub fn is_hosted() -> bool {
     HOSTED.load(Ordering::Relaxed)
 }
 
-/// Keep everything PdfCraft stores per user (crash recovery, the digital IDs it creates) under
-/// `root` instead of the user's data folders, which is created if missing (a portable install);
-/// `None` goes back to those folders. Set it before the app is built. PdfCraft's own portable
+/// Keep everything PdfCraft stores per user (crash recovery, the digital IDs it creates, the
+/// copied images it hands the clipboard) under `root` instead of the user's data folders, which
+/// is created if missing (a portable install); `None` goes back to those folders. Set it before the app is built. PdfCraft's own portable
 /// mode ([`crate::portable`]) is off in a host window and whenever a data root is set.
 pub fn set_data_root(root: Option<PathBuf>) {
     if let Some(dir) = &root
@@ -53,8 +57,8 @@ pub fn data_root() -> Option<PathBuf> {
     }
 }
 
-/// Where PdfCraft keeps its per-user folder `name` ("Recovery", "Digital IDs"): under the data
-/// root when one is set, else where `default` says (the user's data folders). Every per-user
+/// Where PdfCraft keeps its per-user folder `name` ("Recovery", "Digital IDs", "Clipboard"): under
+/// the data root when one is set, else where `default` says (the user's data folders). Every per-user
 /// folder is looked up through here.
 pub fn user_dir(name: &str, default: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
     match data_root() {

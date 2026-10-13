@@ -341,18 +341,11 @@ pub fn apply(ctx: &egui::Context, t: &Tokens) {
     v.selection.stroke = Stroke::new(1.0, t.text_strong);
     v.hyperlink_color = t.accent;
     v.override_text_color = Some(t.text);
-    for (w, fill) in [
-        (&mut v.widgets.noninteractive, t.panel),
-        (&mut v.widgets.inactive, t.button),
-        (&mut v.widgets.hovered, t.hover),
-        (&mut v.widgets.active, t.tool_active),
-        (&mut v.widgets.open, t.hover),
-    ] {
-        w.bg_fill = fill;
-        w.weak_bg_fill = fill;
-        w.corner_radius = r;
-        w.fg_stroke = Stroke::new(1.0, t.text);
-    }
+    craft_ui::theme::WidgetPalette { noninteractive: t.panel, inactive: t.button, hovered: t.hover, active: t.tool_active, open: t.hover }.apply_to(
+        &mut v.widgets,
+        r,
+        Stroke::new(1.0, t.text),
+    );
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, t.divider);
     v.widgets.inactive.bg_stroke = Stroke::new(1.0, t.field_border);
     v.widgets.hovered.bg_stroke = Stroke::new(1.0, t.field_border);
@@ -431,5 +424,33 @@ mod japanese_font_tests {
         });
         // And the real installer works with whatever this build has.
         super::install_fonts(&egui::Context::default(), "ja");
+    }
+}
+
+#[cfg(test)]
+mod ukrainian_font_tests {
+    #[test]
+    fn every_catalog_cyrillic_glyph_exists_in_the_bundled_ui_fonts() {
+        // Check the actual installed face data, without craft-fonts or system fonts.
+        // egui's has_glyph can report false for the face providing its replacement glyph.
+        let definitions = super::font_definitions(&[], "uk");
+        let db = designcraft_fonts::FontDb::with_font_dirs(Vec::new());
+        db.set_system_fallback(false);
+        let characters: std::collections::HashSet<_> = crate::i18n::ukrainian_catalog()
+            .iter()
+            .flat_map(|text| text.chars())
+            .chain("ҐґЄєІіЇї".chars())
+            .filter(|c| matches!(*c, '\u{0400}'..='\u{052f}'))
+            .collect();
+        for (name, family, style) in
+            [("ui", "Source Sans 3", "Regular"), ("ui-semibold", "Source Sans 3", "Semibold"), ("mono", "JetBrains Mono", "Regular")]
+        {
+            let data = &definitions.font_data[name].font;
+            let face = db.face(family, style);
+            assert_eq!(face.data(), data.as_ref(), "configured UI face {name}");
+            for character in &characters {
+                assert_ne!(face.glyph_for(*character), 0, "missing {character} in {name}");
+            }
+        }
     }
 }

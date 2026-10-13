@@ -192,6 +192,32 @@ fn set_transform(s: &mut Session, p: &Value) -> Result<Value> {
         for lid in &ids {
             let l = layer_mut(proj, cid, *lid)?;
             let lt = l.layer_time(t);
+            // Separate Dimensions: the picture follows X/Y/Z Position, not the combined property.
+            if m == "position" && l.transform().is_some_and(|tr| tr.get("positionX").is_some()) {
+                let cur = l
+                    .transform()
+                    .map(|tr| {
+                        [
+                            tr.get("positionX").map(|p| p.value_at(lt).as_f64()).unwrap_or(0.0),
+                            tr.get("positionY").map(|p| p.value_at(lt).as_f64()).unwrap_or(0.0),
+                            tr.get("positionZ").map(|p| p.value_at(lt).as_f64()).unwrap_or(0.0),
+                        ]
+                    })
+                    .unwrap_or([0.0; 3]);
+                // Two numbers keep the current z.
+                let j = match &v {
+                    Value::Array(a) if a.len() == 2 => json!([a[0], a[1], cur[2]]),
+                    _ => v.clone(),
+                };
+                let nv = KV::Vec3(cur).coerce_json(&j).ok_or_else(|| bad("layer.setTransform", format!("can't use {v} for {label}")))?;
+                let xyz = nv.as_vec3();
+                let Some(tr) = l.transform_mut() else { continue };
+                super::layer::update_position(tr, lt, |_| xyz);
+                if let Some(pr) = tr.get_mut("position") {
+                    pr.set_value_at(lt, KV::Vec3(xyz));
+                }
+                continue;
+            }
             let Some(pr) = l.transform_mut().and_then(|tr| tr.get_mut(m)) else { continue };
             let cur = pr.value_at(lt);
             // Two numbers for a 3D value keep the current z.
@@ -635,7 +661,24 @@ fn open_source(s: &mut Session, p: &Value) -> Result<Value> {
 /// Folder containing a file as a `file://` URL.
 pub(crate) fn folder_url(path: &str) -> String {
     let dir = std::path::Path::new(path).parent().map(|d| d.to_string_lossy().to_string()).unwrap_or_default();
-    format!("file://{dir}")
+    file_url(&dir)
+}
+
+/// `path` as a `file://` URL: backslashes become `/`, a Windows drive path gets the third slash
+/// (`file:///C:/…`), and every byte that isn't a plain path character is percent-encoded (spaces,
+/// `#`, `%`, `?`, non-ASCII as UTF-8), so the URL names exactly this file.
+pub(crate) fn file_url(path: &str) -> String {
+    use std::fmt::Write as _;
+    let path = path.replace('\\', "/");
+    let mut url = String::from(if path.starts_with('/') { "file://" } else { "file:///" });
+    for b in path.bytes() {
+        if b.is_ascii_alphanumeric() || b"/-._~:@!$&'()*+,;=".contains(&b) {
+            url.push(char::from(b));
+        } else {
+            let _ = write!(url, "%{b:02X}");
+        }
+    }
+    url
 }
 
 fn reveal_in_finder(s: &mut Session, p: &Value) -> Result<Value> {
@@ -818,4 +861,22 @@ pub fn specs() -> Vec<CommandSpec> {
             sequence
         ),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{file_url, folder_url};
+
+    #[test]
+    fn file_urls_are_well_formed() {
+        assert_eq!(file_url("C:\\Users\\Ann\\Footage\\clip 1.mov"), "file:///C:/Users/Ann/Footage/clip%201.mov");
+        assert_eq!(file_url("/home/ann/a#b%c?d.mov"), "file:///home/ann/a%23b%25c%3Fd.mov");
+        assert_eq!(file_url("/Users/ann/Café/x.mov"), "file:///Users/ann/Caf%C3%A9/x.mov");
+        assert_eq!(file_url("/plain/path-1_2.~(x).mov"), "file:///plain/path-1_2.~(x).mov", "plain characters stay");
+    }
+
+    #[test]
+    fn folder_url_names_the_containing_folder() {
+        assert_eq!(folder_url("/media/My Clips/a.mov"), "file:///media/My%20Clips");
+    }
 }

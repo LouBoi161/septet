@@ -74,3 +74,10 @@ pub fn install_hooks(app: &mut EffectcraftApp) {
         d.set_file_name(file).save_file().map(|p| p.to_string_lossy().to_string())
     }));
 }
+
+/// The commands' file dialogs as sheets on the window instead of nested modal loops (macOS, #511).
+#[cfg(target_os = "macos")]
+pub fn install_sheet_dialogs(app: &mut EffectcraftApp, ctx: &egui::Context) {
+    let ctx = ctx.clone();
+    app.hooks.file_dialog_async = Some(Box::new(move |dialog, done| crate::sheet_dialogs::show(dialog, done, ctx.clone())));
+}

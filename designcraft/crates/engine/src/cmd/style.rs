@@ -95,13 +95,29 @@ pub fn specs() -> Vec<CommandSpec> {
             "Paragraph Style Options…",
             [],
             None,
-            "{name, rename?, basedOn?, nextStyle?, para?: {…}, chars?: {…}}",
+            "{name, rename?, basedOn?, nextStyle?, para?: {… ruleAbove?/ruleBelow?: only the named rule fields change}, chars?: {…}}",
             has_doc,
             edit_para
         ),
         cmd!("style.paragraph.delete", "Delete Paragraph Style", [], None, "{name, replaceWith?}", has_doc, delete_para),
-        cmd!("style.character.create", "New Character Style…", [], None, "{name, basedOn?, chars?: {…}}", has_doc, create_char),
-        cmd!("style.character.edit", "Character Style Options…", [], None, "{name, rename?, basedOn?, chars?}", has_doc, edit_char),
+        cmd!(
+            "style.character.create",
+            "New Character Style…",
+            [],
+            None,
+            "{name, basedOn?: style | \"[None]\", chars?: {…}} — the style sets only `chars` → {name} (made unique)",
+            has_doc,
+            create_char
+        ),
+        cmd!(
+            "style.character.edit",
+            "Character Style Options…",
+            [],
+            None,
+            "{name, rename?, basedOn?: style | \"[None]\" | null, chars?: {attr: value | null (no longer set)}} — renaming updates every use",
+            has_doc,
+            edit_char
+        ),
         cmd!(query "style.list", "List Styles", [], None, "{} → paragraph and character style names", has_doc, |s, _| {
             let st = s.doc()?;
             Ok(json!({
@@ -428,6 +444,7 @@ fn create_para(s: &mut Session, p: &Value) -> Result<Value> {
             chars = full;
         }
     }
+    super::text::validate_char_fill(&s.doc()?.doc, &chars, "style.paragraph.create")?;
     let based_on = str_param(p, "basedOn").map(str::to_string);
     let next = str_param(p, "nextStyle").map(str::to_string);
     s.edit(|d, _| {
@@ -453,8 +470,8 @@ fn CharProps_to_attrs(p: &designcraft_doc::CharProps) -> CharAttrs {
 
 fn edit_para(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_param(p, "name").ok_or_else(|| bad("style.paragraph.edit", "missing name"))?.to_string();
-    let para: ParaAttrs = attrs(p.get("para"), |a: &mut ParaAttrs, k, v| a.set_json(k, v))?;
     let chars: CharAttrs = attrs(p.get("chars"), |a: &mut CharAttrs, k, v| a.set_json(k, v))?;
+    super::text::validate_char_fill(&s.doc()?.doc, &chars, "style.paragraph.edit")?;
     let rename = str_param(p, "rename").map(str::to_string);
     let based = p.get("basedOn").cloned();
     s.edit(|d, _| {
@@ -463,6 +480,9 @@ fn edit_para(s: &mut Session, p: &Value) -> Result<Value> {
         {
             return Err(bad("style.paragraph.edit", "based-on would create a cycle"));
         }
+        // A rule object changes only the rule fields it names, over the style's resolved rule.
+        let (current, _) = d.styles.resolve_para_style(&name);
+        let para: ParaAttrs = attrs(p.get("para"), |a: &mut ParaAttrs, k, v| a.set_json_over(k, v, &current))?;
         let st = d.styles_mut().para_mut(&name).ok_or_else(|| bad("style.paragraph.edit", format!("no style `{name}`")))?;
         st.para.merge(&para);
         st.chars.merge(&chars);
@@ -507,6 +527,12 @@ fn rename_style(d: &mut designcraft_doc::Document, para: bool, from: &str, to: &
                 s.based_on = Some(to.to_string());
             }
         }
+        for s in &mut st.paragraph {
+            rename_char_refs(&mut s.para, from, to);
+        }
+        if d.footnote_options.ref_char_style == from {
+            d.footnote_options.ref_char_style = to.to_string();
+        }
     }
     for sid in d.stories.keys().copied().collect::<Vec<_>>() {
         let Some(story) = d.story_mut(sid) else { continue };
@@ -519,9 +545,23 @@ fn rename_style(d: &mut designcraft_doc::Document, para: bool, from: &str, to: &
                 for r in st.chars.iter_mut().filter(|r| r.format.style == from) {
                     r.format.style = to.to_string();
                 }
+                for f in &mut st.paras {
+                    rename_char_refs(&mut f.para, from, to);
+                }
             }
             st.rev += 1;
         });
+    }
+}
+
+/// Point the nested, nested line and GREP styles of paragraph attributes at a renamed character style.
+fn rename_char_refs(p: &mut ParaAttrs, from: &str, to: &str) {
+    let names = p.nested_styles.iter_mut().flatten().map(|n| &mut n.style);
+    let names = names.chain(p.nested_line_styles.iter_mut().flatten().map(|n| &mut n.style));
+    for n in names.chain(p.grep_styles.iter_mut().flatten().map(|g| &mut g.style)) {
+        if n == from {
+            *n = to.to_string();
+        }
     }
 }
 
@@ -583,8 +623,15 @@ fn delete_para(s: &mut Session, p: &Value) -> Result<Value> {
 fn create_char(s: &mut Session, p: &Value) -> Result<Value> {
     let base = str_param(p, "name").unwrap_or("Character Style 1").to_string();
     let chars: CharAttrs = attrs(p.get("chars"), |a: &mut CharAttrs, k, v| a.set_json(k, v))?;
-    let based_on = str_param(p, "basedOn").map(str::to_string);
+    super::text::validate_char_fill(&s.doc()?.doc, &chars, "style.character.create")?;
+    // Based on [None] is based on nothing.
+    let based_on = str_param(p, "basedOn").filter(|b| *b != designcraft_doc::NO_CHAR_STYLE).map(str::to_string);
     s.edit(|d, _| {
+        if let Some(b) = &based_on
+            && d.styles.char_style(b).is_none()
+        {
+            return Err(bad("style.character.create", format!("no character style `{b}`")));
+        }
         let name = Styles::unique_name(|n| d.styles.char_style(n).is_some(), &base);
         d.styles_mut().character.push(CharacterStyle { name: name.clone(), based_on, chars, shortcut: String::new() });
         Ok(json!({"name": name}))
@@ -593,10 +640,51 @@ fn create_char(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn edit_char(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_param(p, "name").ok_or_else(|| bad("style.character.edit", "missing name"))?.to_string();
+    if name == designcraft_doc::NO_CHAR_STYLE {
+        return Err(bad("style.character.edit", "[None] can't be edited"));
+    }
     let chars: CharAttrs = attrs(p.get("chars"), |a: &mut CharAttrs, k, v| a.set_json(k, v))?;
+    super::text::validate_char_fill(&s.doc()?.doc, &chars, "style.character.edit")?;
+    // `null` unsets an attribute (the style no longer sets it).
+    let unset: Vec<String> = p
+        .get("chars")
+        .and_then(Value::as_object)
+        .map(|o| o.iter().filter(|(_, v)| v.is_null()).map(|(k, _)| k.clone()).collect())
+        .unwrap_or_default();
+    let rename = str_param(p, "rename").filter(|n| *n != name).map(|n| n.trim().to_string());
+    let based: Option<Option<String>> = match p.get("basedOn") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(Value::String(b)) if b == designcraft_doc::NO_CHAR_STYLE => Some(None),
+        Some(Value::String(b)) => Some(Some(b.clone())),
+        Some(_) => return Err(bad("style.character.edit", "`basedOn` is a style name or null")),
+    };
     s.edit(|d, _| {
-        let st = d.styles_mut().char_style_mut(&name).ok_or_else(|| bad("style.character.edit", "no such style"))?;
+        if let Some(Some(b)) = &based {
+            if d.styles.char_style(b).is_none() {
+                return Err(bad("style.character.edit", format!("no character style `{b}`")));
+            }
+            if d.styles.char_based_on_cycles(&name, b) {
+                return Err(bad("style.character.edit", "based-on would create a cycle"));
+            }
+        }
+        if let Some(n) = &rename
+            && (n.is_empty() || n.starts_with('[') || d.styles.char_style(n).is_some())
+        {
+            return Err(bad("style.character.edit", format!("can't rename to `{n}`")));
+        }
+        let st = d.styles_mut().char_style_mut(&name).ok_or_else(|| bad("style.character.edit", format!("no character style `{name}`")))?;
         st.chars.merge(&chars);
+        for k in &unset {
+            st.chars.set_json(k, &Value::Null).map_err(|e| bad("style.character.edit", e))?;
+        }
+        if let Some(b) = based.clone() {
+            st.based_on = b;
+        }
+        if let Some(n) = &rename {
+            // Every use: other styles, stories, table cells, nested and GREP styles, footnotes.
+            rename_style(d, false, &name, n);
+        }
         ok()
     })
 }
@@ -632,13 +720,18 @@ pub fn parse_color(v: &Value) -> Option<designcraft_color::Color> {
     use designcraft_color::Color;
     match v {
         Value::String(s) => Color::from_hex(s),
+        // One scale per colour, not per component: {c: 0.7, y: 12.2} is C 0.7 %, Y 12.2 %. Only a colour whose
+        // components are all within 0..1 is read as fractions (the older form).
         Value::Array(a) if a.len() >= 3 => {
-            let f = |i: usize| a[i].as_f64().map(|x| if x > 1.0 { x / 255.0 } else { x } as f32);
-            Some(Color::rgb(f(0)?, f(1)?, f(2)?))
+            let v = [a[0].as_f64()?, a[1].as_f64()?, a[2].as_f64()?];
+            let scale = if v.iter().any(|&x| x > 1.0) { 255.0 } else { 1.0 };
+            Some(Color::rgb((v[0] / scale) as f32, (v[1] / scale) as f32, (v[2] / scale) as f32))
         }
         Value::Object(o) => {
-            let g = |k: &str| o.get(k).and_then(Value::as_f64).map(|x| if x > 1.0 { x / 100.0 } else { x } as f32);
-            Some(Color::cmyk(g("c")?, g("m")?, g("y")?, g("k")?))
+            let g = |k: &str| o.get(k).and_then(Value::as_f64);
+            let v = [g("c")?, g("m")?, g("y")?, g("k")?];
+            let scale = if v.iter().any(|&x| x > 1.0) { 100.0 } else { 1.0 };
+            Some(Color::cmyk((v[0] / scale) as f32, (v[1] / scale) as f32, (v[2] / scale) as f32, (v[3] / scale) as f32))
         }
         _ => None,
     }
@@ -956,6 +1049,168 @@ fn rename_in(it: &mut designcraft_doc::Item, from: &str, to: &str) {
 mod color_tests {
     use super::*;
 
+    fn fill_session() -> Session {
+        let mut session = Session::new();
+        session.execute("file.new", &json!({})).unwrap();
+        let frame = session.execute("frame.create", &json!({"rect": [0, 0, 200, 100], "content": "text", "text": "Hi"})).unwrap();
+        session.execute("text.select", &json!({"story": frame["story"], "anchor": 0, "focus": 2})).unwrap();
+        session.execute("style.paragraph.create", &json!({"name": "Existing"})).unwrap();
+        session.execute("style.character.create", &json!({"name": "Existing"})).unwrap();
+        session.execute("type.char", &json!({"size": 18})).unwrap();
+        session.execute("edit.undo", &json!({})).unwrap();
+        session
+    }
+
+    fn assert_fill_rejected(session: &mut Session, command: &str, params: Value) {
+        let before = session.doc().unwrap().clone();
+        let journal = session.journal.clone();
+        let fill = params
+            .pointer("/chars/fill")
+            .or_else(|| params.pointer("/attrs/fill"))
+            .or_else(|| params.get("fill"))
+            .and_then(Value::as_str)
+            .unwrap_or("Missing Ink");
+
+        let result = session.execute(command, &params);
+
+        match result {
+            Err(crate::EngineError::BadParams { cmd, msg }) => {
+                assert_eq!(cmd, command);
+                assert!(msg.contains(fill), "{msg}");
+                assert!(msg.contains("swatch.create") && msg.contains("returned name"), "{msg}");
+            }
+            other => panic!("expected BadParams for {command}, got {other:?}"),
+        }
+        let after = session.doc().unwrap();
+        assert!(std::sync::Arc::ptr_eq(&before.doc, &after.doc));
+        assert_eq!(before.selection, after.selection);
+        assert_eq!(before.revision, after.revision);
+        assert_eq!(format!("{:?}", before.history), format!("{:?}", after.history));
+        assert_eq!(journal, session.journal);
+    }
+
+    #[test]
+    fn char_fill_rejects_unknown_flat_and_nested_names_when_formatting() {
+        for fill in ["Missing Ink", "#ff0000", "[black]", " [Black]"] {
+            for params in [json!({"fill": fill, "size": 24}), json!({"attrs": {"fill": fill, "size": 24}})] {
+                let mut session = fill_session();
+                assert_fill_rejected(&mut session, "type.char", params);
+            }
+        }
+    }
+
+    #[test]
+    fn char_fill_rejects_unknown_names_when_creating_or_editing_styles() {
+        for command in ["style.paragraph.create", "style.paragraph.edit", "style.character.create", "style.character.edit"] {
+            for fill in ["Missing Ink", "#ff0000"] {
+                let mut session = fill_session();
+                session.execute("style.paragraph.apply", &json!({"name": "Existing"})).unwrap();
+                session.execute("style.character.apply", &json!({"name": "Existing"})).unwrap();
+                assert_fill_rejected(&mut session, command, json!({"name": "Existing", "rename": "Renamed", "chars": {"fill": fill, "size": 24}}));
+            }
+        }
+    }
+
+    #[test]
+    fn char_fill_rejects_inherited_unknown_name_when_creating_from_selection() {
+        let mut session = fill_session();
+        session
+            .edit(|document, selection| {
+                let selected = selection.text.unwrap();
+                document.story_mut(selected.story).unwrap().format_chars(selected.range(), |format| format.over.fill = Some("Missing Ink".into()));
+                Ok(())
+            })
+            .unwrap();
+
+        assert_fill_rejected(&mut session, "style.paragraph.create", json!({"name": "Inherited", "fromSelection": true}));
+    }
+
+    #[test]
+    fn char_fill_accepts_valid_override_when_selection_has_unknown_name() {
+        let mut session = fill_session();
+        session
+            .edit(|document, selection| {
+                let selected = selection.text.unwrap();
+                document.story_mut(selected.story).unwrap().format_chars(selected.range(), |format| format.over.fill = Some("Missing Ink".into()));
+                Ok(())
+            })
+            .unwrap();
+
+        session.execute("style.paragraph.create", &json!({"name": "Override", "fromSelection": true, "chars": {"fill": "[Paper]"}})).unwrap();
+
+        assert_eq!(session.doc().unwrap().doc.styles.para("Override").unwrap().chars.fill.as_deref(), Some("[Paper]"));
+    }
+
+    #[test]
+    fn char_fill_rejects_unknown_name_when_changing_text_even_without_output() {
+        for (find, change) in [("Hi", "Bye"), ("Hi", ""), ("Absent", "Bye")] {
+            for fill in ["Missing Ink", "#ff0000"] {
+                let mut session = fill_session();
+                assert_fill_rejected(&mut session, "find.change", json!({"find": find, "change": change, "attrs": {"fill": fill}}));
+            }
+        }
+    }
+
+    #[test]
+    fn char_fill_preserves_exact_registered_names_when_used_at_all_boundaries() {
+        for fill in ["Brand Ink", "#ff0000", "[None]", "[Black]"] {
+            let mut session = fill_session();
+            if !fill.starts_with('[') {
+                let created = session.execute("swatch.create", &json!({"name": fill, "color": "#108080"})).unwrap();
+                assert_eq!(created["name"], fill);
+            }
+            for params in [json!({"fill": fill}), json!({"attrs": {"fill": fill}})] {
+                session.execute("type.char", &params).unwrap();
+                assert_eq!(session.execute("type.selectionAttrs", &json!({})).unwrap()["chars"]["fill"], fill);
+            }
+            for kind in ["paragraph", "character"] {
+                session.execute(&format!("style.{kind}.create"), &json!({"name": "Colored", "chars": {"fill": fill}})).unwrap();
+                session.execute(&format!("style.{kind}.edit"), &json!({"name": "Existing", "chars": {"fill": fill}})).unwrap();
+                let document = &session.doc().unwrap().doc;
+                for name in ["Colored", "Existing"] {
+                    let attrs = if kind == "paragraph" {
+                        &document.styles.para(name).unwrap().chars
+                    } else {
+                        &document.styles.char_style(name).unwrap().chars
+                    };
+                    assert_eq!(attrs.fill.as_deref(), Some(fill));
+                }
+            }
+            assert_eq!(session.execute("find.change", &json!({"find": "Hi", "change": "Bye", "attrs": {"fill": fill}})).unwrap()["count"], 1);
+            let selected = session.doc().unwrap().selection.text.unwrap();
+            let story = session.doc().unwrap().doc.story(selected.story).unwrap();
+            assert_eq!(story.text, "Bye");
+            assert_eq!(story.format_after(0).over.fill.as_deref(), Some(fill));
+        }
+    }
+
+    #[test]
+    fn char_fill_accepts_omitted_and_null_attributes_when_used_at_all_boundaries() {
+        for chars in [json!({"size": 18}), json!({"fill": null})] {
+            let mut session = fill_session();
+            session.execute("type.char", &json!({"attrs": chars})).unwrap();
+            for kind in ["paragraph", "character"] {
+                session.execute(&format!("style.{kind}.create"), &json!({"name": "Nullable", "chars": chars})).unwrap();
+                session.execute(&format!("style.{kind}.edit"), &json!({"name": "Existing", "chars": chars})).unwrap();
+            }
+            assert_eq!(session.execute("find.change", &json!({"find": "Hi", "change": "Bye", "attrs": chars})).unwrap()["count"], 1);
+        }
+    }
+
+    #[test]
+    fn percent_components_at_most_one_stay_percent() {
+        use designcraft_color::Color;
+        // {"c": 0.7, ..., "y": 12.2} is a pale cream (C 0.7 %, Y 12.2 %), not C 70 %.
+        let Some(Color::Cmyk { c, m, y, k }) = parse_color(&json!({"c": 0.7, "m": 0, "y": 12.2, "k": 0})) else { panic!("not CMYK") };
+        assert!((c - 0.007).abs() < 1e-6 && m == 0.0 && (y - 0.122).abs() < 1e-6 && k == 0.0, "got {c} {m} {y} {k}");
+        // Fractions (every component within 0..1) keep working.
+        let Some(Color::Cmyk { c, k, .. }) = parse_color(&json!({"c": 0.5, "m": 0, "y": 0, "k": 1})) else { panic!("not CMYK") };
+        assert!((c - 0.5).abs() < 1e-6 && (k - 1.0).abs() < 1e-6);
+        // RGB arrays follow the same rule: [1, 128, 255] is 0..255.
+        let Some(Color::Rgb { r, g, b }) = parse_color(&json!([1, 128, 255])) else { panic!("not RGB") };
+        assert!((r - 1.0 / 255.0).abs() < 1e-6 && (g - 128.0 / 255.0).abs() < 1e-6 && (b - 1.0).abs() < 1e-6);
+    }
+
     #[test]
     fn style_groups_rename_every_use() {
         let mut s = Session::new();
@@ -975,6 +1230,73 @@ mod color_tests {
         s.execute("style.group", &json!({"kind": "paragraph", "names": ["Titles/Head"], "group": ""})).unwrap();
         assert!(s.doc().unwrap().doc.styles.para("Head").is_some());
         assert!(s.execute("style.group", &json!({"names": ["[Basic Paragraph]"], "group": "X"})).is_err());
+    }
+
+    #[test]
+    fn character_style_edit_sets_unsets_rebases_and_renames_every_use() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        s.execute("style.character.create", &json!({"name": "Base", "chars": {"fontStyle": "Bold"}})).unwrap();
+        s.execute("style.character.create", &json!({"name": "Emphasis", "chars": {"fontStyle": "Italic", "tracking": 20}})).unwrap();
+        s.execute(
+            "style.paragraph.create",
+            &json!({"name": "Lead", "para": {
+                "nestedStyles": [{"style": "Emphasis", "through": true, "count": 1, "until": {"kind": "words"}}],
+                "grepStyles": [{"style": "Emphasis", "pattern": "\\d+"}],
+                "nestedLineStyles": [{"style": "Emphasis", "lines": 1}]}}),
+        )
+        .unwrap();
+        s.execute("footnote.options", &json!({"refCharStyle": "Emphasis"})).unwrap();
+        let r = s.execute("frame.create", &json!({"rect": [72, 72, 300, 200], "content": "text", "text": "Hi there"})).unwrap();
+        let sid = r["story"].as_u64().unwrap();
+        s.execute("text.select", &json!({"story": sid, "anchor": 0, "focus": 2})).unwrap();
+        s.execute("style.character.apply", &json!({"name": "Emphasis"})).unwrap();
+
+        s.execute(
+            "style.character.edit",
+            &json!({"name": "Emphasis", "rename": "Strong", "basedOn": "Base", "chars": {"size": 14, "fill": "[Paper]", "fontStyle": null}}),
+        )
+        .unwrap();
+        let d = s.doc().unwrap().doc.clone();
+        assert!(d.styles.char_style("Emphasis").is_none());
+        let st = d.styles.char_style("Strong").unwrap();
+        assert_eq!(st.based_on.as_deref(), Some("Base"));
+        // Exactly the attributes set: `null` unset the font style, the rest stayed unset.
+        assert_eq!(st.chars, CharAttrs { size: Some(14.0), fill: Some("[Paper]".into()), tracking: Some(20.0), ..Default::default() });
+        let story = d.story(designcraft_doc::StoryId(sid)).unwrap();
+        assert!(story.chars.iter().any(|r| r.format.style == "Strong"));
+        assert!(story.chars.iter().all(|r| r.format.style != "Emphasis"));
+        let lead = d.styles.para("Lead").unwrap();
+        assert_eq!(lead.para.nested_styles.as_ref().unwrap()[0].style, "Strong");
+        assert_eq!(lead.para.grep_styles.as_ref().unwrap()[0].style, "Strong");
+        assert_eq!(lead.para.nested_line_styles.as_ref().unwrap()[0].style, "Strong");
+        assert_eq!(d.footnote_options.ref_char_style, "Strong");
+
+        // Based On [None] (null or the name) clears it.
+        s.execute("style.character.edit", &json!({"name": "Strong", "basedOn": null})).unwrap();
+        assert_eq!(s.doc().unwrap().doc.styles.char_style("Strong").unwrap().based_on, None);
+        s.execute("style.character.edit", &json!({"name": "Strong", "basedOn": "Base"})).unwrap();
+        s.execute("style.character.edit", &json!({"name": "Strong", "basedOn": "[None]"})).unwrap();
+        assert_eq!(s.doc().unwrap().doc.styles.char_style("Strong").unwrap().based_on, None);
+
+        // Refused: a based-on cycle, an unknown parent, a taken or empty name, editing [None].
+        s.execute("style.character.edit", &json!({"name": "Strong", "basedOn": "Base"})).unwrap();
+        assert!(s.execute("style.character.edit", &json!({"name": "Base", "basedOn": "Strong"})).is_err());
+        assert!(s.execute("style.character.edit", &json!({"name": "Strong", "basedOn": "Nope"})).is_err());
+        assert!(s.execute("style.character.edit", &json!({"name": "Strong", "rename": "Base"})).is_err());
+        assert!(s.execute("style.character.edit", &json!({"name": "Strong", "rename": "  "})).is_err());
+        assert!(s.execute("style.character.edit", &json!({"name": "[None]", "chars": {"size": 9}})).is_err());
+        assert!(s.doc().unwrap().doc.styles.char_style("[None]").unwrap().chars.is_empty());
+    }
+
+    #[test]
+    fn new_character_style_checks_its_based_on() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        assert!(s.execute("style.character.create", &json!({"name": "Orphan", "basedOn": "Nope"})).is_err());
+        s.execute("style.character.create", &json!({"name": "Plain", "basedOn": "[None]", "chars": {"size": 9}})).unwrap();
+        let st = s.doc().unwrap().doc.styles.char_style("Plain").cloned().unwrap();
+        assert_eq!((st.based_on, st.chars), (None, CharAttrs { size: Some(9.0), ..Default::default() }));
     }
 
     #[test]

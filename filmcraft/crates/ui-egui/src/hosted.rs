@@ -52,7 +52,7 @@ pub fn dragged_items(app: &crate::FilmcraftApp, ctx: &egui::Context) -> Vec<Item
 /// The drag of [`dragged_items`] ended in another app, which took it: forget it as a drop on nothing
 /// does, without acting on the release (an import the Media Browser made for it is taken back).
 pub fn cancel_drag(app: &mut crate::FilmcraftApp, ctx: &egui::Context) {
-    crate::panels::cancel_drag(app, ctx);
+    crate::panels::forget_drag(app, ctx);
 }
 
 /// The movie, audio or still file on disk an item plays (a subclip's master clip's), as imported.

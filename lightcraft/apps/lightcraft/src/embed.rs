@@ -1,7 +1,7 @@
 //! LightCraft as a tab of a host application (Septet) that owns the window, the fonts and the
 //! UI zoom: the app `main.rs` builds for a plain launch, without what belongs to a process or a
 //! window of its own (panic hook, logger, command line, control server, native menu bar, GPU crash
-//! sentinel, window options).
+//! sentinel, window options, the window renderer's probe and fallback chain).
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -62,8 +62,9 @@ impl Embedded {
         let library_dir = crate::session::library_dir(prefs.as_ref());
         // GPU compute off if the preference says so, before anything can create the device
         lightcraft_engine::gpu::set_enabled(prefs.as_ref().is_none_or(|u| u.settings.gpu));
-        let (mut session, problem) = crate::session::open_session(false, library_dir, true);
-        crate::session::configure_segmenter(&mut session);
+        let (session, problem) = crate::session::open_session(false, library_dir, true);
+        // AI masks: the SAM 3 model in <config>/models/sam3 (or LIGHTCRAFT_SAM3_DIR) and its mirror list
+        let session = session.with_default_sam3_model();
         let (open_externally, open_app): (HostHook<OpenExternally>, HostHook<OpenApp>) = Default::default();
         // no log file of LightCraft's own: the host keeps the process's log (Help ▸ Open Log Folder
         // isn't offered)
@@ -285,6 +286,21 @@ impl Embedded {
                 Vec::new()
             })),
         );
+        let (display_profile, keywords, save_keywords) = (ask("pick a monitor profile"), ask("pick a keyword list"), ask("choose where to save"));
+        let saved_keywords = (
+            sv.pick_display_profile.replace(Box::new(move || {
+                display_profile();
+                Vec::new()
+            })),
+            sv.pick_keyword_list.replace(Box::new(move || {
+                keywords();
+                Vec::new()
+            })),
+            sv.save_keyword_list.replace(Box::new(move |_| {
+                save_keywords();
+                None
+            })),
+        );
         let (files, presets, tracklog, curves, save, save_curves, folder, reveal, open_with) = (
             ask("pick files"),
             ask("pick preset files"),
@@ -350,6 +366,7 @@ impl Embedded {
             sv.open_with,
         ) = saved;
         (sv.pick_lightroom_catalog, sv.pick_model_file, sv.pick_denoise_model) = saved_more;
+        (sv.pick_display_profile, sv.pick_keyword_list, sv.save_keyword_list) = saved_keywords;
         sv.picker = picker;
         let opened = !had_dialog && self.app.ui.dialog.is_some();
         if opened {
@@ -490,17 +507,48 @@ impl eframe::App for Embedded {
         self.save_prefs();
     }
 
+    // eframe's `glow` feature (`gl-fallback`, for the standalone binary only) adds the GL context.
+    #[cfg(not(feature = "gl-fallback"))]
     fn on_exit(&mut self) {
+        self.exit();
+    }
+
+    #[cfg(feature = "gl-fallback")]
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.exit();
+    }
+}
+
+/// How long quitting waits for renders that are running (as `main.rs` does, issue #620).
+const EXIT_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+impl Embedded {
+    /// What quitting saves, as the window's `on_exit`: the settings and the library, then it waits
+    /// for running renders, so none is inside the GPU driver when the process ends.
+    fn exit(&mut self) {
         self.save_prefs();
         if let Err(e) = self.app.session.close_library() {
             log::error!("saving the library failed: {e}");
+        }
+        if !self.app.shutdown(EXIT_WAIT) {
+            log::warn!("quit: background work was still running after {EXIT_WAIT:?}");
         }
     }
 }
 
 /// `services` whose `open_with` (Edit in External Editor) offers the file to the host first, and
-/// whose `open_url` hands links to a sibling app's page to the host.
+/// whose `open_url` hands links to a sibling app's page to the host. While the host takes the
+/// files, `check_editor` doesn't ask for the editor to be installed (Edit In PhotoCraft goes to the
+/// host's PhotoCraft).
 fn ask_host_first(mut services: Services, host: HostHook<OpenExternally>, open_app: HostHook<OpenApp>) -> Services {
+    let native_check = services.check_editor.take();
+    let host_check = Rc::clone(&host);
+    services.check_editor = Some(Box::new(move |editor: &str| {
+        if host_check.try_borrow().is_ok_and(|h| h.is_some()) {
+            return Ok(());
+        }
+        native_check.as_ref().map_or(Ok(()), |check| check(editor))
+    }));
     let mut native = services.open_with.take();
     services.open_with = Some(Box::new(move |path: &str, editor: &str| {
         let handled = !path.is_empty() && host.try_borrow_mut().ok().and_then(|mut h| h.as_mut().map(|f| f(Path::new(path)))).unwrap_or(false);
@@ -553,7 +601,11 @@ fn photo_file(session: &mut lightcraft_engine::Session, id: PhotoId, accept: &[&
             Err(e) => log::warn!("sending photo {}: copying {path}: {e}; rendering it instead", id.0),
         }
     }
-    let (ext, format) = accept.iter().find_map(|a| ExportFormat::parse(a).filter(|f| f.is_rendered()).map(|f| (a.to_ascii_lowercase(), f)))?;
+    // TIFF when the target takes it (what Edit in External Editor hands over), else the first
+    // format LightCraft can render: since upstream's PSD writer, PhotoCraft's `psd` would win.
+    let rendered = |a: &str| ExportFormat::parse(a).filter(|f| f.is_rendered()).map(|f| (a.to_ascii_lowercase(), f));
+    let tif = accept.iter().filter(|a| same_extension(a, "tif")).find_map(|a| rendered(a));
+    let (ext, format) = tif.or_else(|| accept.iter().find_map(|a| rendered(a)))?;
     let opts = ExportOptions { format, quality: 95, ..Default::default() };
     let name = opts.file_name_for(p, 1);
     let stem = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem);

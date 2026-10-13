@@ -47,6 +47,48 @@ fn explorer_select_command(path: &str) -> std::process::Command {
     c
 }
 
+/// Where the system keeps monitor profiles, for the Choose Profile dialog to start in: the user's
+/// own profiles first (Linux: colord / DisplayCAL; macOS: ColorSync), then the system's.
+fn display_profile_dir() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|h| !h.is_empty()).map(std::path::PathBuf::from);
+    let user = |rel: &str| home.as_ref().map(|h| h.join(rel));
+    let candidates: Vec<Option<std::path::PathBuf>> = if cfg!(target_os = "macos") {
+        vec![user("Library/ColorSync/Profiles"), Some("/Library/ColorSync/Profiles".into())]
+    } else if cfg!(windows) {
+        let root = std::env::var_os("SystemRoot").map(std::path::PathBuf::from).unwrap_or_else(|| "C:\\Windows".into());
+        vec![Some(root.join("System32").join("spool").join("drivers").join("color"))]
+    } else {
+        let data = std::env::var_os("XDG_DATA_HOME").filter(|d| !d.is_empty()).map(std::path::PathBuf::from).or_else(|| user(".local/share"));
+        vec![data.map(|d| d.join("icc")), user(".color/icc"), Some("/usr/share/color/icc".into())]
+    };
+    candidates.into_iter().flatten().find(|d| d.is_dir())
+}
+
+/// The file dialogs' parent, set once the window exists ([`set_dialog_parent`]). A dialog with a
+/// parent is a child of the app's window; without one, the xdg-desktop-portal picker on Wayland is
+/// a stray top-level ("Failed to associate portal window with parent window" in the portal's log):
+/// a tiling compositor puts it beside the app, and a fullscreen window hides it entirely, so
+/// Import Photos… looks like a hang. rfd exports the Wayland surface through xdg_foreign itself;
+/// `FileDialog` is `Clone` and `Send`, so one parented template serves every picker, including
+/// the one on its own thread (#191). Only set on Linux and FreeBSD: on macOS a parented dialog
+/// becomes a sheet and on Windows a modal, a behaviour change this does not make. Hosted, nothing
+/// sets it (the host owns the window).
+static DIALOG_PARENT: std::sync::OnceLock<rfd::FileDialog> = std::sync::OnceLock::new();
+
+/// Make the file dialogs children of the window `cc` created (Linux and FreeBSD; see
+/// `DIALOG_PARENT`). Call before [`services`].
+pub fn set_dialog_parent(cc: &eframe::CreationContext<'_>) {
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    let _ = DIALOG_PARENT.set(rfd::FileDialog::new().set_parent(cc));
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+    let _ = cc;
+}
+
+/// A file dialog owned by the app's window, or a plain one before the window exists.
+fn file_dialog() -> rfd::FileDialog {
+    DIALOG_PARENT.get().cloned().unwrap_or_default()
+}
+
 /// The platform services; `ctx` repaints when a file dialog closes, and `log_file` is
 /// for Help ▸ Open Log Folder.
 pub fn services(ctx: egui::Context, log_file: Option<&std::path::Path>) -> Services {
@@ -60,7 +102,7 @@ pub fn services(ctx: egui::Context, log_file: Option<&std::path::Path>) -> Servi
             std::thread::Builder::new()
                 .name("file-dialog".into())
                 .spawn(move || {
-                    let mut d = rfd::FileDialog::new();
+                    let mut d = file_dialog();
                     if let Some(t) = &req.title {
                         d = d.set_title(t);
                     }
@@ -86,37 +128,17 @@ pub fn services(ctx: egui::Context, log_file: Option<&std::path::Path>) -> Servi
         })),
         log_file: log_file.map(|p| p.display().to_string()),
         pick_lightroom_catalog: Some(Box::new(|| {
-            rfd::FileDialog::new()
+            file_dialog()
                 .set_title(lightcraft_ui_egui::i18n::tr("Import Lightroom Catalog"))
                 .add_filter_nocase(lightcraft_ui_egui::i18n::tr("Lightroom Classic Catalog"), &["lrcat"])
                 .pick_file()
                 .map(|p| p.to_string_lossy().to_string())
         })),
         pick_folder: Some(Box::new(|| {
-            rfd::FileDialog::new().set_title(lightcraft_ui_egui::i18n::tr("Open Library")).pick_folder().map(|p| p.to_string_lossy().to_string())
+            file_dialog().set_title(lightcraft_ui_egui::i18n::tr("Open Library")).pick_folder().map(|p| p.to_string_lossy().to_string())
         })),
-        open_with: Some(Box::new(|path: &str, app: &str| {
-            // spawned, never waited for: the editor runs alongside
-            let app = app.trim();
-            let mut c = if cfg!(target_os = "macos") {
-                let mut c = std::process::Command::new("open");
-                if !app.is_empty() {
-                    c.args(["-a", app]);
-                }
-                c
-            } else if app.is_empty() {
-                if cfg!(target_os = "windows") {
-                    let mut c = std::process::Command::new("cmd");
-                    c.args(["/C", "start", ""]);
-                    c
-                } else {
-                    std::process::Command::new("xdg-open")
-                }
-            } else {
-                std::process::Command::new(app)
-            };
-            c.arg(path).spawn().map(|_| ()).map_err(|e| e.to_string())
-        })),
+        open_with: Some(Box::new(crate::editors::open_with)),
+        check_editor: Some(Box::new(crate::editors::check)),
         open_url: Some(Box::new(|url: &str| {
             if !url.starts_with("https://") {
                 return Err("only https links are opened".into());
@@ -144,7 +166,7 @@ pub fn services(ctx: egui::Context, log_file: Option<&std::path::Path>) -> Servi
                 .and_then(|s| if s.success() || cfg!(target_os = "windows") { Ok(()) } else { Err(format!("reveal failed: {s}")) })
         })),
         pick_files: Some(Box::new(|| {
-            rfd::FileDialog::new()
+            file_dialog()
                 .add_filter_nocase(lightcraft_ui_egui::i18n::tr("Photos"), lightcraft_engine::import::EXTENSIONS)
                 .pick_files()
                 .unwrap_or_default()
@@ -153,14 +175,14 @@ pub fn services(ctx: egui::Context, log_file: Option<&std::path::Path>) -> Servi
                 .collect()
         })),
         pick_denoise_model: Some(Box::new(|| {
-            rfd::FileDialog::new()
+            file_dialog()
                 .add_filter_nocase(lightcraft_ui_egui::i18n::tr("ONNX model"), &["onnx"])
                 .pick_file()
                 .map(|p| vec![p.to_string_lossy().into_owned()])
                 .unwrap_or_default()
         })),
         pick_preset_files: Some(Box::new(|| {
-            rfd::FileDialog::new()
+            file_dialog()
                 .set_title(lightcraft_ui_egui::i18n::tr("Import Presets"))
                 .add_filter_nocase(
                     lightcraft_ui_egui::i18n::tr("Presets & Profiles"),
@@ -173,7 +195,7 @@ pub fn services(ctx: egui::Context, log_file: Option<&std::path::Path>) -> Servi
                 .collect()
         })),
         pick_model_file: Some(Box::new(|| {
-            rfd::FileDialog::new()
+            file_dialog()
                 .set_title(lightcraft_ui_egui::i18n::tr("Add a Face Recognition Model"))
                 .add_filter_nocase(lightcraft_ui_egui::i18n::tr("Face models (ONNX)"), &["onnx"])
                 .pick_file()
@@ -181,23 +203,53 @@ pub fn services(ctx: egui::Context, log_file: Option<&std::path::Path>) -> Servi
                 .unwrap_or_default()
         })),
         pick_tracklog: Some(Box::new(|| {
-            rfd::FileDialog::new()
+            file_dialog()
                 .set_title(lightcraft_ui_egui::i18n::tr("Auto-Tag from Tracklog"))
                 .add_filter_nocase(lightcraft_ui_egui::i18n::tr("GPS Track Log"), &["gpx"])
                 .pick_file()
                 .map(|p| vec![p.to_string_lossy().to_string()])
                 .unwrap_or_default()
         })),
+        // macOS doesn't colour-manage the window: previews follow the screen's profile (#787)
+        #[cfg(target_os = "macos")]
+        screen_profile: Some(Box::new(crate::screen_profile::icc)),
+        #[cfg(not(target_os = "macos"))]
+        screen_profile: None,
+        pick_display_profile: Some(Box::new(|| {
+            let mut d = file_dialog()
+                .set_title(lightcraft_ui_egui::i18n::tr("Choose Monitor Profile"))
+                .add_filter_nocase(lightcraft_ui_egui::i18n::tr("ICC Profiles"), &["icc", "icm"]);
+            if let Some(dir) = display_profile_dir() {
+                d = d.set_directory(dir);
+            }
+            d.pick_file().map(|p| vec![p.to_string_lossy().to_string()]).unwrap_or_default()
+        })),
         save_preset_file: Some(Box::new(|name: &str| {
-            rfd::FileDialog::new()
+            file_dialog()
                 .set_title(lightcraft_ui_egui::i18n::tr("Export Presets"))
                 .add_filter_nocase(lightcraft_ui_egui::i18n::tr("LightCraft Preset"), &["lcpreset"])
                 .set_file_name(name)
                 .save_file()
                 .map(|p| p.to_string_lossy().to_string())
         })),
+        pick_keyword_list: Some(Box::new(|| {
+            file_dialog()
+                .set_title(lightcraft_ui_egui::i18n::tr("Import Keywords"))
+                .add_filter_nocase(lightcraft_ui_egui::i18n::tr("Keyword Lists"), &["txt", "utf8"])
+                .pick_file()
+                .map(|p| vec![p.to_string_lossy().to_string()])
+                .unwrap_or_default()
+        })),
+        save_keyword_list: Some(Box::new(|name: &str| {
+            file_dialog()
+                .set_title(lightcraft_ui_egui::i18n::tr("Export Keywords"))
+                .add_filter_nocase(lightcraft_ui_egui::i18n::tr("Keyword Lists"), &["txt"])
+                .set_file_name(name)
+                .save_file()
+                .map(|p| p.to_string_lossy().to_string())
+        })),
         pick_curve_preset_files: Some(Box::new(|| {
-            rfd::FileDialog::new()
+            file_dialog()
                 .set_title(lightcraft_ui_egui::i18n::tr("Import Point Curve Presets"))
                 .add_filter_nocase(lightcraft_ui_egui::i18n::tr("Point Curve Presets"), &["lccurve", "json"])
                 .pick_files()
@@ -207,7 +259,7 @@ pub fn services(ctx: egui::Context, log_file: Option<&std::path::Path>) -> Servi
                 .collect()
         })),
         save_curve_preset_file: Some(Box::new(|name: &str| {
-            rfd::FileDialog::new()
+            file_dialog()
                 .set_title(lightcraft_ui_egui::i18n::tr("Export Point Curve Presets"))
                 .add_filter_nocase(lightcraft_ui_egui::i18n::tr("Point Curve Presets"), &["lccurve"])
                 .set_file_name(name)
@@ -223,6 +275,7 @@ pub fn services(ctx: egui::Context, log_file: Option<&std::path::Path>) -> Servi
         // the library is a folder on disk: backed up with the user's other files
         backup_library: None,
         restore_library: None,
+        system_theme: crate::appearance::service(),
     }
 }
 

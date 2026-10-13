@@ -3,12 +3,12 @@
 use lightcraft_engine::Session;
 use lightcraft_ui_egui::panels::library_problem::LibraryProblem;
 
-use crate::prefs::config_dir;
-
 /// The library session with the folder face models are kept in (`<config>/models`).
 pub fn open_session(in_memory: bool, dir: Option<std::path::PathBuf>, seed_demo: bool) -> (Session, Option<LibraryProblem>) {
     let (mut s, problem) = open_library_session(in_memory, dir, seed_demo);
     s.face_models_dir = lightcraft_engine::config::default_face_models_dir();
+    // Control requests are answered on the UI thread: Add to Apple Photos must not wait there
+    s.apple_photos_background = true;
     (s, problem)
 }
 
@@ -47,15 +47,6 @@ fn open_library_session(in_memory: bool, dir: Option<std::path::PathBuf>, seed_d
     }
 }
 
-/// AI masks: the SAM 3 checkpoint (facebook/sam3) in <config>/models/sam3, or LIGHTCRAFT_SAM3_DIR
-/// (never required: without it, AI masks offer to download it; see docs/ai-masks.md), and the
-/// user's own download locations, one base URL per line (LIGHTCRAFT_SAM3_MIRRORS too).
-pub fn configure_segmenter(session: &mut Session) {
-    session.segmenter.dir =
-        std::env::var_os("LIGHTCRAFT_SAM3_DIR").map(std::path::PathBuf::from).or_else(|| config_dir().map(|d| d.join("models").join("sam3")));
-    session.segmenter.mirrors_file = config_dir().map(|d| d.join("models").join("sam3-mirrors.txt"));
-}
-
 /// The library to open without `--library`: the one last opened from Settings (unless
 /// `LIGHTCRAFT_LIBRARY` says otherwise), else the default location.
 pub fn library_dir(prefs: Option<&lightcraft_ui_egui::UiState>) -> Option<std::path::PathBuf> {
@@ -64,4 +55,17 @@ pub fn library_dir(prefs: Option<&lightcraft_ui_egui::UiState>) -> Option<std::p
         .filter(|p| !p.is_empty() && std::env::var_os("LIGHTCRAFT_LIBRARY").is_none())
         .map(Into::into)
         .or_else(lightcraft_engine::library::default_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    /// Issue #236: the window answers control requests on its UI thread, so the desktop session
+    /// adds to Apple Photos on a worker (headless sessions wait instead).
+    #[test]
+    fn the_desktop_session_adds_to_apple_photos_in_the_background() {
+        let (s, problem) = super::open_session(true, None, false);
+        assert!(problem.is_none());
+        assert!(s.apple_photos_background);
+        assert!(!lightcraft_engine::Session::new().apple_photos_background);
+    }
 }

@@ -11,12 +11,16 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 // Built everywhere so its tests run on every platform; only Linux AppImages use it.
+mod appearance;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod appimage;
+#[cfg(target_os = "macos")]
+mod apple_events;
 mod control_server;
 mod launch_guard;
 #[cfg(target_os = "macos")]
 mod native_menu;
+mod window;
 
 use effectcraft_embed::desktop;
 use effectcraft_ui_egui::EffectcraftApp;
@@ -34,6 +38,22 @@ fn app_icon() -> egui::IconData {
     #[cfg(not(target_os = "macos"))]
     let png: &[u8] = ICON_PNG;
     eframe::icon_data::from_png_bytes(png).unwrap_or_default()
+}
+
+/// Both native JSON projects and Save a Copy As XML projects are openable on launch.
+/// Keep this classification shared by project opening and the subsequent media-import pass.
+fn is_project_file(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("ecproj") || ext.eq_ignore_ascii_case("ecprojx"))
+}
+
+/// winit 0.30 cannot deliver native Wayland file drops. XWayland can.
+#[cfg(target_os = "linux")]
+fn wayland_drop_notice(wayland_display: Option<&std::ffi::OsStr>, backend: Option<&std::ffi::OsStr>) -> Option<&'static str> {
+    (wayland_display.is_some_and(|v| !v.is_empty()) && backend != Some(std::ffi::OsStr::new("x11")))
+        .then_some("Native Wayland file drops are unavailable. Use File ▸ Import ▸ File… or run via XWayland (see README, Linux).")
 }
 
 /// The command line.
@@ -66,28 +86,39 @@ fn parse_args(args: impl IntoIterator<Item = String>, env_port: Option<String>) 
 }
 
 fn main() -> eframe::Result {
-    // Help ▸ Enable Logging writes through this logger; warnings feed the compatibility report.
+    // First, so the panic hook and every start-up warning are recorded. Records go to stderr
+    // and the session log; Help ▸ Enable Logging writes through this logger too, and warnings
+    // feed the compatibility report.
     effectcraft_engine::logging::install();
     effectcraft_engine::logging::install_panic_hook();
     let Some(Args { control_port, files, demo, home }) = parse_args(std::env::args().skip(1), std::env::var("EFFECTCRAFT_CONTROL_PORT").ok()) else {
         println!("effectcraft {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     };
+    // The session log lives in the settings folder (`Logs/effectcraft.log`, the previous two runs
+    // kept): a launch from the Dock or a menu has no terminal. Opened after the arguments, so
+    // `--version` leaves no file behind; records logged until now are written to it first.
+    if let Some(dir) = effectcraft_host::config_dir() {
+        match effectcraft_engine::logging::attach_session_log(&effectcraft_engine::logging::log_dir(Some(&dir))) {
+            Ok(path) => log::info!("effectcraft {}, log file {}", env!("CARGO_PKG_VERSION"), path.display()),
+            Err(e) => log::warn!("no log file: {e}"),
+        }
+    }
     // The font menus list the installed fonts: read their names while the window opens.
     effectcraft_engine::text::fonts::scan_system_in_background();
     // Wayland shows the window's icon from its desktop entry: an AppImage brings its own.
     #[cfg(target_os = "linux")]
     appimage::integrate_from_env(ICON_PNG);
-    // Settings ▸ Startup & Repair ▸ Window Graphics, switched to OpenGL when the last launch's
-    // window never drew (a crashing graphics driver, #243).
+    // Settings ▸ Startup & Repair ▸ Window Graphics, switched to OpenGL when the last launch
+    // stopped as its window opened (a crashing graphics driver, #243).
     let mut launch = launch_guard::Launch::begin(effectcraft_host::config_dir().as_deref(), std::env::var_os("WGPU_BACKEND").is_some());
     let on_gl = launch.backends == Some(eframe::wgpu::Backends::GL);
     let notice = launch.notice.take();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("EffectCraft")
-            .with_inner_size([1680.0, 1020.0])
-            .with_min_inner_size([960.0, 600.0])
+            .with_inner_size(window::DEFAULT_SIZE)
+            .with_min_inner_size(window::MIN_SIZE)
             .with_drag_and_drop(true)
             // Started for an agent (`--control`): open without taking the user's keyboard focus.
             .with_active(control_port.is_none())
@@ -98,9 +129,15 @@ fn main() -> eframe::Result {
         wgpu_options: wgpu_options(launch.backends),
         ..Default::default()
     };
-    // Start-up milestones: with `RUST_LOG=info` they go to stderr, so a window that never
-    // appears shows how far start-up got (#234).
+    // Start-up milestones go to stderr and the session log, so a window that never appears
+    // shows how far start-up got (#234).
     log::info!("effectcraft {}: opening the window", env!("CARGO_PKG_VERSION"));
+    // Registered before the event loop starts, so it catches the Finder event that launched us as
+    // well as later ones. Lives until the event loop returns; the app creator only borrows it.
+    #[cfg(target_os = "macos")]
+    let apple_events = apple_events::AppleEvents::install();
+    #[cfg(target_os = "macos")]
+    let apple_events = &apple_events;
     let result = eframe::run_native(
         "EffectCraft",
         options,
@@ -116,22 +153,26 @@ fn main() -> eframe::Result {
             if let Some(rs) = &cc.wgpu_render_state {
                 desktop::install_device_handlers(rs, &gpu_failures);
             }
+            // Lazy open, background auto-save, plug-ins and settings from the platform config
+            // directory. Agent-driven runs (`--control`) skip crash recovery.
             let mut session = desktop::session();
-            // Agent-driven runs (`--control`) skip crash recovery.
+            // Fit the window to its monitor, or put it back where it was (still hidden).
+            let saved_window = session.config.as_deref().and_then(window::load);
+            let opened = cc.winit_window().map(|w| window::restore(w, saved_window));
             let recovery = if control_port.is_none() { session.begin_recovery() } else { None };
-            let project = files.iter().find(|f| f.ends_with(".ecproj")).cloned();
+            let project = files.iter().find(|f| is_project_file(f)).cloned();
             if let Some(p) = project {
                 if let Err(e) = session.execute("file.open", json!({"path": p})) {
-                    eprintln!("effectcraft: {e}");
+                    log::warn!("{p}: {e}");
                 }
             } else if demo {
                 let _ = session.execute("file.openDemoProject", json!({}));
             }
-            let media: Vec<String> = files.iter().filter(|f| !f.ends_with(".ecproj")).cloned().collect();
+            let media: Vec<String> = files.iter().filter(|f| !is_project_file(f)).cloned().collect();
             if !media.is_empty()
                 && let Err(e) = session.execute("file.import", json!({"paths": media}))
             {
-                eprintln!("effectcraft: {e}");
+                log::warn!("import: {e}");
             }
             let show_home = home.unwrap_or(session.prefs.startup.show_home_on_launch && files.is_empty() && control_port.is_none());
             // The ScriptUI panels open when the app last quit open again (a failing one is
@@ -146,9 +187,34 @@ fn main() -> eframe::Result {
             if let Some(r) = recovery {
                 app.offer_recovery(r);
             }
+            #[cfg(target_os = "linux")]
+            if let Some(note) = wayland_drop_notice(std::env::var_os("WAYLAND_DISPLAY").as_deref(), std::env::var_os("WINIT_UNIX_BACKEND").as_deref())
+                && app.ui.status.is_empty()
+            {
+                app.ui.status = note.into();
+            }
             desktop::install_hooks(&mut app);
+            // The window closes after a lost graphics device (#591); say why, unless an agent drives
+            // the app through the control channel.
+            if control_port.is_none() {
+                app.hooks.device_lost = Some(Box::new(|saved: Option<Result<String, String>>| {
+                    let saved = match saved {
+                        Some(Ok(path)) => format!("\n\nYour unsaved changes were saved to:\n{path}\n\nReopen EffectCraft to recover them."),
+                        Some(Err(e)) => format!("\n\nYour unsaved changes could not be saved ({e})."),
+                        None => String::new(),
+                    };
+                    rfd::MessageDialog::new()
+                        .set_level(rfd::MessageLevel::Error)
+                        .set_title("EffectCraft: graphics device lost")
+                        .set_description(format!("The graphics driver stopped responding, so EffectCraft has to close.{saved}"))
+                        .show();
+                }));
+            }
+            app.hooks.system_theme = appearance::service();
             #[cfg(target_os = "macos")]
             {
+                // The commands' file dialogs open as sheets instead of nested modal loops (#511).
+                desktop::install_sheet_dialogs(&mut app, &cc.egui_ctx);
                 app.hooks.app_action = Some(Box::new(native_menu::app_action));
                 app.hooks.clipboard_text = Some(Box::new(native_menu::clipboard_text));
             }
@@ -161,7 +227,10 @@ fn main() -> eframe::Result {
             Ok(Box::new(Desktop {
                 #[cfg(target_os = "macos")]
                 menu: native_menu::NativeBar::new(&cc.egui_ctx),
+                #[cfg(target_os = "macos")]
+                apple_events: apple_events.connect(&cc.egui_ctx),
                 app,
+                window: window::Tracker::new(opened, saved_window, control_port.is_none()),
                 launch,
                 drawn: false,
             }))
@@ -213,8 +282,12 @@ fn startup_failed(e: &eframe::Error, gl_next: bool) {
     let message = format!(
         "EffectCraft couldn't start its window: {e}\n\n{next}Updating the graphics driver often helps. If it keeps happening, please report it at https://github.com/storytold/effectcraft/issues with this message."
     );
-    log::error!("{message}");
-    eprintln!("effectcraft: {message}");
+    // Standard error and the session log; standard error alone when RUST_LOG turned errors off.
+    if log::log_enabled!(log::Level::Error) {
+        log::error!("{message}");
+    } else {
+        eprintln!("effectcraft: {message}");
+    }
     let _ = rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
         .set_title("EffectCraft")
@@ -228,6 +301,11 @@ struct Desktop {
     app: EffectcraftApp,
     #[cfg(target_os = "macos")]
     menu: native_menu::NativeBar,
+    /// Documents opened from Finder, the Dock or `open` (macOS).
+    #[cfg(target_os = "macos")]
+    apple_events: apple_events::Opened,
+    /// The window's size and position, saved for the next launch.
+    window: window::Tracker,
     launch: launch_guard::Launch,
     /// The first frame was drawn (logged once).
     drawn: bool,
@@ -242,18 +320,27 @@ impl eframe::App for Desktop {
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.app.ui(ui, frame);
+        self.window.frame(ui.ctx(), self.app.session.config.as_deref());
         if !self.drawn {
             self.drawn = true;
-            self.launch.drawn();
             log::info!("first frame drawn");
+        }
+        // The launch guard's marker goes once the window has kept drawing for a few seconds: a
+        // driver may still crash as the window is shown and its surface re-created.
+        if let Some(left) = self.launch.frame_drawn() {
+            ui.ctx().request_repaint_after(left);
         }
     }
 
     fn on_exit(&mut self) {
+        self.launch.exited();
+        self.window.save(self.app.session.config.as_deref());
         self.app.on_exit();
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        #[cfg(target_os = "macos")]
+        self.apple_events.feed(self.app.is_ready(), ctx, raw_input);
         self.app.raw_input_hook(ctx, raw_input);
     }
 }
@@ -294,6 +381,17 @@ mod tests {
         parse_args(args.iter().map(|a| a.to_string()), None)
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn wayland_drop_notice_recommends_import_or_xwayland() {
+        use std::ffi::OsStr;
+        let warning = super::wayland_drop_notice(Some(OsStr::new("wayland-0")), None).unwrap();
+        assert!(warning.contains("File ▸ Import") && warning.contains("XWayland"));
+        assert!(super::wayland_drop_notice(None, None).is_none());
+        assert!(super::wayland_drop_notice(Some(OsStr::new("")), None).is_none());
+        assert!(super::wayland_drop_notice(Some(OsStr::new("wayland-0")), Some(OsStr::new("x11"))).is_none());
+    }
+
     /// The window's device never asks for more than the adapter offers (#198).
     #[test]
     fn device_limits_fit_the_adapter() {
@@ -305,6 +403,20 @@ mod tests {
         }
         let big = Limits { max_texture_dimension_2d: 32768, ..Limits::default() };
         assert_eq!(super::device_limits(big).max_texture_dimension_2d, 16384);
+    }
+
+    /// A positional .ecprojx is a project file, not an unsupported media import (#528).
+    #[test]
+    fn launch_classifies_xml_and_json_projects_as_projects() {
+        for path in ["Copy.ecprojx", "/tmp/Scene.ecproj", "C:\\\\work\\\\Shot.ECPROJX"] {
+            assert!(super::is_project_file(path), "{path}");
+        }
+        for path in ["scene.ecprojx.png", "scene.mp4", "scene", "copy.ecprojx.bak"] {
+            assert!(!super::is_project_file(path), "{path}");
+        }
+        let files = ["scene.ecprojx".to_string(), "clip.mov".to_string()];
+        assert_eq!(files.iter().find(|f| super::is_project_file(f)).map(String::as_str), Some("scene.ecprojx"));
+        assert_eq!(files.iter().filter(|f| !super::is_project_file(f)).map(String::as_str).collect::<Vec<_>>(), vec!["clip.mov"],);
     }
 
     /// Launching without a project opens an empty project, not the demo (#204).

@@ -96,9 +96,9 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "command_batch",
             "Run several commands",
-            "Run steps in order; each edit is its own undo step. Returns completed, failed and results. Stops on the first error by default.",
+            "Run steps in order; each edit is its own undo step, or with atomic:true the whole batch is one (named `label`, else after its first edit). A param string that is exactly \"$N.path\" (N: 0-based step index) or \"$last.path\" takes that value from an earlier step's result, e.g. {\"id\":\"$1.id\"}; \"$$\" starts a literal \"$\". Returns completed, failed and results. Stops on the first error by default.",
             obj(
-                json!({"steps": {"type":"array", "items":obj(json!({"id":string("Command id"),"params":{"type":"object"}}), &["id"])}, "stop_on_error":{"type":"boolean", "default":true}}),
+                json!({"steps": {"type":"array", "items":obj(json!({"id":string("Command id"),"params":{"type":"object"}}), &["id"])}, "stop_on_error":{"type":"boolean", "default":true}, "atomic":{"type":"boolean", "default":false, "description":"Make the batch's edits one undo step (needs an open document)"}, "label":string("The undo step's name with atomic")}),
                 &["steps"],
             ),
             false,
@@ -113,8 +113,11 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "render_preview",
             "Render a preview",
-            "Render the first artboard as inline PNG without changing the document. max_side defaults to 1024, limited to 1..4096.",
-            obj(json!({"max_side":{"type":"integer","minimum":1,"maximum":4096}}), &[]),
+            "Render an artboard (default the first) as inline PNG without changing the document. max_side defaults to 1024, limited to 1..4096.",
+            obj(
+                json!({"max_side":{"type":"integer","minimum":1,"maximum":4096},"artboard":{"type":"integer","minimum":0,"description":"0-based artboard (default 0)"}}),
+                &[],
+            ),
             true,
         ),
         tool("ui_inspect", "Inspect the interface", "Inspect the connected desktop interface; returns a tool error in headless mode.", empty(), true),
@@ -138,7 +141,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "run_command",
             "Run command",
-            "Execute any VectorCraft command by id with JSON params (see list_commands for ids and params). Examples: {\"command\":\"object.group\"}, {\"command\":\"object.align\",\"params\":{\"align\":\"left\"}}, {\"command\":\"file.new\",\"params\":{\"width\":800,\"height\":600}}. Returns the command's result (e.g. {id} for creation commands).",
+            "Execute any VectorCraft command by id with JSON params (see list_commands for ids and params). Examples: {\"command\":\"object.group\"}, {\"command\":\"object.align\",\"params\":{\"horizontal\":\"left\"}}, {\"command\":\"file.new\",\"params\":{\"width\":800,\"height\":600}}. Returns the command's result (e.g. {id} for creation commands).",
             obj(
                 json!({"command": string("Command id, e.g. shape.rectangle, object.group, paint.setFill"), "params": {"type": "object", "description": "Command parameters"}}),
                 &["command"],
@@ -200,7 +203,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "draw_path",
             "Draw path",
-            "Create a path from points ([[x,y],…] or [{x,y,in?:[x,y],out?:[x,y]},…] with Bézier handles) or SVG path data `d`, then apply optional paint. Returns the new object id.",
+            "Create a path from points ([[x,y],…] or [{x,y,in?:[x,y],out?:[x,y]},…] with Bézier handles) or SVG path data `d`, then apply optional paint. Omitted paint fields inherit the current new-art appearance (initially white fill and 1 pt black stroke). For a filled path without an outline, pass an explicit fill and stroke:\"none\". Returns the new object id.",
             obj(
                 json!({
                     "points": {"type": "array", "description": "Anchors: [x,y] pairs or {x, y, in?, out?, smooth?} objects", "items": {"anyOf": [{"type": "array", "items": {"type": "number"}, "minItems": 2}, {"type": "object"}]}},
@@ -217,7 +220,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "draw_shape",
             "Draw shape",
-            "Create a live shape and apply optional paint. rectangle/ellipse: x, y, width, height (rectangle: radius = corner radius). polygon: cx, cy, radius, sides. star: cx, cy, radius1, radius2, points. line: x1, y1, x2, y2. Returns the new object id.",
+            "Create a live shape and apply optional paint. rectangle/ellipse: x, y, width, height (rectangle: radius = corner radius). polygon: cx, cy, radius, sides. star: cx, cy, radius1, radius2, points. line: x1, y1, x2, y2. Omitted paint fields inherit the current new-art appearance (initially white fill and 1 pt black stroke); lines start with no fill and a visible stroke. For a filled shape without an outline, pass an explicit fill and stroke:\"none\". Returns the new object id.",
             obj(
                 json!({
                     "shape": {"type": "string", "enum": ["rectangle", "ellipse", "polygon", "star", "line"]},
@@ -329,7 +332,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "export",
             "Export",
-            "Export the active document with the engine's document.export (the same bytes in the app and headless), in any format of the `format` enum: vectors (svg/svgz with the artboard as viewBox, eps, dxf, emf, wmf), pdf (one page per artboard: all, or `artboard` / `range`), rasters (one rendered artboard: png, jpg, webp, gif, png8 as an indexed .png, tiff, bmp, tga, psd with its layers), txt (the stories, back to front), vectorcraft or template (a native copy or template; the document keeps its path). run_command document.formats lists each format's options. `selection: true` exports only the selected objects, cropped to their bounds. Template layers are left out; live effects are kept (geometry baked, SVG filters for shadows/glows/blur). Without `path` the bytes come back as dataBase64.",
+            "Export the active document with the engine's document.export (the same bytes in the app and headless), in any format of the `format` enum: vectors (svg/svgz with the artboard as viewBox, eps, dxf, emf, wmf), pdf (one page per artboard: all, or `artboard` / `range`), rasters (one rendered artboard: png, jpg, webp, gif, png8 as an indexed .png, tiff, bmp, tga, psd with its layers), txt (the stories, back to front), vectorcraft or template (a native copy or template; the document keeps its path). run_command document.formats lists each format's options. For SVG/SVGZ, top-level `outlineText: true` writes text as paths; DXF takes it too (its type is outlined anyway unless `preserve: editability`). PDF instead uses `options.advanced.outlineText: true`, default false (live text). `selection: true` exports only the selected objects, cropped to their bounds. Template layers are left out; live effects are kept (geometry baked, SVG filters for shadows/glows/blur). Without `path` the bytes come back as dataBase64.",
             obj(
                 json!({
                     "format": {"type": "string", "enum": FORMATS.iter().filter(|f| f.write).map(|f| f.id).collect::<Vec<_>>(), "description": "Default: from the path's extension"},
@@ -338,8 +341,8 @@ pub fn tool_definitions() -> Vec<Value> {
                     "artboard": {"type": "integer", "minimum": 0, "description": "0-based artboard (default: the first; PDF default: all)"},
                     "range": string("1-based artboards such as \"1-3, 5\" (PDF: one page each; other formats take one)"),
                     "selection": {"type": "boolean", "description": "Export only the selection, cropped to it"},
-                    "outlineText": {"type": "boolean", "description": "SVG: text as outlines (viewable without the fonts)"},
-                    "options": {"type": "object", "description": "More format options, passed through (see run_command document.formats), e.g. {\"quality\": 80} for jpg"},
+                    "outlineText": {"type": "boolean", "description": "SVG/SVGZ: true writes text as outlines (viewable without the fonts). DXF takes it too (type outlined anyway unless preserve: editability). PDF uses options.advanced.outlineText instead (default false: live text)"},
+                    "options": {"type": "object", "description": "More format options, passed through (see run_command document.formats), e.g. {\"quality\": 80} for jpg or {\"advanced\": {\"outlineText\": true}} for PDF text as outlines (default false: live text)"},
                 }),
                 &[],
             ),
@@ -419,7 +422,7 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "create_graph",
             "Create graph",
-            "Create a graph (graph tools) in the plot rectangle. Data as `csv` (first row: empty cell then series names; then one row per category: label, values…) or `series`/`categories`/`rows`. Edit later with run_command graph.setData / graph.setType.",
+            "Create a graph (graph tools) in the plot rectangle. Data as `csv` (first row: empty cell then series names; then one row per category: label, values…) or `series`/`categories`/`rows`. An empty CSV cell or a null in `rows` is a blank value (no column; lines break around it); a number in straight quotes is a label. Edit later with run_command graph.setData / graph.setType.",
             obj(
                 json!({
                     "type": {"type": "string", "enum": ["column", "stackedColumn", "bar", "stackedBar", "line", "area", "scatter", "pie", "radar"]},
@@ -430,7 +433,7 @@ pub fn tool_definitions() -> Vec<Value> {
                     "csv": {"type": "string"},
                     "series": {"type": "array", "items": {"type": "string"}},
                     "categories": {"type": "array", "items": {"type": "string"}},
-                    "rows": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+                    "rows": {"type": "array", "items": {"type": "array", "items": {"type": ["number", "null"]}}},
                 }),
                 &["x", "y", "width", "height"],
             ),
@@ -574,7 +577,7 @@ fn select_ids(b: &mut dyn Backend, a: &Args) -> Result<(), String> {
 fn add_text(b: &mut dyn Backend, a: &Args) -> Result<Value, String> {
     let text = a.get("text").and_then(Value::as_str).ok_or("missing string argument `text`")?;
     let mut style = json!({});
-    for k in ["size", "font"] {
+    for k in ["size", "font", "color"] {
         if let Some(v) = a.get(k) {
             style[k] = v.clone();
         }
@@ -591,9 +594,6 @@ fn add_text(b: &mut dyn Backend, a: &Args) -> Result<Value, String> {
         let mut p = json!({"x": x, "y": y, "text": text});
         for (k, v) in style.as_object().into_iter().flatten() {
             p[k.as_str()] = v.clone();
-        }
-        if let Some(c) = a.get("color") {
-            p["color"] = c.clone();
         }
         if let (Some(w), Some(h)) = (a.get("width"), a.get("height")) {
             p["area"] = json!({"width": w, "height": h});
@@ -649,43 +649,50 @@ fn transform(b: &mut dyn Backend, a: &Args) -> Result<Value, String> {
 
 fn screenshot(b: &mut dyn Backend, a: &Args) -> Result<ToolResult, String> {
     let path = a.get("path").and_then(Value::as_str);
-    if a.get("window").and_then(Value::as_bool) == Some(true) {
-        need_ui(b, "screenshot {window:true}")?;
-        // The app writes the capture to disk (loopback: same machine), then we read it back.
-        let tmp;
-        let target = match path {
-            Some(p) => p,
-            None => {
-                tmp = std::env::temp_dir().join(format!("vectorcraft-window-{}.png", std::process::id())).to_string_lossy().to_string();
-                &tmp
-            }
-        };
-        let r = b.call("ui.screenshot", json!({"path": target}))?;
-        let png = std::fs::read(target).map_err(|e| format!("read {target}: {e}"))?;
-        if path.is_none() {
-            std::fs::remove_file(target).ok();
-        }
-        return Ok(image_result(&png, json!({"window": true, "width": r.get("width"), "height": r.get("height"), "path": path})));
-    }
-    let mut p = json!({});
-    for k in ["scale", "artboard"] {
-        if let Some(v) = a.get(k) {
-            p[k] = v.clone();
-        }
-    }
-    let r = b.call("ui.render", p)?;
-    let b64 = r.get("pngBase64").and_then(Value::as_str).ok_or("renderer returned no image")?;
+    let window = a.get("window").and_then(Value::as_bool) == Some(true);
+    // The backend writes the file, where its automation roots allow, and sends the image back too
+    // (`data`): this process writes nothing.
+    let mut p = json!({"data": true});
     if let Some(path) = path {
-        let png = vectorcraft_format::base64_decode(b64).ok_or("renderer returned bad base64")?;
-        std::fs::write(path, png).map_err(|e| format!("write {path}: {e}"))?;
+        p["path"] = json!(path);
     }
-    Ok(ToolResult {
-        content: vec![
-            json!({"type": "image", "data": b64, "mimeType": "image/png"}),
-            json!({"type": "text", "text": json!({"width": r.get("width"), "height": r.get("height"), "path": path}).to_string()}),
-        ],
-        is_error: false,
-    })
+    let r = if window {
+        need_ui(b, "screenshot {window:true}")?;
+        b.call("ui.screenshot", p)?
+    } else {
+        for k in ["scale", "artboard"] {
+            if let Some(v) = a.get(k) {
+                p[k] = v.clone();
+            }
+        }
+        b.call("ui.render", p)?
+    };
+    let png = match r.get("pngBase64").and_then(Value::as_str) {
+        Some(b64) => vectorcraft_format::base64_decode(b64).ok_or("the backend returned bad base64")?,
+        // An app from before `data` wrote the file without sending the image: read it back
+        // (loopback: the same machine).
+        None => match path {
+            Some(path) => std::fs::read(path).map_err(|e| format!("read {path}: {e}"))?,
+            None if window => return old_window_capture(b),
+            None => return Err("the renderer returned no image".into()),
+        },
+    };
+    let info = if window {
+        json!({"window": true, "width": r.get("width"), "height": r.get("height"), "path": path})
+    } else {
+        json!({"width": r.get("width"), "height": r.get("height"), "path": path})
+    };
+    Ok(image_result(&png, info))
+}
+
+/// The window of an app from before `ui.screenshot {data}`, captured through a temporary file.
+fn old_window_capture(b: &mut dyn Backend) -> Result<ToolResult, String> {
+    let tmp = std::env::temp_dir().join(format!("vectorcraft-window-{}.png", std::process::id())).to_string_lossy().to_string();
+    let r = b.call("ui.screenshot", json!({"path": tmp}))?;
+    let png = std::fs::read(&tmp).map_err(|e| format!("read {tmp}: {e}"))?;
+    // Best effort: a temporary file left behind is harmless.
+    std::fs::remove_file(&tmp).ok();
+    Ok(image_result(&png, json!({"window": true, "width": r.get("width"), "height": r.get("height"), "path": Value::Null})))
 }
 
 fn image_result(png: &[u8], info: Value) -> ToolResult {
@@ -898,7 +905,19 @@ fn command_batch(b: &mut dyn Backend, a: &Args) -> Result<ToolResult, String> {
         None => true,
         Some(v) => v.as_bool().ok_or("`stop_on_error` must be a boolean")?,
     };
+    let atomic = match a.get("atomic") {
+        None => false,
+        Some(v) => v.as_bool().ok_or("`atomic` must be a boolean")?,
+    };
+    if atomic {
+        let label = a.get("label").cloned().unwrap_or(Value::Null);
+        b.call("engine.execute", json!({"command":"edit.undoGroup.begin","params":{"label":label}}))?;
+    } else if a.get("label").is_some() {
+        return Err("`label` names the undo step of an atomic batch: give atomic:true too".into());
+    }
     let (mut completed, mut failed, mut results) = (0, 0, Vec::new());
+    // Each step's result (null for a failed one), for later steps' `"$N.path"` references.
+    let mut values: Vec<Value> = vec![];
     for step in steps {
         let result = vectorcraft_engine::guard::catch_panic(|| {
             let args = step.as_object().ok_or("each step must be an object")?;
@@ -908,7 +927,7 @@ fn command_batch(b: &mut dyn Backend, a: &Args) -> Result<ToolResult, String> {
             let id = req_str(args, "id")?;
             let params = match args.get("params") {
                 None | Some(Value::Null) => json!({}),
-                Some(v @ Value::Object(_)) => v.clone(),
+                Some(v @ Value::Object(_)) => vectorcraft_engine::steps::resolve(v, &values)?,
                 Some(_) => return Err("`params` must be an object".into()),
             };
             b.call("engine.execute", json!({"command":id,"params":params}))
@@ -917,16 +936,22 @@ fn command_batch(b: &mut dyn Backend, a: &Args) -> Result<ToolResult, String> {
         match result {
             Ok(v) => {
                 completed += 1;
+                values.push(v.clone());
                 results.push(json!({"ok":true,"result":v}));
             }
             Err(e) => {
                 failed += 1;
+                values.push(Value::Null);
                 results.push(json!({"ok":false,"error":e}));
                 if stop {
                     break;
                 }
             }
         }
+    }
+    // The steps that ran stay, as one undo step.
+    if atomic {
+        b.call("engine.execute", json!({"command":"edit.undoGroup.end","params":{}}))?;
     }
     let mut r = ToolResult::json(&json!({"completed":completed,"failed":failed,"results":results}));
     r.is_error = failed > 0;
@@ -938,8 +963,13 @@ fn render_preview(b: &mut dyn Backend, a: &Args) -> Result<ToolResult, String> {
         None => 1024,
         Some(v) => v.as_u64().filter(|v| (1..=4096).contains(v)).ok_or("`max_side` must be an integer in 1..4096")?,
     };
+    let index = match a.get("artboard") {
+        None => 0,
+        Some(v) => v.as_u64().ok_or("`artboard` must be a 0-based artboard index")?,
+    };
     let doc = b.call("document.inspect", json!({"depth":0}))?;
-    let board = doc.get("artboards").and_then(Value::as_array).and_then(|v| v.first()).ok_or("no such artboard")?;
+    let board =
+        doc.get("artboards").and_then(Value::as_array).and_then(|v| v.get(usize::try_from(index).ok()?)).ok_or(format!("no artboard {index}"))?;
     let width = board.get("width").and_then(Value::as_f64).ok_or("artboard has no width")?;
     let height = board.get("height").and_then(Value::as_f64).ok_or("artboard has no height")?;
     if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
@@ -951,7 +981,7 @@ fn render_preview(b: &mut dyn Backend, a: &Args) -> Result<ToolResult, String> {
     if width.max(height) * scale > 4096.0 {
         return Err("artboard is too large for a bounded preview".into());
     }
-    let r = b.call("ui.render", json!({"scale":scale}))?;
+    let r = b.call("ui.render", json!({"scale":scale, "artboard": index}))?;
     let encoded = r.get("pngBase64").and_then(Value::as_str).ok_or("renderer returned no image")?;
     let png = vectorcraft_format::base64_decode(encoded).ok_or("renderer returned bad base64")?;
     let img = image::load_from_memory_with_format(&png, image::ImageFormat::Png).map_err(|e| format!("read preview: {e}"))?;

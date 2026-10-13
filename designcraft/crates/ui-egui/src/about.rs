@@ -21,7 +21,7 @@ const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/256
 /// The sibling apps (app-page slug, name, what it is) — same list as the README.
 pub const SIBLINGS: &[(&str, &str, &str)] = &[
     ("photocraft", "PhotoCraft", "image editing"),
-    ("drawcraft", "VectorCraft", "vector illustration"),
+    ("vectorcraft", "VectorCraft", "vector illustration"),
     ("filmcraft", "FilmCraft", "video editing, color and sound"),
     ("lightcraft", "LightCraft", "photo library and raw development"),
     ("pdfcraft", "PdfCraft", "reading, organizing and protecting PDFs"),

@@ -17,6 +17,11 @@
 # commands is kept. Full-width punctuation (，。：) inside sentences; half-width parentheses and
 # the " · " separators as in the English. Terms shared with PhotoCraft use the same words as its
 # zh-hant catalog (圖層, 選取, 偏好設定, 混合模式 ...), so the two apps read alike.
+	Glowing Edges…	發光邊緣…
+	Glowing Edges	發光邊緣
+	Edge Width	邊緣寬度
+	Edge Brightness	邊緣亮度
+	Smoothness	平滑度
 
 	  — missing	  — 遺失
 	 to search every command	 以搜尋所有指令
@@ -217,6 +222,8 @@
 	Auto-Collapse Iconic Panels	自動收合圖示面板
 	Ellipse Properties:	橢圓屬性：
 	Invert Pie	反轉扇形
+	Side Length:	邊長：
+	Make Sides Equal	使各邊等長
 	Pie End Angle:	扇形終止角度：
 	Pie Start Angle:	扇形起始角度：
 	Show Tool Group Labels	顯示工具組標籤
@@ -679,6 +686,7 @@
 	Divide Vertically Into	垂直分割為
 	Do Not Move	不移動
 	Do you want to save the changes you made to “{name}”?	要儲存對「{name}」所做的變更嗎？
+	Can't open “{name}”.	無法開啟「{name}」。
 	Document	文件
 	Document Color Mode	文件色彩模式
 	Document Info	文件資訊
@@ -982,6 +990,20 @@
 	Flare	光暈
 	Flare Tool	光暈工具
 	Flare Tool Options	光暈工具選項
+	Halo	光暈
+	Rays	射線
+	Rings	光環
+	Diameter:	直徑：
+	Brightness:	亮度：
+	Growth:	增大：
+	Fuzziness:	模糊度：
+	Number:	數量：
+	Longest:	最長：
+	Path:	路徑：
+	Largest:	最大：
+	Direction:	方向：
+	Symbolism Tools Options	符號工具選項
+	Symbol Set Density:	符號組密度：
 	Flat Image	平面影像
 	Flatness:	平滑度：
 	Flatten Artwork	將圖稿平面化
@@ -1073,6 +1095,23 @@
 	Graph	圖表
 	Graph Data	圖表資料
 	Graph Type	圖表類型
+	Graph Design	圖表設計
+	Graph Marker	圖表標記
+	New Design	新增設計
+	Delete Design	刪除設計
+	Paste Design	貼上設計
+	Select Unused	選取未使用項目
+	Import Data…	匯入資料…
+	Transpose	轉置
+	Switch x/y	切換 x/y
+	Number of Decimals:	小數位數：
+	Column Width:	欄寬：
+	No Legend	無圖例
+	Standard Legend	標準圖例
+	Legends in Wedges	楔形中的圖例
+	Ratio	比例
+	Even	平均
+	Stacked	堆疊
 	Graphic Style	繪圖樣式
 	Graphic Style Libraries	繪圖樣式資料庫
 	Graphic Style Libraries Menu	繪圖樣式資料庫選單
@@ -1148,6 +1187,7 @@
 	Highlight Alternate Glyphs	醒目提示替代字符
 	Highlight anchors on mouse over	滑鼠移過時醒目提示錨點
 	Highlight Rows	反白顯示列
+	Highlight Variable	突出顯示變數
 	Highlight Substituted Fonts	醒目提示被取代的字體
 	Highlight Substituted Glyphs	醒目提示被取代的字符
 	History	步驟記錄
@@ -1293,6 +1333,7 @@
 	Last Effect…	最後一次效果…
 	Last Page	最後一頁
 	Latin	拉丁文
+	Thai	泰文
 	Latin Extended	拉丁文擴充
 	Latin-1 Supplement	拉丁文-1 補充
 	Layer	圖層
@@ -1492,6 +1533,8 @@
 	Monospaced	等寬
 	More	更多
 	More Pathfinder options	更多路徑管理員選項
+	More Align options	更多對齊選項
+	More Paragraph options	更多段落選項
 	More Settings	更多設定
 	Move	移動
 	Move All Objects	移動所有物件
@@ -1513,6 +1556,7 @@
 	Move Rows	移動列
 	Move Slices	移動切片
 	Move Spine Point	移動脊線點
+	Reshape Spine Segment	改變脊線線段外框
 	Move Swatch	移動色票
 	Move Up	上移
 	Move…	移動…
@@ -1537,6 +1581,58 @@
 	Artboard	工作區域
 	Exit	結束
 	New Bristle Brush	新增鬃毛筆刷
+	Calligraphic Brush Options	書法筆刷選項
+	Bristle Brush Options	鬃毛筆刷選項
+	Scatter Brush Options	散佈筆刷選項
+	Art Brush Options	藝術筆刷選項
+	Pattern Brush Options	圖樣筆刷選項
+	Scatter:	散佈：
+	Rotation:	旋轉：
+	Rotation relative to:	旋轉相對於：
+	Brush Scale Options	筆刷縮放選項
+	Scale Proportionately	等比例縮放
+	Stretch to Fit Stroke Length	延伸以符合筆畫長度
+	Stretch Between Guides	在參考線之間延伸
+	Start:	起點：
+	End:	終點：
+	Left to Right	由左至右
+	Right to Left	由右至左
+	Top to Bottom	由上而下
+	Bottom to Top	由下而上
+	Flip:	翻轉：
+	Outer Corner Tile	外角拼貼
+	Side Tile	邊線拼貼
+	Inner Corner Tile	內角拼貼
+	Start Tile	起點拼貼
+	End Tile	終點拼貼
+	Fit	符合
+	Stretch to fit	延伸以符合
+	Add space to fit	增加間距以符合
+	Approximate path	近似路徑
+	Colorization	上色
+	Tints	淺色
+	Tints and Shades	淺色與暗色
+	Hue Shift	色相偏移
+	Key Color:	主要顏色：
+	Roundness:	圓度：
+	Fixed	固定
+	Pressure	壓力
+	Shape:	形狀：
+	Bristle Length:	鬃毛長度：
+	Bristle Density:	鬃毛密度：
+	Bristle Thickness:	鬃毛粗細：
+	Paint Opacity:	上色不透明度：
+	Stiffness:	硬度：
+	Round Point	圓尖頭
+	Flat Point	扁尖頭
+	Round Blunt	圓鈍頭
+	Flat Blunt	扁鈍頭
+	Round Curve	圓彎頭
+	Flat Curve	扁彎頭
+	Round Angle	圓斜頭
+	Flat Angle	扁斜頭
+	Round Fan	圓扇頭
+	Flat Fan	扁扇頭
 	New Brush…	新增筆刷…
 	New Calligraphic Brush	新增書法筆刷
 	New Character Style	新增字元樣式
@@ -1952,6 +2048,11 @@
 	Proof Colors	校樣色彩
 	Proof Setup	校樣設定
 	Properties	內容
+	Proportional Metrics	比例度量
+	Digits	數字
+	Arabic	阿拉伯數字
+	Hindi	印地數字
+	Farsi	波斯數字
 	Proportional Oldstyle	比例舊式數字
 	Pucker & Bloat…	縮攏與膨脹…
 	Pucker Tool	縮攏工具
@@ -2042,6 +2143,9 @@
 	Rectangle: Sunshine	矩形：陽光
 	Rectangle…	矩形…
 	Rectangular Grid	矩形格線
+# Rectangular Grid click dialog.
+	Horizontal Dividers:	水平分隔線：
+	Vertical Dividers:	垂直分隔線：
 	Rectangular Grid Tool	矩形格線工具
 	Red	紅色
 	Redefine Character Style	重新定義字元樣式
@@ -2051,6 +2155,9 @@
 	Redefine Symbol	重新定義符號
 	Redefine {kind} Style	重新定義{kind}樣式
 	Redo	重做
+	List Folder	列出資料夾
+	Begin Undo Group	開始還原群組
+	End Undo Group	結束還原群組
 	Redo {name}	重做 {name}
 	Redo {}	重做 {}
 	Reduce Colors	縮減顏色
@@ -2065,6 +2172,25 @@
 	Reflect…	鏡射…
 	Refresh	重新整理
 	Refresh Font List	重新整理字體清單
+	Missing Fonts	遺失的字體
+	Missing Fonts Dialog	遺失的字體對話框
+	These fonts aren't available. Their text shows in another font.	這些字體無法使用。其文字以其他字體顯示。
+	Search Fonts Folder	搜尋 Fonts 資料夾
+	Find in Folder…	在資料夾中尋找…
+	Find Fonts in Folder…	在資料夾中尋找字體…
+	Find Font Files	尋找字體檔案
+	Add Font Files	新增字體檔案
+	Add Fonts	新增字體
+	Find Fonts	尋找字體
+	Stop	停止
+	Searching…	搜尋中…
+	Not found	找不到
+	{folders} folder(s) and {files} file(s) searched	已搜尋 {folders} 個資料夾、{files} 個檔案
+	{count} folder(s) skipped, such as other apps' and the system's folders and hidden ones	已略過 {count} 個資料夾，例如其他應用程式和系統的資料夾，以及隱藏的資料夾
+	{count} folder(s) or file(s) couldn't be read	有 {count} 個資料夾或檔案無法讀取
+	The search stopped at its limit: search a smaller folder.	搜尋已達上限而停止：請搜尋較小的資料夾。
+	Copy only fonts you own or are licensed to install.	只複製您擁有或已取得安裝授權的字體。
+	VectorCraft copies the fonts to {folder}.	VectorCraft 會將字體複製到 {folder}。
 	Registered Trademark Symbol	註冊商標符號
 	Registration marks	對位標記
 	Registry name:	登錄名稱：
@@ -2084,6 +2210,13 @@
 	Relinked {n} image(s); not in that folder: {}	已重新連結 {n} 張影像；不在該資料夾中：{}
 	Relinked {} image(s)	已重新連結 {} 張影像
 	Relink…	重新連結…
+	Find Linked Files	尋找連結檔案
+	Find Linked Files in Folder…	在資料夾中尋找連結檔案…
+	Choose the file to relink each linked file to. Files with the size and contents saved with the link come first.	請為每個連結檔案選擇要重新連結的檔案。大小和內容與連結所儲存相同的檔案會排在最前面。
+	Same file	相同檔案
+	Same size	相同大小
+	Don't Relink	不重新連結
+	Copy into the document's folder	複製到文件所在的資料夾
 	Reload Plug-ins	重新載入增效模組
 	Remove	移除
 	Remove Anchor Points	移除錨點
@@ -2352,6 +2485,7 @@
 	Select an image to see its Link Info.	選取影像以檢視其連結資訊。
 	Select an image to trace	選取要描圖的影像
 	Select Anchors	選取錨點
+	Select Segments	選取路徑區段
 	Select Appearance Item	選取外觀項目
 	Select Art	選取圖稿
 	Select art and choose Object › Pattern › Make.	選取圖稿，然後選擇「物件 › 圖樣 › 製作」。
@@ -2397,7 +2531,6 @@
 	Set base color to the current color	將基本色設為目前顏色
 	Set Bounds	設定邊界
 	Set Current Layer	設定目前圖層
-	Set Key Object	設定關鍵物件
 	Set Keyboard Shortcut	設定鍵盤快速鍵
 	Set Mesh Point Color	設定網格點顏色
 	Set Preference	設定偏好設定
@@ -2515,6 +2648,7 @@
 	Size Tile to Art	拼貼符合圖稿大小
 	Size/Leading	大小/行距
 	Size:	大小：
+	Ridges per segment:	每段起伏數：
 	Size: {size}  Tracking: {tracking}	大小：{size}  字距：{tracking}
 	Skew	傾斜
 	Skin Tone Ramps	膚色漸階
@@ -2543,6 +2677,9 @@
 	Smart Guides (⌘U)	智慧型參考線 (⌘U)
 	Smart Punctuation…	智慧型標點…
 	Smooth	平滑
+	Corner	角點
+	Relative	相對
+	Absolute	絕對
 	Smooth Color	平滑顏色
 	Smooth Tool	平滑工具
 	Snap Curves To Lines	將曲線靠齊線條
@@ -2671,6 +2808,23 @@
 	Add to Library	加入資料庫
 	Delete Library	刪除資料庫
 	Delete Library Item	刪除資料庫項目
+	No results	沒有結果
+	No items in this library match “{query}”.	此資料庫中沒有符合「{query}」的項目。
+	Right-click an item to move it into this group.	在項目上按一下右鍵，即可將其移至此群組。
+	New Group	新增群組
+	New Group…	新增群組…
+	Move to Group	移至群組
+	No Group	無群組
+	Rename Group…	重新命名群組…
+	Delete Group	刪除群組
+	Import Library…	匯入資料庫…
+	Export Library…	匯出資料庫…
+	Import Library	匯入資料庫
+	Export Library	匯出資料庫
+	New Library Group	新增資料庫群組
+	Rename Library Group	重新命名資料庫群組
+	Delete Library Group	刪除資料庫群組
+	Move Library Item to Group	將資料庫項目移至群組
 	Library	資料庫
 	Rename Library	重新命名資料庫
 	Show Library	顯示資料庫
@@ -2764,6 +2918,9 @@
 	Tool Options…	工具選項…
 	Toolbar: Advanced / Basic	工具列：進階 / 基本
 	Toolbar: Single/Double Column	工具列：單欄/雙欄
+	Toolbar: Add Tool	工具列：新增工具
+	Toolbar: Remove Tool	工具列：移除工具
+	Toolbar: Reset	工具列：重設
 	Toolbars	工具列
 	Tools	工具
 	Top	上
@@ -2869,6 +3026,9 @@
 	Untitled	未命名
 	Update Link	更新連結
 	Update Links	更新連結
+	Update Changed Links	更新已變更的連結
+	{count} linked image(s) changed on disk. Show the new versions?	有 {count} 個連結影像已在磁碟上變更。要顯示新版本嗎？
+@msg	Updated {_1} linked file(s) changed on disk	已更新 {_1} 個在磁碟上變更的連結檔案
 	Update Modified Links	更新已修改的連結
 	Updated {} image(s)	已更新 {} 張影像
 	UPPERCASE	全部大寫
@@ -2920,6 +3080,38 @@
 	V:	V：
 	Variable Width Profile	可變寬度描述檔
 	Variables	變數
+	New Variable	新增變數
+	Delete Variable	刪除變數
+	List Variables	列出變數
+	Bind Variable	綁定變數
+	Unbind Variable	解除變數綁定
+	New Data Set	新增資料集
+	Delete Data Set	刪除資料集
+	List Data Sets	列出資料集
+	Select Data Set	選取資料集
+	Next Data Set	下一個資料集
+	Previous Data Set	上一個資料集
+	Data Sets	資料集
+	New Variable…	新增變數…
+	New Data Set…	新增資料集…
+	Edit Data Set…	編輯資料集…
+	Data Set	資料集
+	Kind	類型
+	Variable	變數
+	no document	沒有文件
+	no data set to edit	沒有可編輯的資料集
+	Make Text Dynamic	使文字動態化
+	Make Visibility Dynamic	使可見性動態化
+	Capture Data Set	擷取資料集
+	Update Data Set	更新資料集
+	Rename Data Set…	重新命名資料集…
+	Variable Options…	變數選項…
+	Select Bound Object	選取繫結的物件
+	Select All Bound Objects	選取所有繫結的物件
+	Multiple objects	多個物件
+	New Name	新名稱
+	no variable to rename	沒有可重新命名的變數
+	no data set to rename	沒有可重新命名的資料集
 	Variation:	變化：
 	Vector Effects	向量效果
 	Vector Halftone	向量半色調
@@ -2937,6 +3129,7 @@
 	Vertical %	垂直 %
 	Vertical Align Bottom	垂直靠下對齊
 	Vertical Align Center	垂直置中對齊
+	Horizontal & Vertical Align Center	水平和垂直置中對齊
 	Vertical Align Top	垂直靠上對齊
 	Vertical Area Type Tool	垂直區域文字工具
 	Vertical Distribute Bottom	垂直均分下緣
@@ -3144,6 +3337,7 @@ axis	Horizontal	水平
 axis	Vertical	垂直
 axis	Both	兩者
 	Drag to move	拖曳以移動
+	Drag to move out of the set	拖曳以移出該組合
 	Drag to float as a toolbar	拖曳使其浮動為工具列
 	Put back in the toolbar	放回工具列
 	Float Panel	浮動面板
@@ -3166,6 +3360,8 @@ axis	Both	兩者
 	Images: link to the file instead of only embedding it.	影像：連結至檔案，而不只是嵌入。
 	VectorCraft documents: one locked object, updated when the file changes.	VectorCraft 文件：單一鎖定物件，檔案變更時隨之更新。
 	A file dialog is open: choose there first	檔案對話方塊已開啟：請先在其中選擇
+	The document was closed while its file dialog was open	檔案對話方塊開啟期間，文件已關閉
+	The dialog was closed before its file dialog answered	檔案對話方塊回應之前，對話方塊已關閉
 	Shaper	Shaper
 	Expand Shaper Group	展開 Shaper 群組
 	Release Shaper Group	釋放 Shaper 群組
@@ -3179,6 +3375,31 @@ axis	Both	兩者
 	Smart Blur…	智慧型模糊…
 	Sharpen	銳利化
 	Unsharp Mask…	反銳利化遮罩…
+	Pixelate	像素化
+	Color Halftone…	彩色半色調…
+	Crystallize…	結晶化…
+	Mezzotint…	網線銅版…
+	Pointillize…	點描…
+	Color Halftone	彩色半色調
+	Crystallize	結晶化
+	Mezzotint	網線銅版
+	Pointillize	點描
+	Max. Radius	最大半徑
+	Channel 1	色版 1
+	Channel 2	色版 2
+	Channel 3	色版 3
+	Channel 4	色版 4
+	Cell Size	單元大小
+	Fine Dots	細點
+	Medium Dots	中等點
+	Grainy Dots	顆粒點
+	Coarse Dots	粗點
+	Short Lines	短線
+	Medium Lines	中等線
+	Long Lines	長線
+	Short Strokes	短筆畫
+	Medium Strokes	中等筆畫
+	Long Strokes	長筆畫
 	Radial Blur	放射狀模糊
 	Smart Blur	智慧型模糊
 	Unsharp Mask	反銳利化遮罩
@@ -3190,3 +3411,161 @@ axis	Both	兩者
 	Draft	草稿
 	Good	良好
 	Best	最佳
+	Video	視訊
+	De-Interlace…	反交錯…
+	De-Interlace	反交錯
+	NTSC Colors	NTSC 色彩
+	Eliminate	消除
+	Create New Fields by	建立新圖場以
+	Odd Fields	奇數圖場
+	Even Fields	偶數圖場
+	Duplication	複製
+	Interpolation	內插
+	RGB:	RGB：
+	CMYK:	CMYK：
+	Texture	紋理
+	Craquelure…	龜裂紋…
+	Grain…	顆粒…
+	Mosaic Tiles…	馬賽克拼貼…
+	Patchwork…	拼綴圖…
+	Stained Glass…	彩色玻璃…
+	Texturizer…	紋理化…
+	Craquelure	龜裂紋
+	Grain	顆粒
+	Mosaic Tiles	馬賽克拼貼
+	Patchwork	拼綴圖
+	Stained Glass	彩色玻璃
+	Texturizer	紋理化
+	Crack Spacing	裂紋間距
+	Crack Depth	裂紋深度
+	Crack Brightness	裂紋亮度
+	Intensity	強度
+	Grain Type	顆粒類型
+	Tile Size	拼貼大小
+	Grout Width	縫隙寬度
+	Lighten Grout	加亮縫隙
+	Square Size	方塊大小
+	Relief	浮雕
+	Border Thickness	邊框粗細
+	Light Intensity	光源強度
+	Light Direction	光源方向
+	Sprinkles	噴灑
+	Clumped	結塊
+	Contrasty	高反差
+	Enlarged	放大
+	Stippled	點刻
+	Speckle	斑點
+	Brick	磚塊
+	Burlap	粗麻布
+	Canvas	畫布
+	Sandstone	砂岩
+	Bottom Left	左下
+	Top Left	左上
+	Top Right	右上
+	Bottom Right	右下
+effect	Soft	柔和
+	Edge	邊緣
+	System Title Bar	系統標題列
+	Value Axis	數值軸
+	On Left Side	左側
+	On Right Side	右側
+	On Both Sides	兩側
+	Short	短
+	Full Width	全寬
+	Distort	扭曲
+	Diffuse Glow…	擴散光暈…
+	Glass…	玻璃…
+	Ocean Ripple…	海洋波紋…
+	Diffuse Glow	擴散光暈
+	Glass	玻璃
+	Ocean Ripple	海洋波紋
+	Graininess	顆粒
+	Glow Amount	光暈量
+	Clear Amount	清除量
+	Ripple Size	波紋大小
+	Ripple Magnitude	波紋強度
+	Blocks	塊狀
+	Frosted	磨砂
+	Tiny Lens	小鏡頭
+	Rename Data Set	重新命名資料集
+	Rename Variable	重新命名變數
+	Variable Options	變數選項
+	Edit Data Set	編輯資料集
+	Define a variable first	請先定義一個變數
+	Text	文字
+	Visibility	可見性
+# Shared panel docking
+	Activate Panel	啟用面板
+	Change Panel Layout	變更面板配置
+	Close Panel	關閉面板
+	Move Panel	移動面板
+	Group with	群組至
+	Resize panels	調整面板大小
+	Resize panel window	調整面板視窗大小
+
+# Revolve profile guidance.
+
+# Interactive Revolve controls.
+	Lighting	照明
+	Revolve angle	旋轉成形角度
+	Axis side	軸的位置
+	Rotation X	X 軸旋轉
+	Rotation Y	Y 軸旋轉
+	Rotation Z	Z 軸旋轉
+	Shading	明暗處理
+	Direction	方向
+	Elevation	仰角
+	Ambient	環境光
+	Segments	分段數
+	Show axis	顯示軸
+	Reset all	全部重設
+	Reset to default	重設為預設值
+	Reset all Revolve settings to their defaults.	將所有旋轉成形設定重設為預設值。
+	Drag values or labels. Double-click a value to type.	拖曳數值或標籤。按兩下數值即可輸入。
+	Drag rings to rotate. Shift snaps to 15°.	拖曳圓環旋轉。按住 Shift 以 15° 為間距調整。
+	Drag the light, or its rings. Shift snaps to 15°.	拖曳光源或圓環。按住 Shift 以 15° 為間距調整。
+lighting	Light	光源
+	Keep visible surfaces only when expanding	展開時僅保留可見表面
+	Trim covered geometry on Expand Appearance. Live preview keeps the full surface. Transparent paints and surfaces exceeding visibility limits retain all faces.	展開外觀時裁剪被遮擋的幾何區域。即時預覽保留完整表面。透明繪製或超出可見性處理限制的表面保留所有面。
+	Accented Edges…	強調邊緣…
+	Angled Strokes…	傾斜筆觸…
+	Crosshatch…	交叉影線…
+	Dark Strokes…	深色筆觸…
+	Ink Outlines…	墨水輪廓…
+	Spatter…	噴濺…
+	Sprayed Strokes…	噴灑筆觸…
+	Sumi-e…	水墨畫…
+	Accented Edges	強調邊緣
+	Angled Strokes	傾斜筆觸
+	Crosshatch	交叉影線
+	Dark Strokes	深色筆觸
+	Ink Outlines	墨水輪廓
+	Spatter	噴濺
+	Sprayed Strokes	噴灑筆觸
+	Sumi-e	水墨畫
+	Direction Balance	方向平衡
+	Stroke Length	筆觸長度
+	Sharpness	銳利度
+	Strength	力度
+	Balance	平衡
+	Black Intensity	黑色強度
+	White Intensity	白色強度
+	Dark Intensity	暗部強度
+	Spray Radius	噴灑半徑
+	Stroke Direction	筆觸方向
+	Stroke Width	筆觸寬度
+	Stroke Pressure	筆觸壓力
+	Right Diagonal	右對角線
+	Left Diagonal	左對角線
+	Vertical Guide	垂直參考線
+	Horizontal Guide	水平參考線
+	Move Guide to Layer	將參考線移至圖層
+	Linux Display Server	Linux 顯示伺服器
+	X11 (XWayland)	X11 (XWayland)
+	Ruler Origin	尺標原點
+	Reset Ruler Origin	重設尺標原點
+	Artistic	藝術效果
+	Film Grain…	底片顆粒…
+	Highlight Area	亮部範圍
+	Concentric Dividers:	同心分隔線：
+	Radial Dividers:	徑向分隔線：

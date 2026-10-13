@@ -179,10 +179,11 @@ impl Targets {
         Self::collect_inner(doc, exclude, None, visible, Gather::Bounds)
     }
 
-    /// Targets for moving the selection of `cx`: [`Self::collect`]'s, styled as `cx` asks, and with
-    /// Smart Guides › Spacing Guides the objects it spaces itself evenly with ([`Self::snap_rect`]).
-    pub fn for_move(cx: &ToolContext) -> Self {
-        let mut t = Self::collect(cx.doc, &cx.selection.objects, None).styled(cx);
+    /// Targets for moving the selection of `cx`: [`Self::collect`]'s but `exclude` (the selection,
+    /// or nothing for a copy, which leaves it behind), styled as `cx` asks, and with Smart Guides ›
+    /// Spacing Guides the objects it spaces itself evenly with ([`Self::snap_rect`]).
+    pub fn for_move(cx: &ToolContext, exclude: &[NodeId]) -> Self {
+        let mut t = Self::collect(cx.doc, exclude, None).styled(cx);
         if cx.spacing_guides {
             t.boxes = object_boxes(cx.doc, &cx.selection.objects);
         }
@@ -365,11 +366,22 @@ impl Targets {
     /// View → Snap to Point: only these targets' anchors pull, and the ruler guides (shown and
     /// unlocked, as the selection tools pick them) pull the pointer into line where they run.
     fn for_snap_to_point(self, cx: &ToolContext) -> Self {
-        let mut t = self.anchors_only();
+        self.anchors_only().with_rulers(cx)
+    }
+
+    /// These targets and the ruler guides, when they are shown (and so unlocked to the selection
+    /// tools): they pull a point into line where they run.
+    fn with_rulers(mut self, cx: &ToolContext) -> Self {
         if cx.guides {
-            t.rulers = cx.doc.guides.iter().map(|g| Ruler { vertical: g.vertical, pos: g.pos, span: cx.doc.guide_span(g) }).collect();
+            self.rulers = cx
+                .doc
+                .guides
+                .iter()
+                .filter(|g| cx.doc.guide_shown(g))
+                .map(|g| Ruler { vertical: g.vertical, pos: g.pos, span: cx.doc.guide_span(g) })
+                .collect();
         }
-        t
+        self
     }
 
     /// What a dragged selection's grabbed point snaps to with View → Snap to Point and Smart
@@ -465,6 +477,11 @@ impl Targets {
     }
 
     /// The anchor or centre nearest `p`, within `tol`.
+    /// Is a target point (an anchor, a centre) within `tol` of `p`?
+    pub(crate) fn has_point_near(&self, p: Point, tol: f64) -> bool {
+        self.nearest_point(p, tol).is_some()
+    }
+
     fn nearest_point(&self, p: Point, tol: f64) -> Option<(Point, Kind)> {
         within(&self.points, |q| q.0.x, p.x, tol)
             .iter()
@@ -486,8 +503,10 @@ impl Targets {
             if d.abs() <= 1e-9 {
                 continue;
             }
+            // The ruler guides that way count as lines too (#812).
+            let rulers: Vec<(f64, Point, Kind)> = self.rulers.iter().filter(|r| r.vertical == vertical).filter_map(|r| r.line_at(q, reach)).collect();
             // A line that far across the way crosses it at least that far along.
-            for (t, from, _) in lines_near(lines, v, reach) {
+            for (t, from, _) in lines_near(lines, v, reach).iter().chain(&rulers) {
                 let s = (t - a) / d;
                 // Exactly on the line, whatever the rounding along the way.
                 let hit = if vertical { Point::new(*t, at.y + dir.y * s) } else { Point::new(at.x + dir.x * s, *t) };
@@ -827,7 +846,9 @@ impl PointSnap {
         let targets = if cx.snap_to_pixel || cx.snap_to_grid {
             None
         } else if cx.smart_guides {
-            Some((targets().styled(cx), cx.snapping_tolerance))
+            // Snap to Point keeps pulling points onto the ruler guides with Smart Guides on (#812).
+            let t = targets().styled(cx);
+            Some((if cx.snap_to_point { t.with_rulers(cx) } else { t }, cx.snapping_tolerance))
         } else if cx.snap_to_point {
             Some((targets().for_snap_to_point(cx), cx.snap_tolerance))
         } else {
@@ -1214,7 +1235,7 @@ mod tests {
         }
         let (s, p) = (Selection::default(), paint());
         let lines = |ov: &[Overlay]| ov.iter().filter(|o| matches!(o, Overlay::Line { color, .. } if *color == MAGENTA)).count();
-        let t = Targets::for_move(&cx(&d, &s, &p));
+        let t = Targets::for_move(&cx(&d, &s, &p), &s.objects);
         // 21 after B: 20, as A and B, with both gaps marked (a line and two ticks each).
         let (dv, ov) = t.snap_rect(Rect::new(141.0, 305.0, 181.0, 345.0), 4.0);
         assert_eq!(dv, Vec2::new(-1.0, 0.0));
@@ -1226,7 +1247,7 @@ mod tests {
         let id = wide.alloc_id();
         wide.insert(Some(l), 0, Node::path(id, vectorcraft_geom::shapes::rectangle(Rect::new(220.0, 300.0, 260.0, 340.0)), Default::default()))
             .unwrap();
-        let (dv, ov) = Targets::for_move(&cx(&wide, &s, &p)).snap_rect(Rect::new(148.0, 305.0, 188.0, 345.0), 4.0);
+        let (dv, ov) = Targets::for_move(&cx(&wide, &s, &p), &s.objects).snap_rect(Rect::new(148.0, 305.0, 188.0, 345.0), 4.0);
         assert_eq!(dv, Vec2::new(2.0, 0.0));
         assert!(lines(&ov) >= 6, "{ov:?}");
         // A column: 28 under D, as C and D are 30 apart.
@@ -1238,7 +1259,7 @@ mod tests {
         assert_eq!(dv, Vec2::new(0.0, 2.0));
         // Off: nowhere to go, and no marks.
         let off = ToolContext { spacing_guides: false, ..cx(&d, &s, &p) };
-        let (dv, ov) = Targets::for_move(&off).snap_rect(Rect::new(141.0, 305.0, 181.0, 345.0), 4.0);
+        let (dv, ov) = Targets::for_move(&off, &s.objects).snap_rect(Rect::new(141.0, 305.0, 181.0, 345.0), 4.0);
         assert_eq!((dv, lines(&ov)), (Vec2::ZERO, 0));
     }
 
@@ -1395,6 +1416,27 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// #812: with Smart Guides on, ruler guides pull a drawn point too (Snap to Point), horizontal
+    /// and vertical alike, also while it slides along a construction guide or Shift's angle.
+    #[test]
+    fn drawn_points_snap_to_ruler_guides_with_smart_guides_on() {
+        let (mut d, _) = doc_with_rect();
+        d.guides.push(vectorcraft_doc::Guide::new(false, 313.0));
+        d.guides.push(vectorcraft_doc::Guide::new(true, 331.0));
+        let (s, p) = (Selection::default(), paint());
+        let c = cx(&d, &s, &p);
+        let mut snap = DrawSnap::default();
+        assert_eq!(snap.press(&c, Point::new(260.0, 315.0), &[], None), Point::new(260.0, 313.0), "the horizontal guide");
+        assert_eq!(snap.press(&c, Point::new(329.0, 260.0), &[], None), Point::new(331.0, 260.0), "the vertical guide");
+        // On the 45° construction guide from (210, 210), where the horizontal guide crosses it.
+        let from = Leave::segment(&c, Point::new(210.0, 210.0), false);
+        let q = snap.press(&c, Point::new(312.0, 311.0), &[], Some(&from));
+        assert!((q - Point::new(313.0, 313.0)).hypot() < 1e-9, "{q:?}");
+        // Snap to Point off: Smart Guides alone don't use the ruler guides.
+        let off = ToolContext { snap_to_point: false, ..cx(&d, &s, &p) };
+        assert_eq!(snap.press(&off, Point::new(260.0, 315.0), &[], None), Point::new(260.0, 315.0));
     }
 
     /// A drawing tool's snapper reuses its targets while hovering over the same document state, and
