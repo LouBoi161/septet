@@ -265,8 +265,8 @@ fehlen eigene Varianten:
 | Maßnahme | Wirkung |
 |---|---|
 | **Suite-weiter GPU-Fehler-Handler** (ein `on_uncaptured_error` und ein Device-Lost-Callback in der Shell, die an alle Apps weiterreichen) | Ersetzt die Handler, die sich heute gegenseitig überschreiben. Bei „Speicher voll“: ComfyUI `/free`, erneut versuchen, sonst CPU-Weg der App. Bei „Gerät verloren“: Notsicherung aller Dokumente, dann Gerät neu anlegen oder sauber neu starten. **Hilft auch ohne ComfyUI, deshalb am besten schon in Phase A** |
-| **`--reserve-vram`** beim Start durch die Suite (Standard ca. 3 GB, einstellbar) | ComfyUI lässt der Suite Platz, statt die Karte ganz zu füllen |
-| **GPU-Druck an die Apps melden** (`HostedApp::set_gpu_pressure`) | Während eines Laufs verkleinert Photocraft sein VRAM-Budget, Effectcraft und Filmcraft halten Vorschau-Renderings an |
+| **Die Suite hat Vorrang** (User, 2026-10-13: „es muss genug RAM und VRAM frei sein, damit z. B. Photocraft flüssig läuft“). Die Reserve wird nicht fest eingestellt, sondern aus den Budgets der offenen Apps berechnet: `--reserve-vram` = Summe der GPU-Budgets (Photocraft `RESIDENT_BUDGET` 4 GiB + `FX_BUDGET` 1,5 GiB, Effectcraft usw.) + Shell + 1 GB Puffer. RAM: cgroup-Grenze für ComfyUI = Gesamt-RAM − aktueller Bedarf der Suite − 4 GB Puffer | Die Apps behalten ihre vollen Budgets, Photocraft bleibt flüssig. Preis: ComfyUI hat weniger Platz, lagert mehr aus und rechnet langsamer (vorher messen, bei 12 GB VRAM z. B. ca. 6 GB für ComfyUI). Braucht die Suite später mehr, als beim Start reserviert war (weitere App geöffnet), wird ComfyUI nach dem laufenden Bild entladen und mit neuer Reserve neu gestartet |
+| **GPU-Druck an die Apps melden** (`HostedApp::set_gpu_pressure`) | Nur für Apps im Hintergrund: Verborgene Tabs halten Vorschau-Renderings an und geben Caches frei. Die sichtbare App wird nicht gebremst |
 | **VRAM-Prüfung vor jedem Lauf** (NVML, unter Linux auch `nvidia-smi`) | Reicht der Platz nicht, sagt die Suite, wer ihn belegt (z. B. bonsai), statt zu starten. Andere Dienste beendet sie nicht von selbst |
 | **RAM:** ComfyUI-Prozess unter Linux mit `oom_score_adj=1000` starten, optional in einem cgroup mit `MemoryHigh`/`MemoryMax` (`systemd-run --user --scope`) | Wird der RAM knapp, beendet das System ComfyUI statt der Suite; mit cgroup wird ComfyUI vorher gebremst. Windows: Job Object mit Speichergrenze |
 | ComfyUI mit niedriger CPU-Priorität (`nice`) | Die Oberfläche bleibt flüssig |
@@ -279,6 +279,12 @@ fehlen eigene Varianten:
   Suite einen GPU-Fehler sieht.
 - Hat die Suite ComfyUI selbst gestartet, beendet sie es nach längerem Leerlauf (Standard 10 min) und beim
   Schließen. Lief ComfyUI schon vorher (z. B. für den User selbst), nur `/free`, nie beenden.
+
+**Starten (entschieden 2026-10-13: automatisch):** Läuft ComfyUI schon, nutzt die Suite es. Läuft es nicht,
+startet die Suite es beim ersten Auftrag selbst (mit Reserve, Priorität und Speichergrenze von oben). Der User muss
+nichts einstellen; in den Einstellungen gibt es nur einen Schalter, um das Selbst-Starten abzuschalten.
+Ein schon laufendes ComfyUI wurde ohne die Reserve gestartet: Die Suite prüft dann vor jedem Auftrag den freien
+Speicher und entlädt nach jedem Bild sofort.
 
 **Bedienung:**
 - Einstellungen „ComfyUI“: Adresse, Pfad, selbst starten ja/nein, VRAM-Reserve, Leerlaufzeiten, Workflows.
@@ -295,8 +301,8 @@ fehlen eigene Varianten:
 |---|---|---|
 | H0 | Suite-weiter GPU-Fehler-Handler und Notsicherung (am besten in Phase A) | M |
 | H1 | Client, Start/Stopp von ComfyUI, VRAM-/RAM-Schutz, automatisches Entladen, Einstellungen | M |
-| H2 | Workflow-Vorlagen (Erzeugen, Bearbeiten, Maske, Erweitern) und Import eigener Workflows | M |
-| H3 | Photocraft-Befehle (neue Ebene, Generatives Füllen) und „Bild erzeugen“ in den anderen Apps | M |
+| H2 | Workflow-Vorlagen: zuerst Bearbeiten mit Maske (für Generatives Füllen) und Erzeugen; danach Erweitern und Import eigener Workflows | M |
+| H3 | **Zuerst Photocraft „Generatives Füllen“** (User, 2026-10-13), dann „Bild erzeugen“ als neue Ebene, danach die anderen Apps | M |
 | H4 | Claude-Werkzeuge `image_generate`/`image_edit` | S |
 | H5 | Autotest gegen einen Schein-ComfyUI-Server (ohne GPU); ein echter Lauf von Hand | S |
 
@@ -354,5 +360,6 @@ Namen „ArtCraft“, seine Wortmarke und Logos.
 1. Name der Sound-App.
 2. Markenprüfung und Domain für „Tutti“; danach Umbenennung der Repos auf GitLab und GitHub (nach außen sichtbar).
 3. Ob die Einbettungs-Schnittstelle an ArtCraft zurückgegeben werden soll.
-4. ComfyUI (Phase H): Soll die Suite ComfyUI selbst starten oder nur ein laufendes nutzen? Standardwerte für
-   Leerlauf (2 min entladen, 10 min beenden) und VRAM-Reserve (3 GB) bestätigen. Welche App-Funktionen zuerst?
+4. ComfyUI (Phase H): Leerlaufzeiten (2 min entladen, 10 min beenden) bestätigen, sobald es sich ausprobieren
+   lässt. Entschieden 2026-10-13: automatisch starten bzw. ein laufendes nutzen; die Suite hat beim Speicher
+   Vorrang; Generatives Füllen in Photocraft zuerst.
