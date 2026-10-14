@@ -28,6 +28,7 @@ rustls-native-certs = "0.8"
 pdfcraft-ui-egui = { workspace = true }
 # The agent methods of embed.rs: the automation tools on the app's own session, page renders.
 pdfcraft-automation = { workspace = true }
+# Also `build_info`: the version and compile-time build label for `--version` and the log.
 pdfcraft-engine = { workspace = true }
 pdfcraft-render = { workspace = true }
 # wgpu draws; OpenGL (glow) is the fallback when wgpu can't start on an old or unusual GPU or
