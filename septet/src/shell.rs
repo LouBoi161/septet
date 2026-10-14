@@ -6,7 +6,7 @@
 //! off into a new one. The first window is eframe's root viewport; the others are immediate
 //! viewports rendered from the root's frame.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -129,6 +129,14 @@ pub struct Shell {
     pub confirm: Option<ConfirmClose>,
     /// The About dialog, in this window.
     pub about: Option<ViewportId>,
+    /// The Appearance dialog, in this window.
+    pub appearance_dialog: Option<ViewportId>,
+    pub appearance: crate::appearance::Appearance,
+    desktop: crate::appearance::Desktop,
+    /// The level and UI size last handed to the shell and the apps (`None`: not yet).
+    applied_appearance: Option<(Option<u8>, f32)>,
+    /// An app's theme command asked for the Appearance dialog.
+    open_appearance: Rc<Cell<bool>>,
     pub home: HomeState,
     pub assistant: crate::assistant::Assistant,
     pub recent: Recent,
@@ -167,7 +175,7 @@ pub struct OpenRequest {
 }
 
 impl Shell {
-    pub fn new(ctx: &Context, router: Router, files: Vec<PathBuf>, restore: Option<crate::recent::Session>) -> Self {
+    pub fn new(ctx: &Context, router: Router, files: Vec<PathBuf>, restore: Option<crate::recent::Session>, appearance: crate::appearance::Appearance) -> Self {
         router.lock().windows.insert(ViewportId::ROOT);
         let mut shell = Shell {
             router,
@@ -184,6 +192,11 @@ impl Shell {
             opens: Vec::new(),
             confirm: None,
             about: None,
+            appearance_dialog: None,
+            appearance,
+            desktop: crate::appearance::Desktop::new(),
+            applied_appearance: None,
+            open_appearance: Rc::new(Cell::new(false)),
             home: HomeState::default(),
             assistant: crate::assistant::Assistant::new(ctx),
             recent: Recent::load(),
@@ -316,6 +329,7 @@ impl Shell {
     /// Router traffic and closing, once per frame before any window is drawn.
     pub fn logic(&mut self, ctx: &Context) {
         self.frame_no += 1;
+        self.sync_appearance(ctx);
         let (os_close, delivered, requests) = {
             let mut sh = self.router.lock();
             (std::mem::take(&mut sh.os_close), std::mem::take(&mut sh.close_delivered), std::mem::take(&mut sh.app_requests))
@@ -384,6 +398,9 @@ impl Shell {
             } else {
                 ctx.request_repaint_after(std::time::Duration::from_millis(30));
             }
+        }
+        if self.open_appearance.take() {
+            self.appearance_dialog = Some(self.focused_window(ctx));
         }
         let wanted: Vec<AppKind> = self.open_app.borrow_mut().drain(..).collect();
         for kind in wanted {
@@ -557,6 +574,13 @@ impl Shell {
                 self.about = None;
             }
         }
+        if self.appearance_dialog == Some(viewport) {
+            let mut open = true;
+            crate::appearance::dialog(&mut open, &ctx, &mut self.appearance);
+            if !open {
+                self.appearance_dialog = None;
+            }
+        }
         if self.assistant.dialog == Some(viewport) {
             crate::assistant::settings::dialog(&mut self.assistant, &ctx);
         }
@@ -657,6 +681,11 @@ impl Shell {
         if let Some(rs) = &render_state {
             self.gpu.install(&rs.device, ctx);
         }
+        if let Some((level, _)) = self.applied_appearance {
+            app.set_appearance(level);
+        }
+        let open_appearance = self.open_appearance.clone();
+        app.set_open_appearance(Box::new(move || open_appearance.set(true)));
         let external = self.external.clone();
         let open_app = self.open_app.clone();
         app.set_open_app(Box::new(move |name| {
@@ -678,6 +707,25 @@ impl Shell {
         let slot = Rc::new(RefCell::new(slot));
         self.apps.insert(kind, slot.clone());
         slot
+    }
+
+    /// Hand the appearance's level to the shell and every running app, and its UI size to egui,
+    /// when they change (the desktop's preference may, too).
+    fn sync_appearance(&mut self, ctx: &Context) {
+        let following = self.appearance.theme == crate::appearance::Theme::System;
+        let level = self.appearance.level(self.desktop.dark(ctx, following));
+        let scale = self.appearance.ui_scale();
+        let previous = self.applied_appearance.replace((level, scale));
+        if previous.is_none_or(|(l, _)| l != level) {
+            crate::appearance::apply_to_shell(ctx, level);
+            for slot in self.apps.values() {
+                slot.borrow_mut().with_app(ctx, |app| app.set_appearance(level));
+            }
+            ctx.request_repaint();
+        }
+        if previous.is_none_or(|(_, s)| s != scale) {
+            ctx.set_zoom_factor(scale);
+        }
     }
 
     fn process_opens(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
@@ -1181,6 +1229,7 @@ impl Shell {
     pub fn persist(&self, storage: &mut dyn eframe::Storage) {
         let session = self.quit_session.clone().unwrap_or_else(|| self.session());
         eframe::set_value(storage, "septet/session", &session);
+        eframe::set_value(storage, crate::appearance::STORAGE_KEY, &self.appearance);
         for (kind, slot) in &self.apps {
             if let Ok(mut s) = slot.try_borrow_mut() {
                 s.app.app().save(storage);

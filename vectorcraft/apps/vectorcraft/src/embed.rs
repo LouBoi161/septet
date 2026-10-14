@@ -183,6 +183,18 @@ impl Embedded {
         }
     }
 
+    /// Septet's brightness, 0 (darkest) to 3 (lightest), instead of the app's own until `None`.
+    /// It isn't saved as the app's: the standalone app keeps its own.
+    pub fn set_appearance(&mut self, level: Option<u8>) {
+        use vectorcraft_ui_egui::theme::Brightness;
+        vectorcraft_ui_egui::hosted::set_brightness(level.map(|l| Brightness::ALL[usize::from(l.min(3))]));
+    }
+
+    /// While Septet sets the brightness, the app's brightness commands open Septet's settings.
+    pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
+        vectorcraft_ui_egui::hosted::set_open_appearance(handler);
+    }
+
     /// A short name for the art being dragged out of the app (off the canvas with the Selection
     /// tool, or Layers panel rows) for the drag's ghost: `Layer “Sky”`, `Ellipse`, `3 objects`.
     pub fn outgoing_drag(&self) -> Option<String> {

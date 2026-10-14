@@ -484,6 +484,10 @@ fn window_menu(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui) {
         }
     }
     ui.separator();
+    if ui.button("Appearance…").clicked() {
+        shell.appearance_dialog = Some(viewport);
+        ui.close();
+    }
     if ui.button("About Septet").clicked() {
         shell.about = Some(viewport);
         ui.close();

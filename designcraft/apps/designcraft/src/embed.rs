@@ -242,6 +242,19 @@ impl Embedded {
         self.app.services.open_app = Some(handler);
     }
 
+    /// Septet's brightness, 0 (darkest) to 3 (lightest), instead of the app's own until `None`.
+    /// It isn't saved as the app's: the standalone app keeps its own.
+    pub fn set_appearance(&mut self, level: Option<u8>) {
+        use designcraft_ui_egui::theme::Brightness;
+        hosted::set_brightness(level.map(|l| Brightness::ALL[usize::from(l.min(3))]));
+        self.app.restyle = true;
+    }
+
+    /// While Septet sets the brightness, the app's theme commands open Septet's settings.
+    pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
+        hosted::set_open_appearance(handler);
+    }
+
     /// A page dragged from the Pages panel ("Page 3"), or objects dragged off the canvas with
     /// the Selection tool ("Graphic “photo.jpg”", "Text frame", "3 objects").
     pub fn outgoing_drag(&self) -> Option<String> {

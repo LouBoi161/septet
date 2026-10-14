@@ -48,6 +48,12 @@ pub trait HostedApp {
     fn save_recovery(&mut self) -> bool {
         !self.has_unsaved_changes()
     }
+    /// Septet's brightness (`appearance.rs`), 0 (darkest) to 3 (lightest): shown instead of the
+    /// app's own theme and never saved as it. `None` gives the app its own theme back.
+    fn set_appearance(&mut self, _level: Option<u8>) {}
+    /// While Septet sets the look, the app's theme commands open Septet's Appearance dialog
+    /// through this.
+    fn set_open_appearance(&mut self, _handler: Box<dyn FnMut()>) {}
 
     // Claude drives the app (`docs/embedding/phase5-agent-control.md`). None: the app can't yet.
 
@@ -72,28 +78,10 @@ pub trait HostedApp {
 /// A picture the app makes for Claude, on a worker thread (premultiplied, transparent where empty).
 pub type AgentRender = Box<dyn FnOnce() -> Result<egui::ColorImage, String> + Send>;
 
+/// Implement [`HostedApp`] for an app's `Embedded`, with the optional parts it has: `agent`
+/// (phase 5) and `appearance` (A4).
 macro_rules! hosted {
-    ($ty:ty) => {
-        hosted!($ty, {});
-    };
-    // Apps that implement the agent methods of phase 5.
-    ($ty:ty, agent) => {
-        hosted!($ty, {
-            fn agent_commands(&mut self, ctx: &Context) -> Option<Vec<Value>> {
-                Some(<$ty>::agent_commands(self, ctx))
-            }
-            fn agent_execute(&mut self, ctx: &Context, command: &str, params: Value) -> Option<Receiver<Value>> {
-                Some(<$ty>::agent_execute(self, ctx, command, params))
-            }
-            fn agent_inspect(&mut self, ctx: &Context, what: &str, params: &Value) -> Option<Result<Value, String>> {
-                Some(<$ty>::agent_inspect(self, ctx, what, params))
-            }
-            fn agent_render(&mut self, ctx: &Context, target: &Value) -> Option<Result<(String, AgentRender), String>> {
-                Some(<$ty>::agent_render(self, ctx, target))
-            }
-        });
-    };
-    ($ty:ty, { $($agent:tt)* }) => {
+    ($ty:ty $(, $part:ident)*) => {
         impl HostedApp for $ty {
             fn app(&mut self) -> &mut dyn eframe::App {
                 self
@@ -137,7 +125,32 @@ macro_rules! hosted {
             fn save_recovery(&mut self) -> bool {
                 <$ty>::save_recovery(self)
             }
-            $($agent)*
+            $(hosted_part!($part, $ty);)*
+        }
+    };
+}
+
+macro_rules! hosted_part {
+    (agent, $ty:ty) => {
+        fn agent_commands(&mut self, ctx: &Context) -> Option<Vec<Value>> {
+            Some(<$ty>::agent_commands(self, ctx))
+        }
+        fn agent_execute(&mut self, ctx: &Context, command: &str, params: Value) -> Option<Receiver<Value>> {
+            Some(<$ty>::agent_execute(self, ctx, command, params))
+        }
+        fn agent_inspect(&mut self, ctx: &Context, what: &str, params: &Value) -> Option<Result<Value, String>> {
+            Some(<$ty>::agent_inspect(self, ctx, what, params))
+        }
+        fn agent_render(&mut self, ctx: &Context, target: &Value) -> Option<Result<(String, AgentRender), String>> {
+            Some(<$ty>::agent_render(self, ctx, target))
+        }
+    };
+    (appearance, $ty:ty) => {
+        fn set_appearance(&mut self, level: Option<u8>) {
+            <$ty>::set_appearance(self, level)
+        }
+        fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
+            <$ty>::set_open_appearance(self, handler)
         }
     };
 }
@@ -145,13 +158,13 @@ macro_rules! hosted {
 #[cfg(feature = "photocraft")]
 hosted!(photocraft_embed::Embedded, agent);
 #[cfg(feature = "vectorcraft")]
-hosted!(vectorcraft_embed::Embedded, agent);
+hosted!(vectorcraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "lightcraft")]
 hosted!(lightcraft_embed::Embedded, agent);
 #[cfg(feature = "designcraft")]
-hosted!(designcraft_embed::Embedded, agent);
+hosted!(designcraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "pdfcraft")]
-hosted!(pdfcraft_embed::Embedded, agent);
+hosted!(pdfcraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "filmcraft")]
 hosted!(filmcraft_embed::Embedded, agent);
 #[cfg(feature = "effectcraft")]

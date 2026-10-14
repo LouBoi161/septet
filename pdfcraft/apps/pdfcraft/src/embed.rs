@@ -151,6 +151,18 @@ impl Embedded {
         self._open_app = Some(handler);
     }
 
+    /// Septet's brightness, 0 (darkest) to 3 (lightest): Dark for 0 and 1, Light for 2 and 3,
+    /// instead of PdfCraft's own until `None`. It isn't saved as PdfCraft's.
+    pub fn set_appearance(&mut self, level: Option<u8>) {
+        use pdfcraft_ui_egui::theme::ThemeKind;
+        pdfcraft_ui_egui::hosted::set_theme(level.map(|l| if l >= 2 { ThemeKind::Light } else { ThemeKind::Dark }));
+    }
+
+    /// While Septet sets the theme, PdfCraft's theme commands open Septet's settings.
+    pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
+        pdfcraft_ui_egui::hosted::set_open_appearance(handler);
+    }
+
     /// While pages are dragged in the Organize grid (or the Pages panel's thumbnails): "Page 4",
     /// "3 pages". Nothing else in PdfCraft drags out.
     pub fn outgoing_drag(&self) -> Option<String> {

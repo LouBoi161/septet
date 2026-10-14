@@ -1625,7 +1625,7 @@ impl PdfCraftApp {
                 system = desktop.get().map(|appearance| appearance == pdfcraft_platform::desktop_theme::DesktopAppearance::Dark);
             }
         }
-        let kind = self.theme_preference.resolve(system, ThemeKind::Light);
+        let kind = crate::hosted::theme().unwrap_or_else(|| self.theme_preference.resolve(system, ThemeKind::Light));
         if kind != self.theme {
             self.theme = kind;
             theme::apply(ctx, kind);

@@ -112,9 +112,9 @@ fn sidebar_ui(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellCol
             shell.actions.push(Action::NewTab { window: viewport, kind: TabKind::App(kind) });
         }
     }
-    // Claude, About and Open file, pinned to the bottom.
+    // Claude, Appearance, About and Open file, pinned to the bottom.
     let bottom = ui.max_rect().bottom();
-    let claude = egui::Rect::from_min_max(pos2(ui.max_rect().left(), bottom - 96.0), pos2(ui.max_rect().right(), bottom - 74.0));
+    let claude = egui::Rect::from_min_max(pos2(ui.max_rect().left(), bottom - 122.0), pos2(ui.max_rect().right(), bottom - 100.0));
     let resp = ui.interact(claude, Id::new(("septet-home-claude", viewport)), Sense::click());
     ui.painter().text(
         claude.left_center() + vec2(4.0, 0.0),
@@ -125,6 +125,18 @@ fn sidebar_ui(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellCol
     );
     if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
         shell.assistant.toggle_panel(ui.ctx(), viewport);
+    }
+    let appearance = egui::Rect::from_min_max(pos2(ui.max_rect().left(), bottom - 96.0), pos2(ui.max_rect().right(), bottom - 74.0));
+    let resp = ui.interact(appearance, Id::new(("septet-home-appearance", viewport)), Sense::click());
+    ui.painter().text(
+        appearance.left_center() + vec2(4.0, 0.0),
+        Align2::LEFT_CENTER,
+        "Appearance",
+        theme::medium(12.5),
+        if resp.hovered() { c.text } else { c.text_dim },
+    );
+    if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
+        shell.appearance_dialog = Some(viewport);
     }
     let about = egui::Rect::from_min_max(pos2(ui.max_rect().left(), bottom - 70.0), pos2(ui.max_rect().right(), bottom - 48.0));
     let resp = ui.interact(about, Id::new(("septet-home-about", viewport)), Sense::click());
@@ -141,7 +153,7 @@ fn sidebar_ui(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellCol
     let r = Rect::from_min_max(pos2(ui.max_rect().left(), bottom - 38.0), pos2(ui.max_rect().right(), bottom));
     let resp = ui.interact(r, Id::new(("septet-home-open", viewport)), Sense::click());
     ui.painter().rect_filled(r, 9.0, if resp.hovered() { theme::lighten(c.accent, 0.1) } else { c.accent });
-    ui.painter().text(r.center(), Align2::CENTER_CENTER, "Open File…", theme::semibold(13.5), Color32::from_rgb(0x14, 0x14, 0x17));
+    ui.painter().text(r.center(), Align2::CENTER_CENTER, "Open File…", theme::semibold(13.5), c.on_accent);
     if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
         pick_and_open(shell, Some(viewport), None);
     }

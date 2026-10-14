@@ -1,7 +1,7 @@
 # Plan: Aus sieben Apps werden zwölf
 
 Stand: 2026-10-14. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
-erledigt (MR !2 am 2026-10-14 gemergt), **Phase A läuft** (Branch `phase-a`: A1–A3, A5, H0 fertig, A4 offen); ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
+erledigt (MR !2 am 2026-10-14 gemergt), **Phase A läuft** (Branch `phase-a`: A1–A3, A5, H0 fertig, A4 zur Hälfte); ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
 (`storytold/wordcraft`, `deckcraft`, `gridcraft`, `cadcraft`, `soundcraft`, `craft-launcher`, alle v0.4.0 vom
 2026-10-10) und des Septet-Codes.
 
@@ -136,7 +136,8 @@ v0.6.x). Vor Phase A deshalb ein zweiter Abgleich mit `scripts/sync-upstream.sh 
 | A4 Ein Erscheinungsbild | siehe eigener Abschnitt | M (dazu L für Lightcraft und CADCraft) |
 | A5 CI für Pushes und MRs | Check-Job pro App, Cache | S |
 
-Stand 2026-10-14 (Branch `phase-a`): **A1, A2, A3, A5 und H0 erledigt**, A4 offen.
+Stand 2026-10-14 (Branch `phase-a`): **A1, A2, A3, A5 und H0 erledigt**, A4 zum Teil (Shell, Vectorcraft,
+Designcraft, Pdfcraft; siehe unten).
 - A1: Crate `shared/craft-fonts` bettet jede Schrift einmal ein; die Apps verweisen mit dem Feature
   `shared-craft-fonts` darauf (Adresse, nicht Wert: sonst kopiert der Compiler die Bytes). Gemessen: jede Schrift
   einmal im Binary statt sechsmal; Test `fonts::tests::craft_fonts_are_embedded_once`.
@@ -144,6 +145,11 @@ Stand 2026-10-14 (Branch `phase-a`): **A1, A2, A3, A5 und H0 erledigt**, A4 offe
   `photocraft` … `effectcraft`, alle Standard. Unbekannte Apps in Sitzungen lesen sich als `AppKind::Unknown`.
 - A5: `.github/workflows/check.yml` (nur GitHub; GitLab-MRs laufen dort nur, wenn der Branch auch dorthin geht).
 - H0: `septet/src/gpu.rs`; Autotest `gpu-lost`.
+- A4 (Teil 1): `septet/src/appearance.rs` – Stufe Darkest/Dark/Light/Lightest, „Same as the desktop“ (XDG-Portal
+  über `pdfcraft-platform`), „Each app's own“, UI-Größe 80–175 % (ein `zoom_factor` für alle). Dialog über Home ›
+  Appearance und das Fenstermenü. `HostedApp::set_appearance(Option<u8>)` / `set_open_appearance`; in
+  Vectorcraft, Designcraft (je 4 Stufen) und Pdfcraft (Dark/Light) über `hosted::set_brightness`/`set_theme`,
+  nie in deren Einstellungen gespeichert; ihre Theme-Befehle öffnen Septets Dialog. Autotest `appearance`.
 
 ### Phase B: Die vier Office/CAD-Apps einbauen
 
@@ -345,6 +351,12 @@ Umsetzung:
    Farbe jeder App), UI-Größe (ein gemeinsamer Zoom für alle Apps). Home und leere Fenster folgen dem Theme.
 4. Reihenfolge: zuerst die S-Apps, dann die M-Apps; Lightcraft und CADCraft bleiben dunkel, bis ihre helle
    Palette fertig ist.
+
+Stand 2026-10-14: Schritte 1–3 für die Shell, Vectorcraft, Designcraft und Pdfcraft umgesetzt (ohne Akzentfarbe
+und hohen Kontrast). Abweichungen vom Plan: statt eines gemeinsamen Typs bekommt jede App die Stufe als Zahl
+0–3 (`Option<u8>`, `None` = eigenes Theme), damit die Apps keine neue Abhängigkeit brauchen; Standard ist
+„Dark“. Offen: Photocraft, Filmcraft, Effectcraft (M), Akzentfarbe (abgeleitete Töne pro App, Kontrast prüfen),
+hoher Kontrast (Designcraft hat ihn schon), Lightcraft (L).
 
 ## Namensideen für die Suite
 

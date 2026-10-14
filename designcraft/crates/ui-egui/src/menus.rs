@@ -1467,6 +1467,11 @@ pub fn run_ui(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value, 
             app.ui.workspace = name.to_string();
             Ok(Value::Null)
         }
+        // The host sets the brightness: open its settings instead.
+        "window.brightness" if crate::hosted::brightness().is_some() => {
+            crate::hosted::open_appearance();
+            Ok(json!("host"))
+        }
         "window.brightness" => {
             let b = p.get("brightness").and_then(Value::as_str).and_then(crate::theme::Brightness::parse).unwrap_or(crate::theme::Brightness::Dark);
             app.ui.brightness = b;
@@ -1816,7 +1821,9 @@ pub fn checked(app: &DesignApp, id: &str, params: &Value) -> Option<bool> {
         "window.taskBarPin" => app.ui.task_bar_pin.is_some(),
         "window.toolsDoubleColumn" => app.ui.tools_double_column,
         "view.togglePreview" => app.ui.screen_mode == crate::ScreenMode::Preview,
-        "window.brightness" => params.get("brightness").and_then(Value::as_str) == Some(app.ui.brightness.id()),
+        "window.brightness" => {
+            params.get("brightness").and_then(Value::as_str) == Some(crate::hosted::brightness().unwrap_or(app.ui.brightness).id())
+        }
         "type.storyDirection" => {
             let st = app.session.active()?;
             let sid = st

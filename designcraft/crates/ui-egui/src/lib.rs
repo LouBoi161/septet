@@ -775,7 +775,7 @@ impl DesignApp {
             self.fonts_ready = true;
         }
         if self.restyle {
-            theme::apply(ctx, &theme::Tokens::for_brightness(self.ui.brightness));
+            theme::apply(ctx, &theme::Tokens::for_brightness(hosted::brightness().unwrap_or(self.ui.brightness)));
             self.restyle = false;
         }
         let now = ctx.input(|i| i.time);

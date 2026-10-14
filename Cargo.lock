@@ -10933,6 +10933,7 @@ dependencies = [
  "lightcraft-ui-egui",
  "pdfcraft",
  "pdfcraft-fonts",
+ "pdfcraft-platform",
  "pdfcraft-ui-egui",
  "photocraft",
  "photocraft-text",

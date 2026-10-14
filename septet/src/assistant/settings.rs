@@ -75,7 +75,7 @@ pub fn dialog(a: &mut Assistant, ctx: &Context) {
         );
         ui.add_space(14.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add(egui::Button::new(RichText::new("Done").color(Color32::BLACK)).fill(c.accent)).clicked() {
+            if ui.add(egui::Button::new(RichText::new("Done").color(c.on_accent)).fill(c.accent)).clicked() {
                 close = true;
             }
         });

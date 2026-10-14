@@ -260,6 +260,10 @@ impl PdfCraftApp {
                 }
             }
             "view.read_mode" => self.switch_mode(if self.mode == Mode::Read { Mode::AllTools } else { Mode::Read }, false),
+            // The host sets the theme: open its settings instead.
+            "view.theme" | "view.theme.system" | "view.theme.light" | "view.theme.dark" if crate::hosted::theme().is_some() => {
+                crate::hosted::open_appearance();
+            }
             "view.theme" => {
                 let next = if self.theme == ThemeKind::Light { ThemePreference::Dark } else { ThemePreference::Light };
                 self.set_theme_preference(next);

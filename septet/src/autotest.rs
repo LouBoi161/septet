@@ -63,6 +63,8 @@ enum Step {
     Home,
     /// Destroy the shared GPU device, as a driver reset would lose it (`gpu.rs`).
     LoseGpu,
+    /// Set Septet's appearance: brightness and UI size (`appearance.rs`).
+    Appearance(crate::appearance::Theme, f32),
     Exit,
 }
 
@@ -223,6 +225,51 @@ impl Autotest {
             }
             // Losing the GPU device: apps that set device handlers of their own are open, Vectorcraft
             // has unsaved changes; Septet should write recovery data and restart (logged, not done).
+            // One brightness for the shell and the apps that take it; an app's own theme command
+            // opens Septet's dialog instead.
+            Ok("appearance") => {
+                use crate::appearance::Theme;
+                let brightness = |app: &str, b: &str| {
+                    Step::Tool("app_execute", serde_json::json!({"app": app, "command": "window.brightness", "params": {"brightness": b}}))
+                };
+                vec![
+                    Step::Wait(2.0),
+                    Step::Shot("a01-home-dark"),
+                    Step::Appearance(Theme::Lightest, 1.0),
+                    Step::Wait(1.0),
+                    Step::Shot("a02-home-lightest"),
+                    Step::Open(AppKind::Vectorcraft),
+                    Step::Wait(5.0),
+                    Step::Shot("a03-vectorcraft-lightest"),
+                    Step::Open(AppKind::Designcraft),
+                    Step::Wait(5.0),
+                    Step::Shot("a04-designcraft-lightest"),
+                    Step::Open(AppKind::Pdfcraft),
+                    Step::Wait(5.0),
+                    Step::Shot("a05-pdfcraft-lightest"),
+                    Step::Appearance(Theme::Darkest, 1.25),
+                    Step::Wait(1.0),
+                    Step::Shot("a06-pdfcraft-darkest-125"),
+                    Step::Activate(AppKind::Designcraft),
+                    Step::Wait(1.0),
+                    Step::Shot("a07-designcraft-darkest-125"),
+                    Step::Activate(AppKind::Vectorcraft),
+                    Step::Wait(1.0),
+                    Step::Shot("a08-vectorcraft-darkest-125"),
+                    brightness("vectorcraft", "light"),
+                    Step::ToolWait(10.0),
+                    Step::Wait(1.0),
+                    Step::Shot("a09-dialog-from-vectorcraft"),
+                    Step::Appearance(Theme::AppsOwn, 1.0),
+                    Step::Wait(1.0),
+                    Step::Shot("a10-vectorcraft-own"),
+                    Step::Activate(AppKind::Pdfcraft),
+                    Step::Wait(1.0),
+                    Step::Shot("a11-pdfcraft-own"),
+                    Step::Report,
+                    Step::Exit,
+                ]
+            }
             Ok("gpu-lost") => {
                 let run = |command: &str, params: serde_json::Value| Step::Tool("app_execute", serde_json::json!({"app": "vectorcraft", "command": command, "params": params}));
                 vec![
@@ -721,6 +768,7 @@ impl Autotest {
                     }
                     let focus = shell.windows.iter().map(|w| ctx.memory(|m| m.focused()).map(|f| format!("{:?}:{f:?}", w.viewport))).collect::<Vec<_>>();
                     at.note(format!("keyboard focus: {focus:?}"));
+                    at.note(format!("appearance dialog: {:?}", shell.appearance_dialog));
                 }
                 Step::Keys(kind, keys) => {
                     if let Some((wi, _)) = shell.find_app_tab(kind) {
@@ -997,6 +1045,10 @@ impl Autotest {
                 Step::Home => {
                     let window = shell.windows[0].viewport;
                     shell.actions.push(Action::NewTab { window, kind: TabKind::Home });
+                }
+                Step::Appearance(theme, scale) => {
+                    at.note(format!("appearance {theme:?} at {scale}"));
+                    shell.appearance = crate::appearance::Appearance { theme, ui_scale: scale };
                 }
                 Step::LoseGpu => {
                     at.note("losing the GPU device".into());

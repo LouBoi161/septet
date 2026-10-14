@@ -9,10 +9,14 @@
 //! they made or endorse it (`docs/brand/LICENSE-brand.txt`).
 //!
 //! The host may also keep everything the app stores per user under one folder, the data root
-//! ([`set_data_root`]: a portable install).
+//! ([`set_data_root`]: a portable install), and set the UI brightness for all the apps it shows
+//! ([`set_brightness`]).
 
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::theme::Brightness;
 
 static HOSTED: AtomicBool = AtomicBool::new(false);
 
@@ -33,6 +37,33 @@ pub const ARTCRAFT_LINKS: [&str; 3] = ["help.discord", "help.website", "help.app
 /// Does the UI offer command `id`? Everything but [`ARTCRAFT_LINKS`] while hosted.
 pub fn offers(id: &str) -> bool {
     !(is_hosted() && ARTCRAFT_LINKS.contains(&id))
+}
+
+thread_local! {
+    static BRIGHTNESS: Cell<Option<Brightness>> = const { Cell::new(None) };
+    static OPEN_APPEARANCE: RefCell<Option<Box<dyn FnMut()>>> = const { RefCell::new(None) };
+}
+
+/// The host's UI brightness, shown instead of Preferences › User Interface › Brightness and never
+/// saved as it; `None` (the default) shows the app's own.
+pub fn set_brightness(brightness: Option<Brightness>) {
+    BRIGHTNESS.set(brightness);
+}
+
+/// The host's UI brightness ([`set_brightness`]), if it sets one.
+pub fn brightness() -> Option<Brightness> {
+    BRIGHTNESS.get()
+}
+
+/// The host's appearance settings, which the brightness commands open while the host sets the
+/// brightness.
+pub fn set_open_appearance(open: Box<dyn FnMut()>) {
+    OPEN_APPEARANCE.set(Some(open));
+}
+
+/// Open the host's appearance settings ([`set_open_appearance`]) → whether there are any.
+pub fn open_appearance() -> bool {
+    OPEN_APPEARANCE.with_borrow_mut(|open| open.as_mut().map(|open| open()).is_some())
 }
 
 /// Keep everything the app stores per user (preferences, libraries, Data Recovery, logs,

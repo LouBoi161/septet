@@ -109,7 +109,7 @@ pub fn apply_runtime(app: &mut VectorcraftApp, ctx: &egui::Context) {
         app.ui.brightness = b;
     }
     let want = Applied {
-        brightness: app.ui.brightness,
+        brightness: crate::hosted::brightness().unwrap_or(app.ui.brightness),
         canvas: canvas_color(&p.canvas_color),
         threads: p.render_threads,
         tool_tips: p.show_tool_tips,

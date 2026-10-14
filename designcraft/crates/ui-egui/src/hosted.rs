@@ -3,9 +3,13 @@
 //! `ctx.set_zoom_factor`, and doesn't promote the upstream community (its Discord and website:
 //! nothing may suggest the upstream team made or endorses a derived build,
 //! `docs/brand/LICENSE-brand.txt`); standalone nothing changes. A portable data root
-//! ([`set_data_root`]) keeps the app's per-user files together.
+//! ([`set_data_root`]) keeps the app's per-user files together, and the host may set the
+//! interface brightness for all the apps it shows ([`set_brightness`]).
 
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::theme::Brightness;
 
 static HOSTED: AtomicBool = AtomicBool::new(false);
 
@@ -29,6 +33,33 @@ pub fn show_community() -> bool {
 /// the menus and the command palette when [`show_community`] is false.
 pub fn is_community_command(id: &str) -> bool {
     matches!(id, "help.discord" | "help.website" | "help.appPage" | "help.app")
+}
+
+thread_local! {
+    static BRIGHTNESS: Cell<Option<Brightness>> = const { Cell::new(None) };
+    static OPEN_APPEARANCE: RefCell<Option<Box<dyn FnMut()>>> = const { RefCell::new(None) };
+}
+
+/// The host's interface brightness, shown instead of Window › Interface Color Theme and never
+/// saved as it; `None` (the default) shows the app's own.
+pub fn set_brightness(brightness: Option<Brightness>) {
+    BRIGHTNESS.set(brightness);
+}
+
+/// The host's interface brightness ([`set_brightness`]), if it sets one.
+pub fn brightness() -> Option<Brightness> {
+    BRIGHTNESS.get()
+}
+
+/// The host's appearance settings, which the theme commands open while the host sets the
+/// brightness.
+pub fn set_open_appearance(open: Box<dyn FnMut()>) {
+    OPEN_APPEARANCE.set(Some(open));
+}
+
+/// Open the host's appearance settings ([`set_open_appearance`]) → whether there are any.
+pub fn open_appearance() -> bool {
+    OPEN_APPEARANCE.with_borrow_mut(|open| open.as_mut().map(|open| open()).is_some())
 }
 
 /// Keep every per-user file (preferences, crash recovery) under `root`, created when missing,

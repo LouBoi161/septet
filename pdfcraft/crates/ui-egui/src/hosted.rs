@@ -13,8 +13,10 @@
 //! Discord, their website) ([`shows_community_links`]); PdfCraft's own page and source repository
 //! stay. (The ArtCraft marks are gone from this modified tree altogether: `docs/brand/README.md`.)
 //! And a host may keep everything PdfCraft stores per user in a folder of its own
-//! ([`set_data_root`]). Standalone, nothing changes.
+//! ([`set_data_root`]), and set light or dark for all the apps it shows ([`set_theme`]).
+//! Standalone, nothing changes.
 
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,6 +24,32 @@ use std::sync::atomic::{AtomicBool, Ordering};
 static HOSTED: AtomicBool = AtomicBool::new(false);
 
 static DATA_ROOT: RwLock<Option<PathBuf>> = RwLock::new(None);
+
+thread_local! {
+    static THEME: Cell<Option<crate::theme::ThemeKind>> = const { Cell::new(None) };
+    static OPEN_APPEARANCE: RefCell<Option<Box<dyn FnMut()>>> = const { RefCell::new(None) };
+}
+
+/// The host's theme, shown instead of Preferences ▸ Appearance mode and never saved as it;
+/// `None` (the default) shows PdfCraft's own.
+pub fn set_theme(theme: Option<crate::theme::ThemeKind>) {
+    THEME.set(theme);
+}
+
+/// The host's theme ([`set_theme`]), if it sets one.
+pub fn theme() -> Option<crate::theme::ThemeKind> {
+    THEME.get()
+}
+
+/// The host's appearance settings, which the theme commands open while the host sets the theme.
+pub fn set_open_appearance(open: Box<dyn FnMut()>) {
+    OPEN_APPEARANCE.set(Some(open));
+}
+
+/// Open the host's appearance settings ([`set_open_appearance`]) → whether there are any.
+pub fn open_appearance() -> bool {
+    OPEN_APPEARANCE.with_borrow_mut(|open| open.as_mut().map(|open| open()).is_some())
+}
 
 /// Mark the app as running inside a host window (before the app is built).
 pub fn set_hosted(hosted: bool) {

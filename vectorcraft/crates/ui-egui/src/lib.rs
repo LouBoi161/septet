@@ -981,7 +981,7 @@ impl VectorcraftApp {
         self.adopt_context(ctx);
         if !self.styled {
             theme::install_fonts(ctx);
-            theme::apply(ctx, self.ui.brightness);
+            theme::apply(ctx, hosted::brightness().unwrap_or(self.ui.brightness));
             egui_extras::install_image_loaders(ctx);
             self.styled = true;
         } else {
