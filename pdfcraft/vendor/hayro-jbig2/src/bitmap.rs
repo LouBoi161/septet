@@ -24,6 +24,7 @@ pub(crate) const MAX_PIXELS: u64 = 1 << 28;
 pub(crate) type Word = u32;
 
 pub(crate) const WORD_BITS: u32 = Word::BITS;
+pub(crate) const WORD_BYTES: u32 = WORD_BITS / u8::BITS;
 pub(crate) const WORD_SHIFT: u32 = WORD_BITS - 1;
 
 /// A decoded bitmap with position information.
