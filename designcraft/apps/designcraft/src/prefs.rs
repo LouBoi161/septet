@@ -60,7 +60,8 @@ mod tests {
         assert!(root.is_dir(), "the root is created");
         assert_eq!(prefs_path(), Some(root.join("ui.json")));
         assert_eq!(designcraft_engine::recovery::default_dir(), Some(root.join("Recovery")));
-        assert_eq!(crate::profile::recovery_dir(), Some(root.join("Recovery")));
+        // This run's own folder in it (upstream's per-run recovery folders).
+        assert!(crate::profile::recovery_dir().is_some_and(|d| d.parent() == Some(root.join("Recovery").as_path())));
         // The preferences go there and come back from there.
         let mut app = DesignApp::new(designcraft_engine::Session::new(), designcraft_ui_egui::Services::default());
         app.ui.story_editor_size = 21.0;
