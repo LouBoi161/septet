@@ -1,13 +1,14 @@
 # The same check as .github/workflows/check.yml, on GitLab: the shell with one app at a time
 # (`--features <app>`, see septet/Cargo.toml), so a broken app shows up in its own job. Each job
-# costs CI minutes, so it runs for merge requests, on main and by hand (Run pipeline), not on every
-# branch push.
+# costs CI minutes, so it runs for merge requests, on main and by hand (Run pipeline, `glab ci run`),
+# not on every branch push.
 
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "api"
 
 variables:
   CARGO_HOME: $CI_PROJECT_DIR/.cargo

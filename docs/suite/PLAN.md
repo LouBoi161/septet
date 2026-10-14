@@ -1,7 +1,7 @@
 # Plan: Aus sieben Apps werden zwölf
 
 Stand: 2026-10-14. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
-erledigt (MR !2 am 2026-10-14 gemergt), **Phase A läuft** (Branch `phase-a`: A1–A3, A5, H0 fertig, A4 zur Hälfte); ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
+erledigt (MR !2 am 2026-10-14 gemergt), **Phase A läuft** (Branch `phase-a`: A1–A5 und H0 fertig (A4 ohne Lightcraft und hohen Kontrast)); ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
 (`storytold/wordcraft`, `deckcraft`, `gridcraft`, `cadcraft`, `soundcraft`, `craft-launcher`, alle v0.4.0 vom
 2026-10-10) und des Septet-Codes.
 
@@ -100,9 +100,10 @@ Vorgehen:
 2. **Skript `scripts/sync-upstream.sh <app>|all [tag]`**: holt die neueste Release, merged sie in einen Branch
    `upstream/<datum>`, baut, führt die Tests und die Autotests (`tour`, `interop`, `content`, Claude-Werkzeuge)
    aus und listet Konflikte. Konflikte löst Claude, du prüfst.
-3. **Automatisch nachsehen:** Ein geplanter Lauf (CI-Zeitplan oder eine Claude-Routine) prüft z. B. zweimal pro
-   Woche auf neue Releases, macht den Abgleich auf einem Branch und öffnet einen **Merge Request auf GitLab**.
-   Nichts landet ohne deine Freigabe auf `main`.
+3. **Automatisch nachsehen:** `scripts/sync-nightly.sh`, als systemd-User-Timer Di und Fr 03:17
+   (`scripts/systemd/`, seit 2026-10-14 aktiv), macht den Abgleich in einem eigenen Worktree auf einem Branch
+   und öffnet bei Erfolg einen **Draft-Merge-Request auf GitLab**; bei Konflikt oder Fehler nur eine
+   Desktop-Meldung. Solange ein Sync-MR offen ist, setzt er aus. Nichts landet ohne deine Freigabe auf `main`.
 4. **Konflikte klein halten:** Unsere Änderungen in den App-Ordnern kommen möglichst in **eigene Dateien**
    (`embed.rs`, `hosted.rs`, `appearance.rs`) statt verteilt in die großen Upstream-Dateien. Jede Änderung in
    einer Upstream-Datei wird in `docs/suite/upstream-patches.md` mit Grund notiert.
@@ -136,20 +137,25 @@ v0.6.x). Vor Phase A deshalb ein zweiter Abgleich mit `scripts/sync-upstream.sh 
 | A4 Ein Erscheinungsbild | siehe eigener Abschnitt | M (dazu L für Lightcraft und CADCraft) |
 | A5 CI für Pushes und MRs | Check-Job pro App, Cache | S |
 
-Stand 2026-10-14 (Branch `phase-a`): **A1, A2, A3, A5 und H0 erledigt**, A4 zum Teil (Shell, Vectorcraft,
-Designcraft, Pdfcraft; siehe unten).
+Stand 2026-10-14 (Branch `phase-a`, MR !3 als Draft): **A1–A5 und H0 erledigt**; von A4 fehlen nur Lightcraft
+(helle Palette fehlt) und hoher Kontrast.
 - A1: Crate `shared/craft-fonts` bettet jede Schrift einmal ein; die Apps verweisen mit dem Feature
   `shared-craft-fonts` darauf (Adresse, nicht Wert: sonst kopiert der Compiler die Bytes). Gemessen: jede Schrift
   einmal im Binary statt sechsmal; Test `fonts::tests::craft_fonts_are_embedded_once`.
 - A2/A3: `kinds::APPS` (eine Zeile pro App, samt Einstiegspunkten und Assistant-Texten); Features
   `photocraft` … `effectcraft`, alle Standard. Unbekannte Apps in Sitzungen lesen sich als `AppKind::Unknown`.
-- A5: `.github/workflows/check.yml` (nur GitHub; GitLab-MRs laufen dort nur, wenn der Branch auch dorthin geht).
+- A5: `.github/workflows/check.yml` (GitHub, jeder Push) und `.gitlab-ci.yml` (GitLab: MRs, main, von Hand –
+  kostet CI-Minuten, daher nicht bei jedem Push).
 - H0: `septet/src/gpu.rs`; Autotest `gpu-lost`.
 - A4 (Teil 1): `septet/src/appearance.rs` – Stufe Darkest/Dark/Light/Lightest, „Same as the desktop“ (XDG-Portal
   über `pdfcraft-platform`), „Each app's own“, UI-Größe 80–175 % (ein `zoom_factor` für alle). Dialog über Home ›
   Appearance und das Fenstermenü. `HostedApp::set_appearance(Option<u8>)` / `set_open_appearance`; in
   Vectorcraft, Designcraft (je 4 Stufen) und Pdfcraft (Dark/Light) über `hosted::set_brightness`/`set_theme`,
   nie in deren Einstellungen gespeichert; ihre Theme-Befehle öffnen Septets Dialog. Autotest `appearance`.
+- A4 (Teil 2): auch Photocraft (vier Pro-Themes), Filmcraft, Effectcraft (setzt gehostet keinen Zoom mehr).
+  Akzentfarbe: acht feste Farben, auf denen weißer Text lesbar bleibt; jede App färbt ihre Akzent-Tokens um
+  (`hosted::with_accent`/`recolor`: Farbton des Akzents, Helligkeit und Sättigung relativ zum Theme-Akzent,
+  Grautöne bleiben), Filmcraft über seine Highlight-Farbe. `set_appearance(level, accent)`.
 
 ### Phase B: Die vier Office/CAD-Apps einbauen
 
@@ -352,11 +358,11 @@ Umsetzung:
 4. Reihenfolge: zuerst die S-Apps, dann die M-Apps; Lightcraft und CADCraft bleiben dunkel, bis ihre helle
    Palette fertig ist.
 
-Stand 2026-10-14: Schritte 1–3 für die Shell, Vectorcraft, Designcraft und Pdfcraft umgesetzt (ohne Akzentfarbe
-und hohen Kontrast). Abweichungen vom Plan: statt eines gemeinsamen Typs bekommt jede App die Stufe als Zahl
-0–3 (`Option<u8>`, `None` = eigenes Theme), damit die Apps keine neue Abhängigkeit brauchen; Standard ist
-„Dark“. Offen: Photocraft, Filmcraft, Effectcraft (M), Akzentfarbe (abgeleitete Töne pro App, Kontrast prüfen),
-hoher Kontrast (Designcraft hat ihn schon), Lightcraft (L).
+Stand 2026-10-14: Schritte 1–3 für die Shell und alle Apps außer Lightcraft umgesetzt, mit Akzentfarbe.
+Abweichungen vom Plan: statt eines gemeinsamen Typs bekommt jede App Stufe (0–3, `None` = eigenes Theme) und
+Akzent (`Option<egui::Color32>`) einzeln, damit die Apps keine neue Abhängigkeit brauchen; Standard ist „Dark“
+und der Akzent jeder App. Die Akzente sind eine feste Auswahl statt eines Farbwählers (Kontrast zu weißem
+Text). Offen: hoher Kontrast (Designcraft und Filmcraft haben ihn schon, die anderen nicht), Lightcraft (L).
 
 ## Namensideen für die Suite
 
