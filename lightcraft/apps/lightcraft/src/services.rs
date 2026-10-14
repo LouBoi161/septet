@@ -137,7 +137,16 @@ pub fn services(ctx: egui::Context, log_file: Option<&std::path::Path>) -> Servi
         pick_folder: Some(Box::new(|| {
             file_dialog().set_title(lightcraft_ui_egui::i18n::tr("Open Library")).pick_folder().map(|p| p.to_string_lossy().to_string())
         })),
+        #[cfg(target_os = "linux")]
+        open_model_folder: Some(std::sync::Arc::new(|path: &str| {
+            std::process::Command::new("xdg-open")
+                .arg(path)
+                .status()
+                .map_err(|e| e.to_string())
+                .and_then(|s| if s.success() { Ok(()) } else { Err(format!("opening folder failed: {s}")) })
+        })),
         open_with: Some(Box::new(crate::editors::open_with)),
+        open_all_with: Some(Box::new(crate::editors::open_all_with)),
         check_editor: Some(Box::new(crate::editors::check)),
         open_url: Some(Box::new(|url: &str| {
             if !url.starts_with("https://") {
@@ -213,7 +222,10 @@ pub fn services(ctx: egui::Context, log_file: Option<&std::path::Path>) -> Servi
         // macOS doesn't colour-manage the window: previews follow the screen's profile (#787)
         #[cfg(target_os = "macos")]
         screen_profile: Some(Box::new(crate::screen_profile::icc)),
-        #[cfg(not(target_os = "macos"))]
+        // Linux: the profile the desktop assigns in colord, read off the UI thread
+        #[cfg(target_os = "linux")]
+        screen_profile: Some(crate::colord::service()),
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         screen_profile: None,
         pick_display_profile: Some(Box::new(|| {
             let mut d = file_dialog()

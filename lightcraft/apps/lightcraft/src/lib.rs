@@ -6,6 +6,8 @@
 
 pub mod alloc_release;
 mod appearance;
+#[cfg(target_os = "linux")]
+mod colord;
 mod dialog_filter;
 mod editors;
 mod embed;
