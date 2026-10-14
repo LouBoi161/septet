@@ -4,7 +4,7 @@
 
 use egui::{Color32, FontData, FontDefinitions, FontFamily, Visuals};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 /// The level Home and empty windows show, 0 (darkest) to 3 (lightest); [`NO_LEVEL`]: dark.
 static LEVEL: AtomicU8 = AtomicU8::new(NO_LEVEL);

@@ -170,7 +170,11 @@ mod tests {
         set_accent(None);
         assert_eq!(t.accent, pink);
         let hue = |c: Color32| egui::ecolor::HsvaGamma::from(c).h;
-        for (name, c, was) in [("accent_text", t.accent_text, light.accent_text), ("accent_soft", t.accent_soft, light.accent_soft), ("selected", t.selected, light.selected)] {
+        for (name, c, was) in [
+            ("accent_text", t.accent_text, light.accent_text),
+            ("accent_soft", t.accent_soft, light.accent_soft),
+            ("selected", t.selected, light.selected),
+        ] {
             assert!((hue(c) - hue(pink)).abs() < 0.02, "{name} has the accent's hue");
             let v = |c: Color32| egui::ecolor::HsvaGamma::from(c).v;
             assert!((v(c) > v(pink)) == (v(was) > v(light.accent)), "{name} keeps its brightness relative to the accent");
