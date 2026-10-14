@@ -6,11 +6,15 @@
 pub mod app_dirs;
 mod appearance;
 pub mod caps_lock;
+// The window caption style the desktop asks for; main.rs hands it to the standalone app.
+pub mod caption_style;
 pub mod crash_guard;
 mod embed;
 // Used by services.rs (an empty file dialog answer explained, #3354); main.rs starts it.
 pub mod file_dialog_probe;
 pub mod gpu_startup;
+#[cfg(target_os = "linux")]
+mod icon_theme;
 // Pure logic is tested on every platform; only Linux runs the check.
 #[cfg(any(target_os = "linux", test))]
 pub mod linux_libs;
