@@ -1,7 +1,7 @@
 # Plan: Aus sieben Apps werden zwölf
 
 Stand: 2026-10-14. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
-erledigt (MR !2 am 2026-10-14 gemergt), **Phase A läuft** (Branch `phase-a`); ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
+erledigt (MR !2 am 2026-10-14 gemergt), **Phase A läuft** (Branch `phase-a`: A1–A3, A5, H0 fertig, A4 offen); ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
 (`storytold/wordcraft`, `deckcraft`, `gridcraft`, `cadcraft`, `soundcraft`, `craft-launcher`, alle v0.4.0 vom
 2026-10-10) und des Septet-Codes.
 
@@ -135,6 +135,15 @@ v0.6.x). Vor Phase A deshalb ein zweiter Abgleich mit `scripts/sync-upstream.sh 
 | A3 Cargo-Features pro App | baut auf A2 auf | S |
 | A4 Ein Erscheinungsbild | siehe eigener Abschnitt | M (dazu L für Lightcraft und CADCraft) |
 | A5 CI für Pushes und MRs | Check-Job pro App, Cache | S |
+
+Stand 2026-10-14 (Branch `phase-a`): **A1, A2, A3, A5 und H0 erledigt**, A4 offen.
+- A1: Crate `shared/craft-fonts` bettet jede Schrift einmal ein; die Apps verweisen mit dem Feature
+  `shared-craft-fonts` darauf (Adresse, nicht Wert: sonst kopiert der Compiler die Bytes). Gemessen: jede Schrift
+  einmal im Binary statt sechsmal; Test `fonts::tests::craft_fonts_are_embedded_once`.
+- A2/A3: `kinds::APPS` (eine Zeile pro App, samt Einstiegspunkten und Assistant-Texten); Features
+  `photocraft` … `effectcraft`, alle Standard. Unbekannte Apps in Sitzungen lesen sich als `AppKind::Unknown`.
+- A5: `.github/workflows/check.yml` (nur GitHub; GitLab-MRs laufen dort nur, wenn der Branch auch dorthin geht).
+- H0: `septet/src/gpu.rs`; Autotest `gpu-lost`.
 
 ### Phase B: Die vier Office/CAD-Apps einbauen
 
