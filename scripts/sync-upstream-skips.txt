@@ -36,3 +36,10 @@ filmcraft bit_exact_with_the_software_decoder
 filmcraft japanese_needs_an_installed_font
 filmcraft japanese_renders_with_craft_fonts
 filmcraft crash::tests::hook_records_and_logs_worker_panics
+
+# Upstream v0.8.0 fails the same way here (checked 2026-10-14 on the release tag itself): its Spanish
+# catalog says "procesamiento por software", its test expects "renderizado"; the packaged .desktop file
+# lists MimeType, the generated one doesn't; an Alt box drag loses its video-only selection on release.
+filmcraft the_notice_follows_the_interface_language
+filmcraft desktop_file_matches_the_packaged_fields
+filmcraft alt_box_selects_only_video_and_delete_keeps_linked_audio

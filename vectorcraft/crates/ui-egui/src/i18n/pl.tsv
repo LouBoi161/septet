@@ -4651,3 +4651,7 @@ mark-style	Japanese	Japońskie
 	Softness	Miękkość
 	Ambient Light	Światło otoczenia
 	Light behind the object	Światło za obiektem
+@msg	VectorCraft can't write any of {_1}	VectorCraft nie potrafi zapisać żadnego z formatów: {_1}
+@msg	the art has no extent	grafika nie ma rozmiaru
+@msg	the document was closed	dokument został zamknięty
+@msg	{_1} holds too many files named {stem}	{_1} zawiera zbyt wiele plików o nazwie {stem}

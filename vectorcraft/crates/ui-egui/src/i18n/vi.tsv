@@ -4362,3 +4362,7 @@ theme	Appearance	Giao diện
 	Softness	Độ mềm
 	Ambient Light	Ánh sáng môi trường
 	Light behind the object	Ánh sáng phía sau đối tượng
+@msg	VectorCraft can't write any of {_1}	VectorCraft không thể ghi bất kỳ định dạng nào trong số: {_1}
+@msg	the art has no extent	hình vẽ không có kích thước
+@msg	the document was closed	tài liệu đã bị đóng
+@msg	{_1} holds too many files named {stem}	{_1} chứa quá nhiều tệp tên {stem}
