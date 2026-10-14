@@ -1,0 +1,8 @@
+[package]
+name = "shared-craft-fonts"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "The craft-fonts faces, embedded once for every app in the suite binary"
+publish = false
+build = "build.rs"

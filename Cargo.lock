@@ -2095,6 +2095,7 @@ dependencies = [
  "harfrust 0.13.3",
  "kurbo 0.13.1",
  "log",
+ "shared-craft-fonts",
  "skrifa 0.47.0",
  "unicode-bidi",
  "unicode-script",
@@ -4189,6 +4190,7 @@ version = "0.7.2"
 dependencies = [
  "filmcraft-color 0.7.2",
  "harfrust 0.12.0",
+ "shared-craft-fonts",
  "skrifa 0.44.0",
  "unicode-bidi",
  "unicode-linebreak",
@@ -6756,6 +6758,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "shared-craft-fonts",
  "thiserror 2.0.21",
  "unicode-segmentation",
  "web-time",
@@ -8596,6 +8599,7 @@ version = "0.7.1"
 dependencies = [
  "harfrust 0.12.0",
  "pdfcraft-cos",
+ "shared-craft-fonts",
  "skrifa 0.44.0",
  "unicode-bidi",
 ]
@@ -9283,6 +9287,7 @@ dependencies = [
  "photocraft-geom",
  "photocraft-psd",
  "photocraft-raster",
+ "shared-craft-fonts",
  "skrifa 0.44.0",
 ]
 
@@ -10911,6 +10916,7 @@ dependencies = [
  "arboard",
  "base64 0.22.1",
  "designcraft",
+ "designcraft-fonts",
  "designcraft-ui-egui",
  "effectcraft",
  "effectcraft-ui-egui",
@@ -10918,14 +10924,18 @@ dependencies = [
  "egui",
  "egui_extras",
  "filmcraft",
+ "filmcraft-text",
  "filmcraft-ui-egui",
  "image",
  "libc",
  "lightcraft",
+ "lightcraft-engine",
  "lightcraft-ui-egui",
  "pdfcraft",
+ "pdfcraft-fonts",
  "pdfcraft-ui-egui",
  "photocraft",
+ "photocraft-text",
  "photocraft-ui-egui",
  "resvg 0.45.1",
  "rfd",
@@ -10936,6 +10946,7 @@ dependencies = [
  "ureq",
  "uuid",
  "vectorcraft",
+ "vectorcraft-text",
  "vectorcraft-ui-egui",
  "winit",
  "winresource",
@@ -11085,6 +11096,10 @@ dependencies = [
  "keccak",
  "sponge-cursor",
 ]
+
+[[package]]
+name = "shared-craft-fonts"
+version = "0.1.0"
 
 [[package]]
 name = "shlex"
@@ -12789,6 +12804,7 @@ dependencies = [
  "icu_segmenter",
  "kurbo 0.13.1",
  "log",
+ "shared-craft-fonts",
  "skrifa 0.47.0",
  "subsetter",
  "unicode-bidi",

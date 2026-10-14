@@ -3776,6 +3776,7 @@ version = "0.7.1"
 dependencies = [
  "harfrust",
  "pdfcraft-cos",
+ "shared-craft-fonts",
  "skrifa 0.44.0",
  "unicode-bidi",
 ]
@@ -5188,6 +5189,10 @@ dependencies = [
  "keccak",
  "sponge-cursor",
 ]
+
+[[package]]
+name = "shared-craft-fonts"
+version = "0.1.0"
 
 [[package]]
 name = "shlex"

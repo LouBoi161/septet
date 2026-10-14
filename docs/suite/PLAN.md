@@ -1,7 +1,7 @@
 # Plan: Aus sieben Apps werden zwölf
 
-Stand: 2026-10-13. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), Phase A noch nicht
-begonnen; ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
+Stand: 2026-10-14. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
+erledigt (MR !2 am 2026-10-14 gemergt), **Phase A läuft** (Branch `phase-a`); ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
 (`storytold/wordcraft`, `deckcraft`, `gridcraft`, `cadcraft`, `soundcraft`, `craft-launcher`, alle v0.4.0 vom
 2026-10-10) und des Septet-Codes.
 
@@ -123,7 +123,8 @@ vielen Upstream-Änderungen).
 
 Erledigt 2026-10-10, gemergt 2026-10-13 (MR !1). Upstream war da schon weiter (Photocraft v0.8.2, Vectorcraft
 v0.10.0, Lightcraft/Designcraft/Pdfcraft v0.7.1, Filmcraft v0.7.2, Effectcraft v0.9.2; die fünf neuen Apps
-v0.6.x). Vor Phase A deshalb ein zweiter Abgleich mit `scripts/sync-upstream.sh all`.
+v0.6.x). Vor Phase A deshalb ein zweiter Abgleich mit `scripts/sync-upstream.sh all`: erledigt, gemergt
+2026-10-14 (MR !2; Photocraft v0.8.2, Vectorcraft v0.10.0, Effectcraft v0.9.2, Filmcraft v0.7.2, die übrigen v0.7.1).
 
 ### Phase A: Fundament (vor den neuen Apps)
 

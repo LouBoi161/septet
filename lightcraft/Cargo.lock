@@ -3245,6 +3245,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "shared-craft-fonts",
  "thiserror 2.0.21",
  "unicode-segmentation",
  "web-time",
@@ -5463,6 +5464,10 @@ dependencies = [
  "cpufeatures",
  "digest",
 ]
+
+[[package]]
+name = "shared-craft-fonts"
+version = "0.1.0"
 
 [[package]]
 name = "shlex"

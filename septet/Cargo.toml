@@ -39,6 +39,14 @@ designcraft = { path = "../designcraft/apps/designcraft" }
 pdfcraft = { path = "../pdfcraft/apps/pdfcraft" }
 filmcraft = { path = "../filmcraft/apps/filmcraft" }
 effectcraft = { path = "../effectcraft/apps/effectcraft" }
+# The apps' font crates, only to turn on `shared-craft-fonts`: the craft fonts are embedded once
+# (`shared/craft-fonts`), not once per app.
+photocraft-text = { path = "../photocraft/crates/text", features = ["shared-craft-fonts"] }
+vectorcraft-text = { path = "../vectorcraft/crates/text", features = ["shared-craft-fonts"] }
+lightcraft-engine = { path = "../lightcraft/crates/engine", features = ["shared-craft-fonts"] }
+designcraft-fonts = { path = "../designcraft/crates/fonts", features = ["shared-craft-fonts"] }
+pdfcraft-fonts = { path = "../pdfcraft/crates/fonts", features = ["shared-craft-fonts"] }
+filmcraft-text = { path = "../filmcraft/crates/text", features = ["shared-craft-fonts"] }
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 # Only for EventLoopBuilderExtX11 (XWayland by default, see main.rs).

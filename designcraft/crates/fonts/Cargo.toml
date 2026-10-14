@@ -11,6 +11,8 @@ workspace = true
 [features]
 # Synthetic fonts for other crates' tests (`designcraft_fonts::testing`).
 testing = []
+# Septet turns this on: CRAFT_FONTS refers to the fonts embedded once for all apps.
+shared-craft-fonts = ["dep:shared-craft-fonts"]
 
 [dependencies]
 kurbo = { workspace = true }
@@ -19,3 +21,5 @@ harfrust = { workspace = true }
 unicode-bidi = { workspace = true }
 unicode-script = { workspace = true }
 log = { workspace = true }
+# Septet: the suite's single copy of the craft fonts (`shared-craft-fonts` feature, see build.rs).
+shared-craft-fonts = { path = "../../../shared/craft-fonts", optional = true }

@@ -2278,6 +2278,7 @@ version = "0.7.2"
 dependencies = [
  "filmcraft-color",
  "harfrust",
+ "shared-craft-fonts",
  "skrifa",
  "unicode-bidi",
  "unicode-linebreak",
@@ -5512,6 +5513,10 @@ dependencies = [
  "cpufeatures",
  "digest",
 ]
+
+[[package]]
+name = "shared-craft-fonts"
+version = "0.1.0"
 
 [[package]]
 name = "shlex"
