@@ -54,7 +54,7 @@ fn kinds_map_to_their_dialogs() {
         assert_eq!(DialogKind::of(kind), Some(want), "{kind}");
     }
     assert_eq!(DialogKind::of("nope"), None);
-    assert!(spec("effect").preview && spec("recolor").preview && !spec("move").preview);
+    assert!(spec("effect").preview && spec("recolor").preview && !spec("rectangle").preview);
     assert!(spec("preferences").window.is_some() && spec("rectangle").window.is_none());
 }
 
@@ -257,6 +257,31 @@ fn revolve_dialog_preview_cancel_confirm_and_undo() {
 }
 
 #[test]
+fn extrude_inflate_and_rotate_dialogs_preview_confirm_and_undo() {
+    for effect in vectorcraft_effects::SOLIDS {
+        let mut app = app();
+        app.run("path.create", json!({"d":"M100 100 L200 100 L200 200 L100 200 Z"})).unwrap();
+        app.run("select.all", json!({})).unwrap();
+        let before = app.session.doc().unwrap().doc.clone();
+        app.run("effect.dialog", json!({"effect": effect, "item": null})).unwrap();
+        frame(&mut app, Default::default());
+        assert!(app.session.in_interaction(), "{effect}: previewing");
+        cancel(&mut app);
+        assert_eq!(app.session.doc().unwrap().doc, before, "{effect}: Cancel restores");
+        app.run("effect.dialog", json!({"effect": effect, "item": null})).unwrap();
+        app.ui.dialog.as_mut().unwrap().fields.insert("rotationY".into(), json!(45));
+        frame(&mut app, Default::default());
+        confirm(&mut app).unwrap();
+        let doc = &app.session.doc().unwrap().doc;
+        let n = doc.node(doc.layers[0].children().unwrap()[0].id).unwrap();
+        assert_eq!(n.appearance.effects.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), [effect]);
+        assert_eq!(n.appearance.effects[0].params["rotationY"], json!(45));
+        app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(app.session.doc().unwrap().doc, before, "{effect}: one undo step");
+    }
+}
+
+#[test]
 fn dialogs_are_as_tall_as_their_content() {
     // The save prompt, shown after a taller dialog, is as tall as its text and buttons: no empty
     // band around the buttons, nothing inherited from the other dialog.
@@ -352,6 +377,42 @@ fn a_form_dialog_is_as_wide_as_its_fields_not_the_window() {
     // The same dialog in a narrow window still fits it.
     let narrow = dialog_rect(&mut app, 360.0);
     assert!(narrow.width() <= 360.0, "{:.0} wide in a 360-point window", narrow.width());
+}
+
+/// Object › Path › Split Into Grid opens on a grid the size of the selection, shows its rows and
+/// columns side by side (number, size, gutter, total), previews on the canvas and, on OK, splits
+/// the path and adds the guides as one undo step.
+#[test]
+fn split_into_grid_opens_at_the_selections_size_and_previews() {
+    let mut app = app();
+    app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 112, "height": 62})).unwrap();
+    app.run("select.all", json!({})).unwrap();
+    let undo = app.session.doc().unwrap().history.undo.len();
+    crate::menus::invoke(&mut app, "object.path.splitIntoGrid", json!({}));
+    let d = app.ui.dialog.as_mut().unwrap();
+    assert_eq!((d.f64("totalWidth", 0.0), d.f64("totalHeight", 0.0), d.bool("addGuides")), (112.0, 62.0, false));
+    d.fields.extend([
+        ("columns".to_string(), json!(3)),
+        ("columnGutter".to_string(), json!(8)),
+        ("addGuides".into(), json!(true)),
+        ("preview".into(), json!(true)),
+    ]);
+    frame(&mut app, Default::default());
+    // The preview: 2 × 3 cells and the guides along their edges, not yet an undo step.
+    assert_eq!((objects(&app), app.session.doc().unwrap().doc.guides.len()), (6, 10));
+    assert!(app.session.in_interaction());
+    confirm(&mut app).unwrap();
+    let st = app.session.doc().unwrap();
+    assert_eq!((objects(&app), st.doc.guides.len(), st.history.undo.len()), (6, 10, undo + 1));
+    assert!(app.ui.dialog.is_none() && !app.session.in_interaction());
+    // Cancel rolls a preview back.
+    app.run("select.all", json!({})).unwrap();
+    crate::menus::invoke(&mut app, "object.path.splitIntoGrid", json!({}));
+    app.ui.dialog.as_mut().unwrap().fields.insert("preview".into(), json!(true));
+    frame(&mut app, Default::default());
+    assert_eq!(objects(&app), 4, "one grid over the six cells");
+    cancel(&mut app);
+    assert_eq!(objects(&app), 6);
 }
 
 #[test]
@@ -525,6 +586,78 @@ fn a_dialog_opens_with_its_first_field_focused_so_typing_and_enter_apply() {
     assert_eq!(node.appearance.effects.last().map(|e| e.params["scaleH"].clone()), Some(json!(50.0)));
 }
 
+/// #1367: a dialog opened by a click (its menu item) is drawn in the frame of that click, where egui
+/// takes the focus from a field the click missed: its first field still has the focus, each time it
+/// opens.
+#[test]
+fn a_dialog_opened_by_a_click_focuses_its_first_field_each_time_it_opens() {
+    let mut app = app();
+    app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 40, "height": 20})).unwrap();
+    let ctx = egui::Context::default();
+    theme::install_fonts(&ctx);
+    theme::apply(&ctx, Default::default());
+    let frame = |app: &mut VectorcraftApp, events: Vec<egui::Event>| {
+        let mut out = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| show(app, ui.ctx()));
+        out.textures_delta.clear();
+    };
+    // A click away from the dialog, as on a menu item.
+    let click = || {
+        let (pos, button, modifiers) = (egui::pos2(5.0, 5.0), egui::PointerButton::Primary, egui::Modifiers::NONE);
+        let press = |pressed| egui::Event::PointerButton { pos, button, pressed, modifiers };
+        vec![egui::Event::PointerMoved(pos), press(true), press(false)]
+    };
+    type Open = fn(&mut VectorcraftApp);
+    let opens: [(&str, Open); 2] = [
+        ("Convert to Shape", |app| drop(app.run("effect.dialog", json!({"effect": "convertToShape.rectangle"})))),
+        ("Rasterize", |app| crate::menus::invoke(app, "object.rasterize", json!({}))),
+    ];
+    for (name, open) in opens {
+        for turn in 1..=3 {
+            open(&mut app);
+            assert!(app.ui.dialog.is_some(), "{name}");
+            frame(&mut app, click());
+            frame(&mut app, vec![]);
+            frame(&mut app, vec![]);
+            assert!(ctx.memory(|m| m.focused()).is_some(), "{name}, turn {turn}");
+            cancel(&mut app);
+            // A frame without the dialog, as between two uses of it.
+            frame(&mut app, vec![]);
+            assert!(ctx.memory(|m| m.focused()).is_none(), "{name}, turn {turn}");
+        }
+    }
+}
+
+/// A greyed-out field can't hold the keyboard focus, so it doesn't take a just-opened dialog's
+/// either: the focus waits for the first enabled field. Blend Options on Smooth Color shows its
+/// steps greyed out; choosing Specified Steps enables the field and it takes the focus (type a
+/// count, press Enter).
+#[test]
+fn a_dialogs_focus_skips_a_greyed_out_first_field() {
+    let mut app = app();
+    let ctx = egui::Context::default();
+    theme::install_fonts(&ctx);
+    theme::apply(&ctx, Default::default());
+    let frame = |app: &mut VectorcraftApp, events: Vec<egui::Event>| {
+        let mut out = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| show(app, ui.ctx()));
+        out.textures_delta.clear();
+    };
+    let enter = egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
+    app.run("ui.blendOptions", json!({})).unwrap();
+    app.ui.dialog.as_mut().unwrap().fields.insert("spacing".into(), json!("smooth"));
+    for _ in 0..3 {
+        frame(&mut app, vec![]);
+    }
+    assert!(ctx.memory(|m| m.focused()).is_none(), "nothing to type in yet");
+    app.ui.dialog.as_mut().unwrap().fields.insert("spacing".into(), json!("steps"));
+    frame(&mut app, vec![]);
+    assert!(ctx.memory(|m| m.focused()).is_some(), "the steps field takes the focus once it is enabled");
+    frame(&mut app, vec![egui::Event::Text("7".into())]);
+    frame(&mut app, vec![enter]);
+    assert!(app.ui.dialog.is_none());
+    let info = app.run("object.blend.info", json!({})).unwrap();
+    assert_eq!((info["spacing"].clone(), info["steps"].clone()), (json!("steps"), json!(7)), "{info}");
+}
+
 /// #1000: a count typed in Object › Create Object Mosaic… reaches the command (a whole number typed
 /// in a command's dialog is an integer), so the mosaic has that many columns, not the 10 × 10 grid.
 #[test]
@@ -686,6 +819,54 @@ fn polar_grid_shared_canvas_click_defaults_units_counts_and_history() {
     assert_eq!(app.session.doc().unwrap().doc, before);
     app.run("edit.redo", json!({})).unwrap();
     assert_eq!(app.session.doc().unwrap().doc, made);
+}
+
+/// #1377: Polar Grid's dialog has a skew slider under each divider count, Create Compound Path
+/// From Ellipses and Fill Grid, opened with the tool's stored values; OK draws with them and
+/// stores them.
+#[test]
+fn polar_grid_dialog_edits_skews_compound_and_fill() {
+    use vectorcraft_doc::{NodeId, NodeKind};
+    let mut app = app();
+    app.run("paint.setFill", json!({"color": "#ff0000"})).unwrap();
+    app.run("tool.setOption", json!({"tool": "polarGrid", "values": {"concentric": 3, "radial": 4, "radialSkew": 500}})).unwrap();
+    open_tool_dialog(&mut app, "polarGrid", json!({"x": 10, "y": 20}));
+    let text = crate::tests_labels::painted_text(&mut app, |app, ui| show(app, ui.ctx()));
+    let labels = [
+        "Concentric Dividers:",
+        "Skew:",
+        "Inside",
+        "Outside",
+        "Radial Dividers:",
+        "Skew:",
+        "Left",
+        "Right",
+        "Create Compound Path From Ellipses",
+        "Fill Grid",
+    ];
+    let mut from = 0;
+    for label in labels {
+        from += text[from..].find(&format!("{label}\n")).unwrap_or_else(|| panic!("no {label:?} in order in {text}")) + label.len();
+    }
+    assert!(!text.contains("Use Outside Rectangle As Frame"), "{text}");
+    let d = app.ui.dialog.as_mut().unwrap();
+    assert_eq!((d.fields["concentricSkew"].clone(), d.fields["radialSkew"].clone()), (json!(0.0), json!(500.0)));
+    assert_eq!((d.fields["compound"].clone(), d.fields["fill"].clone()), (json!(false), json!(false)));
+    for (key, value) in [("concentricSkew", json!(100)), ("compound", json!(true)), ("fill", json!(true))] {
+        d.fields.insert(key.into(), value);
+    }
+    let result = confirm(&mut app).unwrap();
+    let s = app.session.doc().unwrap();
+    let children = s.doc.node(NodeId(result["id"].as_u64().unwrap())).unwrap().children().unwrap();
+    // Two rings under four radial dividers, all in the current fill.
+    assert_eq!(children.iter().map(|n| matches!(n.kind, NodeKind::Compound { .. })).collect::<Vec<_>>(), [true, true, false, false, false, false]);
+    assert!(children.iter().all(|n| n.appearance.fill().is_some_and(|f| f.paint != vectorcraft_color::Paint::None)));
+    let widths: Vec<f64> = children[0].children().unwrap().iter().map(|n| n.geometric_bounds().unwrap().width()).collect();
+    assert!((widths[0] - 100.0).abs() < 1e-6 && (widths[1] - 93.75).abs() < 1e-6, "outward: {widths:?}");
+    let tips: Vec<f64> = children[3..].iter().map(|n| n.path_data().unwrap().subpaths[0].anchors[1].p.x).collect();
+    assert!(tips.iter().all(|x| *x > 60.0), "right of the top divider: {tips:?}");
+    let saved = json!({"concentric": 3, "radial": 4, "concentricSkew": 100.0, "radialSkew": 500.0, "compound": true, "fill": true});
+    assert_eq!(app.session.tool_options_of("polarGrid"), saved);
 }
 
 #[test]

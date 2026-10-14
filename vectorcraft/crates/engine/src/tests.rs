@@ -712,7 +712,10 @@ fn a_transform_that_moves_nothing_records_no_undo_step() {
         assert_eq!(history(&s), before, "{id} {p}");
         assert_eq!(s.journal.last().unwrap(), &(id.to_string(), p));
     }
-    assert_eq!(s.doc().unwrap().last_transform, Some((Affine::IDENTITY, json!({"copy": false, "typeAreas": false, "patterns": false}))));
+    assert_eq!(
+        s.doc().unwrap().last_transform,
+        Some((Affine::IDENTITY, json!({"copy": false, "typeAreas": false, "patterns": false, "objects": true})))
+    );
     // A Nudge of 0 with an anchor of the rectangle direct-selected keeps it a live shape.
     let is_live = |s: &Session| matches!(s.doc().unwrap().doc.node(a).unwrap().kind, NodeKind::Path { live: Some(_), .. });
     assert!(is_live(&s), "a rectangle is a live shape");
@@ -762,6 +765,86 @@ fn a_transform_that_moves_nothing_records_no_undo_step() {
     s.execute("object.move", &json!({"dx": 0, "dy": 0, "copy": true})).unwrap();
     assert_eq!(history(&s), (before.0 + 1, 0, true));
     assert_eq!(count(&s), n + 1);
+}
+
+/// #1408: with anchors selected with Direct Selection, the Transform commands and tools transform
+/// those anchors alone, about the centre of their own box; a copy still copies the whole object.
+#[test]
+fn transforms_act_on_direct_selected_anchors() {
+    let mut s = session();
+    let square = json!({"anchors": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 100, "y": 100}, {"x": 0, "y": 100}], "closed": true});
+    let id = NodeId(s.execute("path.create", &square).unwrap()["id"].as_u64().unwrap());
+    let points = |s: &Session| -> Vec<(f64, f64)> {
+        let NodeKind::Path { path, .. } = &s.doc().unwrap().doc.node(id).unwrap().kind else { panic!("a path") };
+        path.subpaths[0].anchors.iter().map(|a| (a.p.x.round(), a.p.y.round())).collect()
+    };
+    let top = json!({"id": id.0, "anchors": [[0, 0], [0, 1]]});
+    s.execute("select.anchors", &top).unwrap();
+    let cases = [
+        ("object.scale", json!({"sx": 50}), [(25.0, 0.0), (75.0, 0.0)]),
+        ("object.scale", json!({"sx": 50, "origin": [0, 100]}), [(0.0, 50.0), (50.0, 50.0)]),
+        ("object.rotate", json!({"angle": 90}), [(50.0, 50.0), (50.0, -50.0)]),
+        ("object.reflect", json!({"axis": "vertical"}), [(100.0, 0.0), (0.0, 0.0)]),
+        ("object.shear", json!({"angle": 45, "axis": "vertical", "origin": [0, 0]}), [(0.0, 0.0), (100.0, 100.0)]),
+        ("object.move", json!({"dx": 10, "dy": -10}), [(10.0, -10.0), (110.0, -10.0)]),
+        ("object.transform", json!({"matrix": [1, 0, 0, 1, 5, 5], "anchors": true}), [(5.0, 5.0), (105.0, 5.0)]),
+    ];
+    for (cmd, p, [a, b]) in cases {
+        s.execute(cmd, &p).unwrap();
+        assert_eq!(points(&s), [a, b, (100.0, 100.0), (0.0, 100.0)], "{cmd} {p}");
+        s.execute("edit.undo", &json!({})).unwrap();
+        s.execute("select.anchors", &top).unwrap();
+    }
+    // Transform Again repeats it on the anchors.
+    s.execute("object.move", &json!({"dx": 10, "dy": 0})).unwrap();
+    s.execute("object.transformAgain", &json!({})).unwrap();
+    assert_eq!(points(&s), [(20.0, 0.0), (120.0, 0.0), (100.0, 100.0), (0.0, 100.0)]);
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("select.anchors", &top).unwrap();
+    // Without `anchors`, object.transform (the Selection tool's) takes the whole path, and so does a copy.
+    s.execute("object.transform", &json!({"matrix": [1, 0, 0, 1, 5, 5]})).unwrap();
+    assert_eq!(points(&s), [(5.0, 5.0), (105.0, 5.0), (105.0, 105.0), (5.0, 105.0)]);
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("select.anchors", &top).unwrap();
+    let copies = s.execute("object.scale", &json!({"sx": 50, "copy": true})).unwrap();
+    assert_eq!(copies["ids"].as_array().unwrap().len(), 1);
+    assert_eq!(points(&s), [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)], "the original stays");
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("select.anchors", &top).unwrap();
+    // The Scale tool: a drag from (100, 50) to (75, 50) halves the top edge about its centre (50, 0).
+    let v = ViewInfo::default();
+    s.select_tool("scale", v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Down, 100.0, 50.0), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Drag, 75.0, 50.0), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Up, 75.0, 50.0), v).unwrap();
+    assert_eq!(points(&s), [(25.0, 0.0), (75.0, 0.0), (100.0, 100.0), (0.0, 100.0)]);
+}
+
+/// #1824: with anchors selected with Direct Selection, the Transform panel's X/Y/W/H
+/// (`object.setBounds`) are the box around those anchors, and only they move or scale.
+#[test]
+fn set_bounds_acts_on_direct_selected_anchors() {
+    let mut s = session();
+    let square = json!({"anchors": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 100, "y": 100}, {"x": 0, "y": 100}], "closed": true});
+    let id = NodeId(s.execute("path.create", &square).unwrap()["id"].as_u64().unwrap());
+    let points = |s: &Session| -> Vec<(f64, f64)> {
+        let NodeKind::Path { path, .. } = &s.doc().unwrap().doc.node(id).unwrap().kind else { panic!("a path") };
+        path.subpaths[0].anchors.iter().map(|a| (a.p.x.round(), a.p.y.round())).collect()
+    };
+    s.execute("select.anchors", &json!({"id": id.0, "anchors": [[0, 1]]})).unwrap();
+    s.execute("object.setBounds", &json!({"x": 130, "reference": 0})).unwrap();
+    assert_eq!(points(&s), [(0.0, 0.0), (130.0, 0.0), (100.0, 100.0), (0.0, 100.0)], "only the selected anchor moves");
+    s.execute("object.setBounds", &json!({"y": 20, "reference": 4})).unwrap();
+    assert_eq!(points(&s), [(0.0, 0.0), (130.0, 20.0), (100.0, 100.0), (0.0, 100.0)]);
+    // Two anchors: W scales their box about the reference point, the others stay.
+    s.execute("select.anchors", &json!({"id": id.0, "anchors": [[0, 2], [0, 3]]})).unwrap();
+    s.execute("object.setBounds", &json!({"width": 50, "reference": 3})).unwrap();
+    assert_eq!(points(&s), [(0.0, 0.0), (130.0, 20.0), (50.0, 100.0), (0.0, 100.0)]);
+    // The path selected whole moves as a whole.
+    s.execute("select.set", &json!({"ids": [id.0]})).unwrap();
+    s.execute("object.setBounds", &json!({"x": 10, "reference": 0})).unwrap();
+    assert_eq!(points(&s), [(10.0, 0.0), (140.0, 20.0), (60.0, 100.0), (10.0, 100.0)]);
 }
 
 /// Arrange commands that leave the stacking order as it is record no undo step: Bring to Front and
@@ -1423,6 +1506,26 @@ fn direct_selection_moves_one_anchor() {
     assert_eq!(p.subpaths[0].anchors[1].p, vectorcraft_geom::Point::new(200.0, 100.0));
 }
 
+/// #1816: with Snap to Grid on, a dragged anchor lands on the grid's subdivisions, not on whole
+/// points, even with Snap to Pixel left on too.
+#[test]
+fn direct_selection_snaps_anchors_to_the_grid() {
+    let mut s = session();
+    let a = rect(&mut s, 101.0, 101.0, 100.0, 100.0);
+    s.execute("select.none", &json!({})).unwrap();
+    let step = s.doc().unwrap().doc.grid.spacing / f64::from(s.doc().unwrap().doc.grid.subdivisions.max(1));
+    let on_grid = |v: f64| (v / step - (v / step).round()).abs() < 1e-9;
+    let v = ViewInfo { snap_to_grid: true, snap_to_pixel: true, ..ViewInfo::default() };
+    s.select_tool("directSelection", v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Down, 101.0, 101.0), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Drag, 131.0, 113.0), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Up, 131.0, 113.0), v).unwrap();
+    let p = s.doc().unwrap().doc.node(a).unwrap().path_data().unwrap().clone();
+    let moved = p.subpaths[0].anchors[0].p;
+    assert!(on_grid(moved.x) && on_grid(moved.y), "anchor at {moved:?}, grid step {step}");
+    assert_eq!(p.subpaths[0].anchors[1].p, vectorcraft_geom::Point::new(201.0, 101.0));
+}
+
 /// Follow-up to #1254: toggling or adding anchors of a path selected as a whole starts from all
 /// its anchors, so toggling one deselects it alone and adding one keeps them all.
 #[test]
@@ -1517,6 +1620,81 @@ fn inspect_lists_everything() {
     assert!(s.commands().len() > 100);
 }
 
+/// A compound path reports the paint that lives on it, and any node reports a blend other than Normal.
+#[test]
+fn inspect_reports_compound_paint_and_blend() {
+    let mut s = session();
+    let a = rect(&mut s, 0.0, 0.0, 40.0, 40.0);
+    let b = rect(&mut s, 10.0, 10.0, 10.0, 10.0);
+    s.execute("select.set", &json!({"ids": [a.0, b.0]})).unwrap();
+    let c = s.execute("object.compoundPath.make", &json!({})).unwrap()["id"].as_u64().unwrap();
+    s.execute("object.setProps", &json!({"id": c, "blend": "Multiply"})).unwrap();
+    let v = s.execute("document.inspect", &json!({})).unwrap();
+    let node = &v["layers"][0]["children"][0];
+    assert_eq!(node["id"], c);
+    assert_eq!(node["kind"], "Compound Path");
+    assert!(node["fill"].as_str().is_some_and(|f| f != "None"), "compound paint: {node}");
+    assert!(node.get("stroke").is_some() && node.get("strokeWidth").is_some(), "{node}");
+    assert_eq!(node["blend"], "Multiply");
+    let plain = rect(&mut s, 80.0, 0.0, 10.0, 10.0);
+    let v = s.execute("document.inspect", &json!({})).unwrap();
+    let plain = v["layers"][0]["children"].as_array().unwrap().iter().find(|n| n["id"] == plain.0).unwrap();
+    assert!(plain.get("blend").is_none(), "Normal is omitted: {plain}");
+}
+
+/// A compound path made of a group (outlined type is one) takes the paint of the backmost path in
+/// it, not the group's own (none): it drew nothing. A compound path in the group gives the paint
+/// that painted its paths.
+#[test]
+fn compound_of_a_group_takes_its_backmost_paths_paint() {
+    let paint = |s: &Session, id: u64| (*s.doc().unwrap().doc.node(NodeId(id)).unwrap().appearance).clone();
+    let made = |s: &mut Session, cmd: &str| s.execute(cmd, &json!({})).unwrap()["id"].as_u64().unwrap();
+    let mut s = session();
+    let a = rect(&mut s, 0.0, 0.0, 40.0, 40.0);
+    s.execute("paint.setFill", &json!({"color": "#ff0000"})).unwrap();
+    let b = rect(&mut s, 10.0, 10.0, 10.0, 10.0);
+    s.execute("paint.setFill", &json!({"color": "#0000ff"})).unwrap();
+    let red = paint(&s, a.0);
+    assert_ne!(red, paint(&s, b.0));
+    assert_ne!(red, Default::default());
+    s.execute("select.set", &json!({"ids": [a.0, b.0]})).unwrap();
+    made(&mut s, "object.group");
+    let c = made(&mut s, "object.compoundPath.make");
+    assert_eq!(paint(&s, c), red, "the backmost path's paint");
+    // Grouped again and joined with a path in front: the paint the compound path gave its paths.
+    let g = made(&mut s, "object.group");
+    let front = rect(&mut s, 20.0, 20.0, 5.0, 5.0);
+    s.execute("paint.setFill", &json!({"color": "#00ff00"})).unwrap();
+    s.execute("select.set", &json!({"ids": [g, front.0]})).unwrap();
+    let c = made(&mut s, "object.compoundPath.make");
+    assert_eq!(paint(&s, c), red);
+    assert_eq!(s.doc().unwrap().doc.node(NodeId(c)).unwrap().children().unwrap().len(), 3);
+}
+/// Compound paths joined into one keep their own holes: each one's paths turn together, so the
+/// counters of outlined letters stay open (they filled in when every path was turned alone).
+#[test]
+fn joined_compound_paths_keep_their_holes() {
+    let made = |s: &mut Session, cmd: &str| s.execute(cmd, &json!({})).unwrap()["id"].as_u64().unwrap();
+    let mut s = session();
+    let mut rings = vec![];
+    for x in [0.0, 100.0, 200.0] {
+        let (outer, inner) = (rect(&mut s, x, 0.0, 40.0, 40.0), rect(&mut s, x + 10.0, 10.0, 10.0, 10.0));
+        s.execute("select.set", &json!({"ids": [outer.0, inner.0]})).unwrap();
+        rings.push(made(&mut s, "object.compoundPath.make"));
+    }
+    s.execute("select.set", &json!({"ids": rings})).unwrap();
+    made(&mut s, "object.group");
+    let c = made(&mut s, "object.compoundPath.make");
+    let d = &s.doc().unwrap().doc;
+    let turns: Vec<f64> =
+        d.node(NodeId(c)).unwrap().children().unwrap().iter().map(|p| p.path_data().unwrap().subpaths[0].signed_area().signum()).collect();
+    assert_eq!(turns.len(), 6);
+    for ring in turns.chunks(2) {
+        assert_eq!(ring[0], -ring[1], "a hole runs against its outline: {turns:?}");
+    }
+    // The rings in front run against the backmost one (#1197).
+    assert_eq!((turns[2], turns[4]), (-turns[0], -turns[0]), "{turns:?}");
+}
 /// `document.node {summary: true}` answers the `document.inspect` shape for one node:
 /// the same fields the full-tree summary carries, without serializing the whole tree.
 #[test]
@@ -1530,6 +1708,55 @@ fn document_node_summary_matches_inspect() {
     let node = v["layers"][0]["children"].as_array().unwrap().iter().find(|n| n["id"] == id).cloned().unwrap();
     assert_eq!(summary, node, "{summary} vs {node}");
     assert!(s.execute("document.node", &json!({"id": 999999, "summary": true})).is_err());
+}
+
+/// #1389: the paint of a compound path is on the compound, which reports it; its members report
+/// that they are members instead of a paint they don't have. Every node reports a blend mode
+/// that isn't Normal, as it does an opacity below 100%.
+#[test]
+fn inspect_reports_a_compound_paths_paint_and_blend_modes() {
+    let mut s = session();
+    let plain = rect(&mut s, 300.0, 0.0, 50.0, 50.0).0;
+    let (a, b) = (rect(&mut s, 0.0, 0.0, 200.0, 200.0), rect(&mut s, 50.0, 50.0, 100.0, 100.0));
+    s.execute("select.set", &json!({"ids": [a.0, b.0]})).unwrap();
+    s.execute("object.compoundPath.make", &json!({})).unwrap();
+    s.execute("paint.setFill", &json!({"color": "#ff0000"})).unwrap();
+    s.execute("paint.setStroke", &json!({"color": "#0000ff"})).unwrap();
+    s.execute("stroke.set", &json!({"weight": 3})).unwrap();
+    s.execute("object.setProps", &json!({"opacity": 80, "blend": "Color Burn"})).unwrap();
+    let v = s.execute("document.inspect", &json!({})).unwrap();
+    let nodes = v["layers"][0]["children"].as_array().unwrap();
+    let compound = nodes.iter().find(|n| n["kind"] == "Compound Path").unwrap();
+    assert_eq!((&compound["fill"], &compound["stroke"], &compound["strokeWidth"]), (&json!("#ff0000"), &json!("#0000ff"), &json!(3.0)), "{compound}");
+    assert_eq!(compound["blend"], "Color Burn", "{compound}");
+    // The label is what `object.setProps` takes.
+    s.execute("object.setProps", &json!({"blend": compound["blend"]})).unwrap();
+    let members = compound["children"].as_array().unwrap();
+    assert_eq!(members.len(), 2);
+    for m in members {
+        assert_eq!(m["compoundMember"], true, "{m}");
+        assert!(["fill", "stroke", "strokeWidth", "strokeOptions", "blend"].iter().all(|k| m.get(k).is_none()), "{m}");
+        // One member read on its own says the same.
+        assert_eq!(&s.execute("document.node", &json!({"id": m["id"], "summary": true})).unwrap(), m);
+    }
+    assert_eq!(s.execute("document.node", &json!({"id": compound["id"], "summary": true})).unwrap(), *compound);
+    // A plain object: no blend while it is Normal, nothing about compound paths.
+    let plain = nodes.iter().find(|n| n["id"] == plain).unwrap();
+    assert!(plain.get("blend").is_none() && plain.get("compoundMember").is_none() && plain.get("fill").is_some(), "{plain}");
+    // A group has a blend mode too, and still no paint.
+    s.execute("select.set", &json!({"ids": [plain["id"]]})).unwrap();
+    let g = s.execute("object.group", &json!({})).unwrap()["id"].as_u64().unwrap();
+    s.execute("object.setProps", &json!({"ids": [g], "blend": "Multiply"})).unwrap();
+    let group = s.execute("document.node", &json!({"id": g, "summary": true})).unwrap();
+    assert!(group["blend"] == "Multiply" && group.get("fill").is_none(), "{group}");
+}
+
+#[test]
+fn isolating_an_object_that_doesnt_exist_says_so() {
+    let mut s = session();
+    let e = s.execute("object.isolate", &json!({"id": 999_999})).unwrap_err();
+    assert_eq!(e.to_string(), EngineError::NoNode(NodeId(999_999)).to_string());
+    assert!(!e.to_string().contains("type"), "{e}");
 }
 
 /// `depth` and `childLimit` slice a summary read; a level that shows fewer children
@@ -2121,6 +2348,39 @@ fn align_moves_selected_anchor_points() {
     s.execute("select.set", &json!({"ids": [id.0]})).unwrap();
     s.execute("object.align", &json!({"vertical": "top", "to": "artboard"})).unwrap();
     assert_eq!(anchors(&s)[2].1 - anchors(&s)[0].1, 120.0, "its shape kept");
+}
+
+/// #1636: with anchor points selected, the Distribute commands space those points, on one path
+/// or across paths, and leave the other points and the paths' objects where they are.
+#[test]
+fn distribute_spaces_selected_anchor_points() {
+    let mut s = session();
+    let new = |s: &mut Session, d: &str| NodeId(s.execute("path.create", &json!({"d": d})).unwrap()["id"].as_u64().unwrap());
+    let a = new(&mut s, "M10 10 L20 50 L100 30 L60 90");
+    let pts = |s: &Session, id: NodeId| -> Vec<(f64, f64)> {
+        s.doc().unwrap().doc.node(id).unwrap().path_data().unwrap().anchors().map(|(_, _, a)| (a.p.x, a.p.y)).collect()
+    };
+    // One path selected whole is one object: nothing to distribute.
+    assert!(s.execute("object.distribute", &json!({"horizontal": "center"})).is_err());
+    s.execute("select.anchors", &json!({"id": a.0, "anchors": [[0, 0], [0, 1], [0, 2]], "mode": "set"})).unwrap();
+    for h in ["left", "center", "right"] {
+        s.execute("object.distribute", &json!({"horizontal": h})).unwrap();
+        assert_eq!(pts(&s, a), [(10.0, 10.0), (55.0, 50.0), (100.0, 30.0), (60.0, 90.0)], "{h}: a point has no width");
+    }
+    let steps = history(&s);
+    s.execute("object.distribute", &json!({"horizontal": "left"})).unwrap();
+    assert_eq!(history(&s), steps, "already distributed: no undo step");
+    s.execute("object.distribute", &json!({"vertical": "top"})).unwrap();
+    assert_eq!(pts(&s, a), [(10.0, 10.0), (55.0, 50.0), (100.0, 30.0), (60.0, 90.0)], "10, 30, 50 are even already");
+    s.execute("object.distributeSpacing", &json!({"axis": "vertical", "spacing": 5})).unwrap();
+    assert_eq!(pts(&s, a), [(10.0, 10.0), (55.0, 20.0), (100.0, 15.0), (60.0, 90.0)], "5 apart from the first, in order");
+    assert!(s.execute("object.distribute", &json!({})).is_err());
+    // Across paths: the points of both, with the second path's unselected point left alone.
+    let b = new(&mut s, "M40 200 L400 300");
+    s.execute("select.anchors", &json!({"id": a.0, "anchors": [[0, 0], [0, 2]], "mode": "set"})).unwrap();
+    s.execute("select.anchors", &json!({"id": b.0, "anchors": [[0, 0]], "mode": "add"})).unwrap();
+    s.execute("object.distributeSpacing", &json!({"axis": "horizontal"})).unwrap();
+    assert_eq!((pts(&s, a)[0].0, pts(&s, b), pts(&s, a)[2].0), (10.0, vec![(55.0, 200.0), (400.0, 300.0)], 100.0));
 }
 
 /// Repeating anchor Align must leave one Undo for the move that actually changed the path.

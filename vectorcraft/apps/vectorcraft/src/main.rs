@@ -6,7 +6,8 @@
 //! `--in-window-menus` (or `VECTORCRAFT_IN_WINDOW_MENUS=1`) keeps the menus inside the window on
 //! macOS instead of the macOS menu bar (`mac_menu`).
 //!
-//! `--control <port>` (or `VECTORCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control server:
+//! `--control <port>` (or `VECTORCRAFT_CONTROL_PORT`; a port from 1 to 65535, or the app doesn't
+//! start) starts a localhost JSON-lines control server:
 //! `{"id":1,"method":"ui.inspect","params":{}}` → `{"id":1,"ok":true,"result":…}`.
 //! See `vectorcraft_ui_egui::control` for the methods. `--automation-read-root` and
 //! `--automation-write-root` (or `VECTORCRAFT_AUTOMATION_READ_ROOT` / `_WRITE_ROOT`) confine the
@@ -35,6 +36,7 @@ mod mac_window;
 #[cfg(target_os = "macos")]
 mod open_documents;
 mod window;
+mod window_frame;
 mod xwayland;
 
 use vectorcraft_embed::desktop::{open_files, services};
@@ -52,6 +54,8 @@ struct App {
     graphics_lost: bool,
     /// Frames the UI has run (see [`end_before_teardown`]).
     frames: u64,
+    /// Keeps the custom title bar's window borderless (Windows, #1758).
+    window_frame: Option<window_frame::WindowFrameFn>,
 }
 
 impl eframe::App for App {
@@ -62,6 +66,11 @@ impl eframe::App for App {
         file_access::unconfined(|| self.logic_frame(ctx, frame));
     }
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        // winit gives the window its caption back when it changes the window's flags (maximize,
+        // restore, …): take it off again before the frame is laid out (#1758).
+        if let Some(window_frame) = self.window_frame.as_mut() {
+            window_frame();
+        }
         #[cfg(target_os = "macos")]
         if self.app.services.native_menu.is_some() {
             mac_menu::raw_input_hook(raw);
@@ -77,6 +86,11 @@ impl eframe::App for App {
             self.app.titlebar_inset = inset.unwrap_or(mac_window::DEFAULT_INSET);
         }
         file_access::unconfined(|| self.app.ui(ui));
+        // Preferences are written when confirmed, not only at exit: a session ended any other way
+        // (the system shutting down, the process ended or crashing) used to lose them (#1747).
+        if self.app.take_prefs_changed() {
+            file_access::unconfined(|| save_prefs(&self.app));
+        }
         // Not while a file dialog's sheet has the keyboard: its name field's composition would go.
         #[cfg(target_os = "macos")]
         if !self.app.file_dialog_open() && self.app.take_ime_discard() {
@@ -207,7 +221,7 @@ fn native_options(custom_titlebar: bool) -> eframe::NativeOptions {
 fn main() -> std::process::ExitCode {
     // Validate roots before logging, font scans, preferences or the window: a missing value
     // must not clear an environment root and start the control channel without confinement.
-    let mut control_port: Option<u16> = std::env::var("VECTORCRAFT_CONTROL_PORT").ok().and_then(|p| p.parse().ok());
+    let mut control = automation_args::ControlArg::default();
     let root_env = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
     let mut roots_args =
         automation_args::AutomationArgs::new(root_env("VECTORCRAFT_AUTOMATION_READ_ROOT"), root_env("VECTORCRAFT_AUTOMATION_WRITE_ROOT"));
@@ -215,7 +229,7 @@ fn main() -> std::process::ExitCode {
     let mut in_window_menus = std::env::var_os("VECTORCRAFT_IN_WINDOW_MENUS").is_some_and(|v| !v.is_empty() && v != "0");
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
-        match roots_args.consume(&a, &mut args) {
+        match roots_args.consume(&a, &mut args).and_then(|root| if root { Ok(true) } else { control.consume(&a, &mut args) }) {
             Ok(true) => continue,
             Ok(false) => {}
             Err(e) => {
@@ -224,7 +238,6 @@ fn main() -> std::process::ExitCode {
             }
         }
         match a.as_str() {
-            "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
             "--in-window-menus" => in_window_menus = true,
             "--version" => {
                 println!("vectorcraft {}", env!("CARGO_PKG_VERSION"));
@@ -234,6 +247,17 @@ fn main() -> std::process::ExitCode {
         }
     }
     let automation_args::AutomationArgs { read_root, write_root, .. } = roots_args;
+    // After the arguments: `--control` and `--version` win over a bad environment value.
+    let control_port = match control.port {
+        Some(port) => Some(port),
+        None => match automation_args::env_control_port(std::env::var_os("VECTORCRAFT_CONTROL_PORT")) {
+            Ok(port) => port,
+            Err(e) => {
+                eprintln!("vectorcraft: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        },
+    };
     // Before desktop services, so every start-up warning is recorded (`logging`).
     let logger = logging::install();
     vectorcraft_ui_egui::i18n::detect_system_lang_in_background();
@@ -340,6 +364,16 @@ fn main() -> std::process::ExitCode {
             // losing the device before the first frame (#1194). `WGPU_DX12_COMPILER` picks another.
             create.instance_descriptor.backend_options.dx12.shader_compiler =
                 eframe::wgpu::Dx12Compiler::from_env().unwrap_or(eframe::wgpu::Dx12Compiler::Fxc);
+            // The window's surface may be as large as the adapter allows, not eframe's fixed
+            // 8192 px: a window stretched over several monitors, or grown by a display scale
+            // change, otherwise fails to configure its surface and the app closes (#1459).
+            let device = create.device_descriptor.clone();
+            create.device_descriptor = std::sync::Arc::new(move |adapter: &eframe::wgpu::Adapter| {
+                let mut descriptor = device(adapter);
+                let limit = &mut descriptor.required_limits.max_texture_dimension_2d;
+                *limit = gpu::surface_limit(*limit, adapter.limits().max_texture_dimension_2d);
+                descriptor
+            });
         }
         options
     };
@@ -418,7 +452,9 @@ fn main() -> std::process::ExitCode {
                 // The first frame is due from now (`gpu::watch_first_frame`).
                 #[cfg(feature = "wgpu")]
                 created.ready();
-                Ok(Box::new(App { app, graphics_loss, graphics_lost: false, frames: 0 }))
+                // The content and the pointer stay aligned on Windows (#1758).
+                let window_frame = window_frame::service(cc, custom_titlebar);
+                Ok(Box::new(App { app, graphics_loss, graphics_lost: false, frames: 0, window_frame }))
             }),
         )
     });

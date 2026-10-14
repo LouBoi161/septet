@@ -298,6 +298,60 @@ fn selection_preferences_drive_the_selection_tool() {
     assert!(double(&mut s).is_some(), "on: the group is isolated");
 }
 
+/// Double Click To Isolate: a double-click with the Selection tool isolates a single object too,
+/// not only a group. Inside, only it is hit, marqueed and selected by Select All; new art goes
+/// beside it; a double-click on the empty canvas leaves, with it selected. Type isn't isolated:
+/// a double-click on it switches to the Type tool.
+#[test]
+fn double_clicking_a_single_object_isolates_it() {
+    use vectorcraft_tools::{PointerEvent, PointerKind};
+    let mut s = Session::new();
+    s.execute("file.new", &json!({"width": 400, "height": 400})).unwrap();
+    let id = |v: Value| NodeId(v["id"].as_u64().unwrap());
+    let rect = |s: &mut Session, x: f64| id(s.execute("shape.rectangle", &json!({"x": x, "y": 100, "width": 50, "height": 50})).unwrap());
+    let (a, b) = (rect(&mut s, 100.0), rect(&mut s, 200.0));
+    s.select_tool("selection", ViewInfo::default()).unwrap();
+    let ev = |s: &mut Session, kinds: &[PointerKind], x: f64, y: f64| {
+        for k in kinds {
+            s.pointer(&PointerEvent::new(*k, x, y), ViewInfo::default()).unwrap();
+        }
+    };
+    let click = [PointerKind::Down, PointerKind::Up];
+    let double = [PointerKind::DoubleClick];
+    ev(&mut s, &double, 125.0, 125.0);
+    assert_eq!(s.doc().unwrap().isolation, Some(a));
+    // Only the isolated object is hit: a click on the other selects nothing.
+    ev(&mut s, &click, 225.0, 125.0);
+    assert!(s.doc().unwrap().selection.objects.is_empty());
+    ev(&mut s, &click, 125.0, 125.0);
+    assert_eq!(s.doc().unwrap().selection.objects, vec![a]);
+    // A marquee over both and Select All take it alone.
+    s.execute("select.none", &json!({})).unwrap();
+    ev(&mut s, &[PointerKind::Down], 90.0, 90.0);
+    ev(&mut s, &[PointerKind::Move, PointerKind::Up], 300.0, 300.0);
+    assert_eq!(s.doc().unwrap().selection.objects, vec![a]);
+    s.execute("select.none", &json!({})).unwrap();
+    s.execute("select.all", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().selection.objects, vec![a]);
+    // A second double-click on it stays in isolation; new art lands on its layer.
+    ev(&mut s, &double, 125.0, 125.0);
+    assert_eq!(s.doc().unwrap().isolation, Some(a));
+    let c = rect(&mut s, 300.0);
+    let st = s.doc().unwrap();
+    assert_eq!(st.doc.parent_of(c), st.doc.parent_of(a));
+    // A double-click on the empty canvas leaves isolation, the object selected.
+    ev(&mut s, &double, 50.0, 350.0);
+    let st = s.doc().unwrap();
+    assert_eq!((st.isolation, st.selection.objects.clone()), (None, vec![a]));
+    assert!(st.doc.node(b).is_some());
+    // Type is not isolated.
+    let t = id(s.execute("text.create", &json!({"x": 100, "y": 300, "text": "Type"})).unwrap());
+    assert!(s.execute("object.isolate", &json!({"id": t.0})).is_err());
+    s.execute("prefs.set", &json!({"key": "doubleClickToIsolate", "value": false})).unwrap();
+    ev(&mut s, &double, 225.0, 125.0);
+    assert_eq!(s.doc().unwrap().isolation, None, "off: no isolation");
+}
+
 /// General › Use Precise Cursors (#394): the Pen's pointer becomes a crosshair; the Selection
 /// tool's arrow stays.
 #[test]
@@ -317,6 +371,134 @@ fn use_precise_cursors_makes_drawing_cursors_crosshairs() {
     assert_eq!(cursor(&mut s, "selection"), Cursor::Arrow);
     s.execute("prefs.set", &json!({"key": "usePreciseCursors", "value": false})).unwrap();
     assert_eq!(cursor(&mut s, "eyedropper"), Cursor::Eyedropper);
+}
+
+/// Use Precise Cursors changes the pointer of the tools that have one of their own: off, each shows its own
+/// pointer; on, a crosshair. Every other drawing tool shows a crosshair either way, and the Type tool and the
+/// Scissors over no path keep theirs.
+#[test]
+fn use_precise_cursors_swaps_the_tools_own_pointers_for_a_crosshair() {
+    use vectorcraft_tools::{Cursor, Mods};
+    let mut s = Session::new();
+    s.execute("file.new", &json!({"width": 400, "height": 400})).unwrap();
+    let at = vectorcraft_geom::Point::new(300.0, 300.0);
+    let cursor = |s: &mut Session, tool: &str| {
+        s.select_tool(tool, ViewInfo::default()).unwrap();
+        s.cursor(at, Mods::default(), ViewInfo::default())
+    };
+    // Off: the pointer of each tool whose own pointer the preference replaces.
+    let own = [
+        ("pen", Cursor::Pen),
+        ("addAnchor", Cursor::PenAdd),
+        ("deleteAnchor", Cursor::PenDelete),
+        ("anchorPoint", Cursor::Pen),
+        ("curvature", Cursor::Pen),
+        ("mesh", Cursor::PenAdd),
+        ("eyedropper", Cursor::Eyedropper),
+        ("slice", Cursor::Slice),
+        ("blend", Cursor::Blend),
+        ("shapeBuilder", Cursor::ShapeBuilder),
+    ];
+    for (tool, c) in own {
+        assert_eq!(cursor(&mut s, tool), c, "{tool} off");
+    }
+    // The tools that show a crosshair whatever the preference says.
+    let always = [
+        "lineSegment",
+        "arc",
+        "spiral",
+        "rectangularGrid",
+        "polarGrid",
+        "rectangle",
+        "roundedRectangle",
+        "ellipse",
+        "polygon",
+        "star",
+        "flare",
+        "paintbrush",
+        "blobBrush",
+        "shaper",
+        "pencil",
+        "smooth",
+        "pathEraser",
+        "join",
+        "eraser",
+        "knife",
+        "mirrorCut",
+        "lineCut",
+        "rectCut",
+        "gradient",
+    ];
+    for tool in always {
+        assert_eq!(cursor(&mut s, tool), Cursor::Crosshair, "{tool} off");
+    }
+    s.execute("prefs.set", &json!({"key": "usePreciseCursors", "value": true})).unwrap();
+    for (tool, _) in own {
+        assert_eq!(cursor(&mut s, tool), Cursor::Crosshair, "{tool} on");
+    }
+    for tool in always {
+        assert_eq!(cursor(&mut s, tool), Cursor::Crosshair, "{tool} on");
+    }
+    assert_eq!(cursor(&mut s, "type"), Cursor::Text);
+    assert_eq!(cursor(&mut s, "scissors"), Cursor::NotAllowed);
+    s.execute("prefs.set", &json!({"key": "usePreciseCursors", "value": false})).unwrap();
+    for (tool, c) in own {
+        assert_eq!(cursor(&mut s, tool), c, "{tool} off again");
+    }
+}
+
+/// Every state of the Pen's pointer, and the other drawing pointers, turn into a crosshair; the rest stay.
+#[test]
+fn precise_cursors_replace_every_pen_state() {
+    use vectorcraft_tools::Cursor;
+    for c in [
+        Cursor::Pen,
+        Cursor::PenAdd,
+        Cursor::PenDelete,
+        Cursor::PenClose,
+        Cursor::PenContinue,
+        Cursor::PenJoin,
+        Cursor::PenConvert,
+        Cursor::Eyedropper,
+        Cursor::Slice,
+        Cursor::Blend,
+        Cursor::BlendObject,
+        Cursor::BlendAnchor,
+        Cursor::ShapeBuilder,
+        Cursor::ShapeBuilderErase,
+    ] {
+        assert_eq!(c.precise(), Cursor::Crosshair, "{c:?}");
+    }
+    for c in [Cursor::Arrow, Cursor::Move, Cursor::Text, Cursor::Hand, Cursor::NotAllowed, Cursor::SliceSelect] {
+        assert_eq!(c.precise(), c, "{c:?}");
+    }
+}
+
+/// Switching the preference is not an edit: no undo step, no unsaved changes.
+#[test]
+fn use_precise_cursors_is_not_an_edit() {
+    let mut s = Session::new();
+    s.execute("file.new", &json!({"width": 400, "height": 400})).unwrap();
+    let before = (s.active().unwrap().history.undo.len(), s.active().unwrap().history.redo.len());
+    assert!(!s.active().unwrap().is_dirty());
+    s.execute("prefs.set", &json!({"key": "usePreciseCursors", "value": true})).unwrap();
+    assert!(s.prefs.use_precise_cursors);
+    let st = s.active().unwrap();
+    assert_eq!((st.history.undo.len(), st.history.redo.len()), before, "no undo step");
+    assert!(!st.is_dirty(), "the document stays saved");
+}
+
+/// The preference is saved with the others and reads back as it was.
+#[test]
+fn use_precise_cursors_is_saved_and_restored() {
+    let mut s = Session::new();
+    assert!(!s.prefs.use_precise_cursors, "off by default");
+    s.execute("prefs.set", &json!({"key": "usePreciseCursors", "value": true})).unwrap();
+    let saved = s.prefs.to_json();
+    assert_eq!(saved["usePreciseCursors"], json!(true));
+    let mut t = Session::new();
+    t.apply_prefs(serde_json::from_value(saved).unwrap());
+    assert!(t.prefs.use_precise_cursors);
 }
 
 // ---------- #394, second batch ----------

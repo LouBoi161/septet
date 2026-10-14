@@ -34,7 +34,7 @@ const MAX_DEPTH: usize = 64;
 /// Most values read.
 const MAX_VALUES: usize = 4_000_000;
 /// The centre of the app's canvas, in the units of its text document.
-const CANVAS_CENTRE: f64 = 8191.5;
+pub(super) const CANVAS_CENTRE: f64 = 8191.5;
 
 /// A value of the text document.
 #[derive(Debug, Clone, PartialEq)]
@@ -666,6 +666,14 @@ impl Story {
         Some(Node::new(id, NodeKind::Text(Box::new(t))))
     }
 
+    /// Area type that the file lays lines out in, in a frame too short for its first line as it is
+    /// laid out here: a font that isn't available shows in the fallback font, whose lines may be
+    /// taller, and type that doesn't fit its frame isn't drawn. The frame is made taller, from its
+    /// top, by what the first line needs (`vectorcraft_text::fit_first_line`). Whether it was.
+    pub(super) fn fit_first_line(&self, t: &mut TextObject) -> bool {
+        !self.lines.is_empty() && vectorcraft_text::fit_first_line(vectorcraft_text::FontDb::global(), t)
+    }
+
     /// The leading the file's own line positions imply: the distance from one line to the next, less
     /// the space between paragraphs that is part of it (a paragraph's space after and the next one's
     /// space before; a layout's lines are where that space has put them, and the text object adds it
@@ -859,5 +867,31 @@ mod tests {
         assert!((s.line_leading(1.0).unwrap() - 15.6).abs() < 1e-9);
         // One line has no distance to read.
         assert_eq!(story("one\r", &[0.0], &Para::default()).line_leading(1.0), None);
+    }
+
+    #[test]
+    fn a_frame_too_short_for_its_first_line_is_made_taller() {
+        // A heading in a frame as tall as its size: a line of the font it shows in here is taller.
+        let s = story("Heading\r", &[0.0], &Para::default());
+        let area = |height: f64| {
+            let mut t = TextObject::point(Point::ZERO, "Heading", CharStyle { size: 13.0, ..CharStyle::default() });
+            t.kind = TextKind::Area { frame: vectorcraft_geom::shapes::rectangle(Rect::new(10.0, 20.0, 210.0, 20.0 + height)) };
+            t
+        };
+        let height =
+            |t: &TextObject| if let TextKind::Area { frame } = &t.kind { frame.bounds().map(|b| (b.x0, b.y0, b.x1, b.height())) } else { None };
+        let lines = |t: &TextObject| vectorcraft_text::layout(vectorcraft_text::FontDb::global(), t).lines.len();
+        let mut t = area(13.0);
+        assert_eq!(lines(&t), 0, "nothing of it shows");
+        assert!(s.fit_first_line(&mut t));
+        let (x0, y0, x1, h) = height(&t).unwrap();
+        assert!((x0, y0, x1) == (10.0, 20.0, 210.0) && h > 13.0 && h < 26.0, "taller from its top: {h}");
+        assert_eq!(lines(&t), 1);
+        // A frame that holds the line stays as it is; so does one the file lays no line out in
+        // (its type is overset in the file too).
+        let mut t = area(40.0);
+        assert!(!s.fit_first_line(&mut t) && height(&t).unwrap().3 == 40.0);
+        let mut t = area(13.0);
+        assert!(!story("Heading\r", &[], &Para::default()).fit_first_line(&mut t) && height(&t).unwrap().3 == 13.0);
     }
 }

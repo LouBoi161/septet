@@ -7,8 +7,6 @@ pub mod desktop;
 pub mod embed;
 #[cfg(target_os = "macos")]
 mod mac_fonts;
-#[cfg(target_os = "macos")]
-mod mac_save_format;
 pub mod prefs;
 // Shared with `vectorcraft-cli`, whose `#[path]` includes the file where it is.
 pub mod prefs_dir;

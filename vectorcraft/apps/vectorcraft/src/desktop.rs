@@ -255,9 +255,10 @@ fn start_pick(request: PickRequest, parent: &Parent, ui: &egui::Context) -> Opti
             let picked = dialog.pick_files();
             Box::pin(async move { picked.await.unwrap_or_default().iter().map(path).collect() })
         }
-        PickRequest::Save(pick) => {
+        PickRequest::Save(_) => {
+            // Nothing is added to the sheet once rfd has begun it: an accessory view set then made
+            // recent macOS versions dismiss the sheet at once, so nothing could be saved (#1800).
             let picked = dialog.save_file();
-            crate::mac_save_format::attach(window, &pick);
             Box::pin(async move { picked.await.iter().map(path).collect() })
         }
         PickRequest::Folder => {
@@ -275,6 +276,8 @@ pub fn services(parent: Parent, ui: egui::Context) -> Services {
     // macOS shows dialogs as sheets on the app's own window (#867); in a host's window, which it
     // doesn't have, they are modal panels as before.
     let sheets = cfg!(target_os = "macos") && parent.is_some();
+    use winit::raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+    let wayland = parent.as_ref().and_then(|w| w.window_handle().ok()).is_some_and(|h| matches!(h.as_raw(), RawWindowHandle::Wayland(_)));
     let (p1, p2, p3, p4, p5) = (parent.clone(), parent.clone(), parent.clone(), parent.clone(), parent);
     Services {
         pick_open: Some(Box::new(move |pick: &FilePick| pick_now(PickRequest::Open(pick.clone()), &p1).into_iter().next())),
@@ -285,6 +288,7 @@ pub fn services(parent: Parent, ui: egui::Context) -> Services {
         start_pick: (cfg!(all(unix, not(target_os = "macos"))) || sheets)
             .then(|| Box::new(move |request: PickRequest| start_pick(request, &p5, &ui)) as vectorcraft_ui_egui::picks::StartPick),
         dialogs_are_sheets: sheets,
+        wayland,
         read: Some(Box::new(|p: &str| std::fs::read(p).map_err(|e| e.to_string()))),
         write: Some(Box::new(write_file)),
         // Background Save and Export write from a worker thread.
