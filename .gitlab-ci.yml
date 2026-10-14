@@ -1,0 +1,39 @@
+# The same check as .github/workflows/check.yml, on GitLab: the shell with one app at a time
+# (`--features <app>`, see septet/Cargo.toml), so a broken app shows up in its own job. Each job
+# costs CI minutes, so it runs for merge requests, on main and by hand (Run pipeline), not on every
+# branch push.
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+variables:
+  CARGO_HOME: $CI_PROJECT_DIR/.cargo
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  HOSTED_BUILD: "1"
+  GIT_DEPTH: "20"
+
+check:
+  image: rust:1-bookworm
+  timeout: 90m
+  interruptible: true
+  parallel:
+    matrix:
+      - APP: [photocraft, vectorcraft, lightcraft, designcraft, pdfcraft, filmcraft, effectcraft]
+  cache:
+    key: check-$APP
+    paths:
+      - .cargo/registry/index
+      - .cargo/registry/cache
+      - .cargo/git/db
+      - target
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends pkg-config cmake nasm libasound2-dev libwayland-dev libxkbcommon-dev
+      libx11-dev libxcursor-dev libxrandr-dev libxi-dev libvulkan-dev
+  script:
+    - cargo check --locked -p septet --no-default-features --features $APP
