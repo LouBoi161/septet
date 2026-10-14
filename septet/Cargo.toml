@@ -24,29 +24,41 @@ base64 = "0.22"
 # septet_fetch: icons and fonts for Claude, over rustls with the OS's trusted roots (as Pdfcraft does).
 ureq = { version = "3.4", default-features = false, features = ["rustls-no-provider", "_ring"] }
 rustls-native-certs = "0.8"
-photocraft-ui-egui = { path = "../photocraft/crates/ui-egui" }
-vectorcraft-ui-egui = { path = "../vectorcraft/crates/ui-egui" }
-lightcraft-ui-egui = { path = "../lightcraft/crates/ui-egui" }
-designcraft-ui-egui = { path = "../designcraft/crates/ui-egui" }
-pdfcraft-ui-egui = { path = "../pdfcraft/crates/ui-egui" }
-filmcraft-ui-egui = { path = "../filmcraft/crates/ui-egui" }
-effectcraft-ui-egui = { path = "../effectcraft/crates/ui-egui" }
+photocraft-ui-egui = { path = "../photocraft/crates/ui-egui", optional = true }
+vectorcraft-ui-egui = { path = "../vectorcraft/crates/ui-egui", optional = true }
+lightcraft-ui-egui = { path = "../lightcraft/crates/ui-egui", optional = true }
+designcraft-ui-egui = { path = "../designcraft/crates/ui-egui", optional = true }
+pdfcraft-ui-egui = { path = "../pdfcraft/crates/ui-egui", optional = true }
+filmcraft-ui-egui = { path = "../filmcraft/crates/ui-egui", optional = true }
+effectcraft-ui-egui = { path = "../effectcraft/crates/ui-egui", optional = true }
 # The apps' desktop packages, used as libraries (their `embed` API builds each app for a tab).
-photocraft = { path = "../photocraft/apps/photocraft" }
-vectorcraft = { path = "../vectorcraft/apps/vectorcraft" }
-lightcraft = { path = "../lightcraft/apps/lightcraft" }
-designcraft = { path = "../designcraft/apps/designcraft" }
-pdfcraft = { path = "../pdfcraft/apps/pdfcraft" }
-filmcraft = { path = "../filmcraft/apps/filmcraft" }
-effectcraft = { path = "../effectcraft/apps/effectcraft" }
+photocraft = { path = "../photocraft/apps/photocraft", optional = true }
+vectorcraft = { path = "../vectorcraft/apps/vectorcraft", optional = true }
+lightcraft = { path = "../lightcraft/apps/lightcraft", optional = true }
+designcraft = { path = "../designcraft/apps/designcraft", optional = true }
+pdfcraft = { path = "../pdfcraft/apps/pdfcraft", optional = true }
+filmcraft = { path = "../filmcraft/apps/filmcraft", optional = true }
+effectcraft = { path = "../effectcraft/apps/effectcraft", optional = true }
 # The apps' font crates, only to turn on `shared-craft-fonts`: the craft fonts are embedded once
 # (`shared/craft-fonts`), not once per app.
-photocraft-text = { path = "../photocraft/crates/text", features = ["shared-craft-fonts"] }
-vectorcraft-text = { path = "../vectorcraft/crates/text", features = ["shared-craft-fonts"] }
-lightcraft-engine = { path = "../lightcraft/crates/engine", features = ["shared-craft-fonts"] }
-designcraft-fonts = { path = "../designcraft/crates/fonts", features = ["shared-craft-fonts"] }
-pdfcraft-fonts = { path = "../pdfcraft/crates/fonts", features = ["shared-craft-fonts"] }
-filmcraft-text = { path = "../filmcraft/crates/text", features = ["shared-craft-fonts"] }
+photocraft-text = { path = "../photocraft/crates/text", optional = true, features = ["shared-craft-fonts"] }
+vectorcraft-text = { path = "../vectorcraft/crates/text", optional = true, features = ["shared-craft-fonts"] }
+lightcraft-engine = { path = "../lightcraft/crates/engine", optional = true, features = ["shared-craft-fonts"] }
+designcraft-fonts = { path = "../designcraft/crates/fonts", optional = true, features = ["shared-craft-fonts"] }
+pdfcraft-fonts = { path = "../pdfcraft/crates/fonts", optional = true, features = ["shared-craft-fonts"] }
+filmcraft-text = { path = "../filmcraft/crates/text", optional = true, features = ["shared-craft-fonts"] }
+
+# One feature per app; a build without one leaves the app out (`kinds::APPS`). Saved sessions and
+# recent files that name it are skipped.
+[features]
+default = ["photocraft", "vectorcraft", "lightcraft", "designcraft", "pdfcraft", "filmcraft", "effectcraft"]
+photocraft = ["dep:photocraft", "dep:photocraft-ui-egui", "dep:photocraft-text"]
+vectorcraft = ["dep:vectorcraft", "dep:vectorcraft-ui-egui", "dep:vectorcraft-text"]
+lightcraft = ["dep:lightcraft", "dep:lightcraft-ui-egui", "dep:lightcraft-engine"]
+designcraft = ["dep:designcraft", "dep:designcraft-ui-egui", "dep:designcraft-fonts"]
+pdfcraft = ["dep:pdfcraft", "dep:pdfcraft-ui-egui", "dep:pdfcraft-fonts"]
+filmcraft = ["dep:filmcraft", "dep:filmcraft-ui-egui", "dep:filmcraft-text"]
+effectcraft = ["dep:effectcraft", "dep:effectcraft-ui-egui"]
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 # Only for EventLoopBuilderExtX11 (XWayland by default, see main.rs).

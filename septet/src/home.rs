@@ -96,7 +96,7 @@ fn sidebar_ui(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellCol
     ui.add_space(22.0);
     ui.label(egui::RichText::new("RUNNING").font(theme::semibold(10.5)).color(c.text_dim));
     ui.add_space(6.0);
-    let running: Vec<AppKind> = AppKind::ALL.into_iter().filter(|k| shell.apps.contains_key(k)).collect();
+    let running: Vec<AppKind> = AppKind::all().filter(|k| shell.apps.contains_key(k)).collect();
     if running.is_empty() {
         ui.label(egui::RichText::new("No apps open").font(FontId::proportional(12.0)).color(c.text_dim));
     }
@@ -185,7 +185,8 @@ fn app_grid(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellColor
     let width = ui.available_width();
     let cols = (((width + gap) / (card_w + gap)).floor() as usize).max(1);
     let card_w = (width - gap * (cols as f32 - 1.0)) / cols as f32;
-    for row in AppKind::ALL.chunks(cols) {
+    let apps: Vec<AppKind> = AppKind::all().collect();
+    for row in apps.chunks(cols) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             for &kind in row {
@@ -332,14 +333,14 @@ pub fn open_in_system(path: &std::path::Path) {
 /// File › Open: every file type the apps know, or just `app`'s.
 pub fn pick_and_open(shell: &mut Shell, window: Option<ViewportId>, app: Option<AppKind>) {
     let mut dialog = rfd::FileDialog::new().set_title("Open in Septet");
-    let all: Vec<&str> = AppKind::ALL.iter().flat_map(|k| k.extensions().iter().copied()).collect();
+    let all: Vec<&str> = AppKind::all().flat_map(|k| k.extensions().iter().copied()).collect();
     match app {
         Some(kind) => {
             dialog = dialog.add_filter(kind.name(), kind.extensions());
         }
         None => {
             dialog = dialog.add_filter("All supported files", &all);
-            for kind in AppKind::ALL {
+            for kind in AppKind::all() {
                 dialog = dialog.add_filter(kind.name(), kind.extensions());
             }
         }

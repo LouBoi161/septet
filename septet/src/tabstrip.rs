@@ -384,7 +384,7 @@ fn caption_buttons(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, strip: 
 
 pub fn new_tab_menu(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui) {
     ui.set_min_width(250.0);
-    for kind in AppKind::ALL {
+    for kind in AppKind::all() {
         let running = shell.find_app_tab(kind).is_some();
         let resp = app_menu_row(ui, kind, running);
         if resp.clicked() {
@@ -453,7 +453,7 @@ fn tab_menu(shell: &mut Shell, viewport: ViewportId, tab: crate::shell::Tab, ui:
         }
         if shell.apps.contains_key(&kind) {
             ui.menu_button("Send to", |ui| {
-                for target in AppKind::ALL.into_iter().filter(|k| *k != kind) {
+                for target in AppKind::all().filter(|k| *k != kind) {
                     let resp = app_menu_row(ui, target, shell.apps.contains_key(&target));
                     if resp.clicked() {
                         shell.actions.push(Action::SendTo { source: kind, target });

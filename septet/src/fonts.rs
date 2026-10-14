@@ -4,15 +4,14 @@
 
 use egui::{FontDefinitions, FontFamily};
 
-use crate::hosted;
-use crate::kinds::AppKind;
+use crate::kinds::APPS;
 
 pub fn merged() -> FontDefinitions {
     let mut out = FontDefinitions::default();
     let mut proportional: Vec<String> = Vec::new();
     let mut monospace: Vec<String> = Vec::new();
-    for kind in AppKind::ALL {
-        let defs = hosted::font_definitions(kind);
+    for app in APPS {
+        let defs = (app.entry.font_definitions)();
         for (name, data) in defs.font_data {
             out.font_data.entry(name).or_insert(data);
         }
@@ -49,11 +48,17 @@ mod tests {
             let first = *seen.entry((family, style)).or_insert(bytes.as_ptr());
             assert_eq!(first, bytes.as_ptr(), "{family} {style} is embedded more than once");
         };
+        #[cfg(feature = "photocraft")]
         photocraft_text::CRAFT_FONTS.iter().for_each(|f| check(f.family, f.style, f.bytes));
+        #[cfg(feature = "vectorcraft")]
         vectorcraft_text::CRAFT_FONTS.iter().for_each(|f| check(f.family, f.style, f.bytes));
+        #[cfg(feature = "lightcraft")]
         lightcraft_engine::CRAFT_FONTS.iter().for_each(|f| check(f.family, f.style, f.bytes));
+        #[cfg(feature = "designcraft")]
         designcraft_fonts::CRAFT_FONTS.iter().for_each(|f| check(f.family, f.style, f.bytes));
+        #[cfg(feature = "pdfcraft")]
         pdfcraft_fonts::CRAFT_FONTS.iter().for_each(|f| check(f.family, f.style, f.bytes));
+        #[cfg(feature = "filmcraft")]
         filmcraft_text::fonts::CRAFT_FONTS.iter().for_each(|f| check(f.family, f.style, f.bytes));
     }
 }

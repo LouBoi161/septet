@@ -161,11 +161,6 @@ pub struct OpenRequest {
     pub place: Option<Option<Pos2>>,
 }
 
-/// Apps that ask about unsaved work themselves when their window closes.
-fn has_own_close_prompt(kind: AppKind) -> bool {
-    !matches!(kind, AppKind::Designcraft | AppKind::Filmcraft)
-}
-
 impl Shell {
     pub fn new(ctx: &Context, router: Router, files: Vec<PathBuf>, restore: Option<crate::recent::Session>) -> Self {
         router.lock().windows.insert(ViewportId::ROOT);
@@ -268,9 +263,10 @@ impl Shell {
             let active = saved.active;
             let mut kinds: Vec<TabKind> = Vec::new();
             for k in saved.tabs {
-                // One tab per app, also across the windows restored before this one.
+                // One tab per app, also across the windows restored before this one. Apps this build
+                // doesn't have (left out at build time, or unknown to it) are skipped.
                 if let TabKind::App(kind) = k
-                    && (kinds.contains(&k) || self.find_app_tab(kind).is_some())
+                    && (kinds.contains(&k) || self.find_app_tab(kind).is_some() || !kind.installed())
                 {
                     continue;
                 }
@@ -583,7 +579,7 @@ impl Shell {
         }
         let Some(at) = crate::pointer::in_viewport(ctx) else { return };
         let take = || ctx.input_mut(|i| i.raw.dropped_files.clear());
-        if matches!(slot.kind, AppKind::Photocraft | AppKind::Effectcraft | AppKind::Designcraft | AppKind::Filmcraft) {
+        if slot.kind.spec().drops_at_pointer {
             take();
             for p in &dropped {
                 self.recent.add(p, slot.kind);
@@ -611,9 +607,9 @@ impl Shell {
         if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL | Modifiers::SHIFT, Key::T))) {
             self.actions.push(Action::NewTab { window: viewport, kind: TabKind::Home });
         }
-        // Ctrl+Alt+1…7: the apps, in Home's order.
-        let keys = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7];
-        for (key, kind) in keys.into_iter().zip(AppKind::ALL) {
+        // Ctrl+Alt+1…9: the apps, in Home's order.
+        let keys = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9];
+        for (key, kind) in keys.into_iter().zip(AppKind::all()) {
             if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(ctrl_alt, key))) {
                 self.actions.push(Action::NewTab { window: viewport, kind: TabKind::App(kind) });
             }
@@ -639,12 +635,13 @@ impl Shell {
         }
         iso.swap(ctx);
         let render_state = frame.wgpu_render_state().cloned();
-        crate::hosted::set_data_root(kind, crate::recent::portable_root().map(|root| root.join(kind.name())));
-        let mut app = crate::hosted::create(kind, ctx, render_state.as_ref(), frame.storage());
+        let entry = &kind.spec().entry;
+        (entry.set_data_root)(crate::recent::portable_root().map(|root| root.join(kind.name())));
+        let mut app = (entry.create)(ctx, render_state.as_ref(), frame.storage());
         let external = self.external.clone();
         let open_app = self.open_app.clone();
         app.set_open_app(Box::new(move |name| {
-            if let Some(kind) = AppKind::ALL.into_iter().find(|k| k.name().eq_ignore_ascii_case(name)) {
+            if let Some(kind) = AppKind::by_name(name) {
                 open_app.borrow_mut().push(kind);
             }
         }));
@@ -782,7 +779,7 @@ impl Shell {
         if matches!(s.close, CloseState::Requested | CloseState::Delivered) {
             return;
         }
-        if has_own_close_prompt(kind) {
+        if kind.spec().own_close_prompt {
             s.close = CloseState::Requested;
         } else if s.app.has_unsaved_changes() {
             if let Some((wi, ti)) = self.find_app_tab(kind) {

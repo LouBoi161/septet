@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use egui::{Color32, Context, Event, Id, Key, Rect, ViewportId, pos2, vec2};
 
 use crate::hosted::AppSlot;
-use crate::kinds::AppKind;
+use crate::kinds::{AppKind, Paste};
 use crate::theme;
 
 struct Toast {
@@ -80,20 +80,20 @@ impl Bridge {
         if !paste || ctx.text_edit_focused() || self.clip_owner == Some(kind) {
             return;
         }
-        // Lightcraft pastes develop settings; nothing to translate for it.
-        if kind == AppKind::Lightcraft || kind == AppKind::Vectorcraft {
+        // E.g. Lightcraft pastes develop settings; nothing to translate for it.
+        let paste = kind.spec().paste;
+        if paste == Paste::Itself {
             return;
         }
         let Some(clip) = self.read_clipboard() else { return };
-        let file = match (&clip, kind) {
-            // Photocraft reads images and copied files itself.
-            (Clip::Image(_) | Clip::Files(_), AppKind::Photocraft) => return,
+        let file = match (&clip, paste) {
+            (Clip::Image(_) | Clip::Files(_), Paste::ItselfImages) => return,
             (Clip::Files(files), _) => {
                 take_paste(ctx);
                 slot.app.place_paths(files, None);
                 return;
             }
-            (Clip::Svg(svg), AppKind::Designcraft | AppKind::Effectcraft) => save_pasted("svg", svg.as_bytes()),
+            (Clip::Svg(svg), Paste::Svg) => save_pasted("svg", svg.as_bytes()),
             (Clip::Svg(svg), _) => rasterize_svg(svg).and_then(|png| save_pasted("png", &png)),
             (Clip::Image(img), _) => encode_png(img).and_then(|png| save_pasted("png", &png)),
         };

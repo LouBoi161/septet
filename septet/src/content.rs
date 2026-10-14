@@ -25,17 +25,9 @@ pub struct ContentDrag {
     pub hover: Option<(crate::shell::TabId, f64)>,
 }
 
-/// Formats each app places well, best first.
+/// Formats the app places well, best first.
 pub fn accepts(kind: AppKind) -> &'static [&'static str] {
-    match kind {
-        AppKind::Photocraft => &["psd", "tif", "tiff", "png", "jpg", "jpeg", "webp"],
-        AppKind::Vectorcraft => &["svg", "pdf", "ai", "eps", "png", "jpg", "jpeg"],
-        AppKind::Lightcraft => &["dng", "tif", "tiff", "jpg", "jpeg", "png", "webp"],
-        AppKind::Designcraft => &["pdf", "svg", "psd", "tif", "tiff", "png", "jpg", "jpeg", "txt"],
-        AppKind::Pdfcraft => &["pdf", "png", "jpg", "jpeg"],
-        AppKind::Filmcraft => &["mp4", "mov", "mkv", "webm", "wav", "mp3", "m4a", "png", "jpg", "jpeg"],
-        AppKind::Effectcraft => &["mp4", "mov", "mkv", "webm", "wav", "mp3", "svg", "psd", "pdf", "png", "jpg", "jpeg"],
-    }
+    kind.spec().accepts
 }
 
 /// Where content handed from one app to another is written (placed files are often linked, so it stays).

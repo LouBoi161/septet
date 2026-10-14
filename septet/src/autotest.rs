@@ -124,7 +124,7 @@ impl Autotest {
                 Step::Wait(2.0),
                 Step::Open({
                     let name = std::env::var("SEPTET_AUTOTEST_APP").unwrap_or_else(|_| "vectorcraft".into());
-                    AppKind::ALL.into_iter().find(|k| k.name().eq_ignore_ascii_case(&name))?
+                    AppKind::by_name(&name)?
                 }),
                 Step::Wait(5.0),
                 Step::ClaudePanel,
@@ -168,7 +168,7 @@ impl Autotest {
             // commands, inspecting and rendering (also while the tab is hidden), a blocked command, undo.
             Ok("assistant-apps") => {
                 let name = std::env::var("SEPTET_AUTOTEST_APP").unwrap_or_else(|_| "vectorcraft".into());
-                let kind = AppKind::ALL.into_iter().find(|k| k.name().eq_ignore_ascii_case(&name))?;
+                let kind = AppKind::by_name(&name)?;
                 Self::app_tools(kind)
             }
             // Run 1 of 2: a few tabs and a torn-off window, then quit (the layout is saved).
@@ -207,7 +207,7 @@ impl Autotest {
             // `SEPTET_AUTOTEST_AT` ("x,y"), press Delete, then right-click it.
             Ok("layers") => {
                 let name = std::env::var("SEPTET_AUTOTEST_APP").unwrap_or_else(|_| "vectorcraft".into());
-                let kind = AppKind::ALL.into_iter().find(|k| k.name().eq_ignore_ascii_case(&name))?;
+                let kind = AppKind::by_name(&name)?;
                 // "x,y;x,y;…": clicks before (a panel tab), the last one on the row.
                 let at: Vec<Pos2> = std::env::var("SEPTET_AUTOTEST_AT")
                     .unwrap_or_default()
@@ -261,6 +261,7 @@ impl Autotest {
                 ("layer.new", json!({"name": "One"})),
                 ("layer.new", json!({"name": "Two"})),
             ],
+            AppKind::Unknown => unreachable!("autotests name installed apps"),
             AppKind::Effectcraft => vec![
                 ("comp.new", json!({"name": "Main", "width": 640, "height": 360, "duration": 4})),
                 ("layer.newSolid", json!({"name": "Orange", "color": "#e8a33d"})),
@@ -389,6 +390,7 @@ impl Autotest {
                 2,
                 vec![run("file.place", json!({}))],
             ),
+            AppKind::Unknown => unreachable!("autotests name installed apps"),
             AppKind::Effectcraft => (
                 run("comp.new", json!({"name": "Main", "width": 640, "height": 360, "duration": 4, "background": "#202830"})),
                 "solid",
@@ -476,8 +478,8 @@ impl Autotest {
     /// Every app once, a torn-off window, a closed tab, quit.
     fn tour(file: Option<PathBuf>) -> Vec<Step> {
         let mut steps = vec![Step::Wait(3.0), Step::Shot("01-home"), Step::Report];
-        let names = ["photocraft", "vectorcraft", "lightcraft", "designcraft", "pdfcraft", "filmcraft", "effectcraft"];
-        for (n, (kind, name)) in AppKind::ALL.into_iter().zip(names).enumerate() {
+        for (n, kind) in AppKind::all().enumerate() {
+            let name = kind.name().to_ascii_lowercase();
             steps.push(Step::Open(kind));
             steps.push(Step::Wait(7.0));
             steps.push(Step::Shot(Box::leak(format!("{:02}-{name}", n + 2).into_boxed_str())));
