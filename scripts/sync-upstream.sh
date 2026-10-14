@@ -13,6 +13,7 @@
 #   --no-tests       skip the cargo tests and the autotests (merge and build only)
 #   --no-autotests   skip the autotests
 #   --no-cargo-tests skip the cargo tests, still build and run the autotests
+#   --all-tests      test the app's whole workspace, not only the crates the merge changed
 #
 # Conflicts: the merge stays in progress and the conflicting files are listed (exit 2). Resolve them so our
 # Septet changes survive, `git commit`, then run the same command again: an app already at the tag is not
@@ -23,19 +24,26 @@
 # a non-zero exit, a panic or a failed screenshot, the screenshots themselves are for a person to look at.
 # CRAFT_FONTS_DIR is passed through to the builds when set.
 # Builds and tests run at the lowest CPU and IO priority, so the desktop stays usable; SYNC_JOBS limits
-# cargo's parallel jobs (default: all cores).
+# cargo's parallel jobs (default: all cores). Debug info is off (CARGO_PROFILE_DEV_DEBUG=0: a test build
+# of an app is ~5 GB instead of 100+ GB, and the disk writes no longer stall the desktop). The app's tests
+# build in one folder shared by all apps, SYNC_TARGET (default ~/.cache/septet-sync/target), not in the
+# app's own target/ (20-100 GB each). After a merge only the crates it changed are tested, with every
+# crate of the app that depends on them; a change to the workspace itself (Cargo.toml, Cargo.lock,
+# vendor/, …) tests all of it, as do --all-tests and verifying an app that is already merged.
 # Exit status: 0 everything passed, 1 a build, test or autotest failed, 2 a merge conflict.
 set -euo pipefail
 renice -n 19 -p $$ >/dev/null 2>&1 || true
 ionice -c 3 -p $$ 2>/dev/null || true
 [ -z "${SYNC_JOBS:-}" ] || export CARGO_BUILD_JOBS=$SYNC_JOBS
+export CARGO_PROFILE_DEV_DEBUG=${CARGO_PROFILE_DEV_DEBUG:-0}
+app_target=${SYNC_TARGET:-$HOME/.cache/septet-sync/target}
 
 apps=(designcraft effectcraft pdfcraft filmcraft vectorcraft lightcraft photocraft)
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 today=$(date +%F)
 branch=upstream/$today
-check=0 tests=1 autotests=1 cargo_tests=1
+check=0 tests=1 autotests=1 cargo_tests=1 all_tests=0
 while [ $# -gt 0 ]; do
     case $1 in
         --check) check=1 ;;
@@ -43,6 +51,7 @@ while [ $# -gt 0 ]; do
         --no-tests) tests=0 autotests=0 ;;
         --no-autotests) autotests=0 ;;
         --no-cargo-tests) cargo_tests=0 ;;
+        --all-tests) all_tests=1 ;;
         -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
         -*) echo "unknown option $1" >&2; exit 64 ;;
         *) break ;;
@@ -141,7 +150,7 @@ autotest() {
         WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json \
         SEPTET_NO_VSYNC=1 SEPTET_AUTOTEST="$dir" SEPTET_AUTOTEST_SCENARIO="$scenario" \
         SEPTET_AUTOTEST_FILE="$out/sample.png" SEPTET_AUTOTEST_PDF="$out/sample.pdf" "$@" \
-        timeout 600 "$root/target/debug/septet" >"$dir/stdout.txt" 2>"$dir/stderr.txt" || status=$?
+        timeout 600 "${CARGO_TARGET_DIR:-$root/target}/debug/septet" >"$dir/stdout.txt" 2>"$dir/stderr.txt" || status=$?
     rm -rf "$home"
     local why=""
     [ $status = 0 ] || why="exit $status"
@@ -161,13 +170,45 @@ commit_lockfiles() {
     fi
 }
 
+# The `-p` arguments for the app's crates that the merge from $1 changed, and every crate of the app
+# that depends on one of them; nothing (test the whole workspace) when the workspace itself changed.
+affected_packages() {
+    local app=$1 before=$2
+    git diff --name-only "$before" HEAD -- "$app" | python3 -c '
+import json, os, subprocess, sys
+app, root = sys.argv[1], sys.argv[2]
+meta = json.loads(subprocess.run(["cargo", "metadata", "--format-version", "1", "--no-deps"], cwd=os.path.join(root, app),
+                                 check=True, capture_output=True, text=True).stdout)
+dirs = {os.path.dirname(p["manifest_path"]): p["name"] for p in meta["packages"]}
+# Files no test reads: documentation, CI and packaging, licences.
+inert = (".github/", "docs/", "packaging/", "contributors/", "plan/")
+changed = set()
+for f in sys.stdin.read().split():
+    rel = f[len(app) + 1:]
+    if rel.startswith(inert) or rel.endswith(".md") or rel.split("/")[-1].startswith(("LICENSE", "NOTICE", ".git")):
+        continue
+    path = os.path.join(root, f)
+    owner = max((d for d in dirs if path.startswith(d + os.sep)), key=len, default=None)
+    if owner is None or os.path.dirname(owner) == os.path.join(root, app):
+        sys.exit(0)  # a file of the workspace itself (or a crate at its root): test all of it
+    changed.add(dirs[owner])
+users = {p["name"]: {d["name"] for d in p["dependencies"] if d.get("path")} for p in meta["packages"]}
+grew = True
+while grew:
+    more = {name for name, deps in users.items() if deps & changed} - changed
+    grew = bool(more)
+    changed |= more
+print(" ".join("-p " + n for n in sorted(changed)))
+' "$app" "$root"
+}
+
 step() { # label, log file, command…
     local label=$1 log=$2; shift 2
     if "$@" >"$log" 2>&1; then echo "  $label: ok"; else echo "  $label: FAILED, see $log"; tail -n 30 "$log" | sed 's/^/    /'; return 1; fi
 }
 
 verify() {
-    local app=$1 tag=$2
+    local app=$1 tag=$2 before=${3:-}
     step "build septet" "$out/$app-build.log" cargo build -p septet || return 1
     commit_lockfiles "$app" "$tag"
     [ $tests = 1 ] || return 0
@@ -177,7 +218,14 @@ verify() {
     # because a custom test harness may not take --skip.
     local skips
     skips=$(sed -n "s/^$app \([^ ]*\).*/--skip \1/p" "$root/scripts/sync-upstream-skips.txt" | tr '\n' ' ')
-    step "$app tests" "$out/$app-test.log" bash -c "cd '$app' && cargo test --workspace --no-fail-fast ${skips:+-- $skips}" || return 1
+    local which="--workspace"
+    if [ $all_tests = 0 ] && [ -n "$before" ]; then
+        which=$(affected_packages "$app" "$before") || return 1
+        if [ -z "$which" ]; then which="--workspace"; fi
+    fi
+    echo "  testing ${which/--workspace/the whole workspace}"
+    step "$app tests" "$out/$app-test.log" \
+        bash -c "cd '$app' && CARGO_TARGET_DIR='$app_target' cargo test $which --no-fail-fast ${skips:+-- $skips}" || return 1
     commit_lockfiles "$app" "$tag"
     verify_autotests
 }
@@ -197,11 +245,16 @@ for app in "${selected[@]}"; do
     tag=${want_tag:-$(latest_tag "$app")}
     commit=$(fetch_tag "$app" "$tag")
     echo "== $app $tag"
+    before=""
     if git merge-base --is-ancestor "$commit" HEAD; then
         if [ "$target" = all ]; then echo "  already at $tag"; continue; fi
         echo "  already at $tag, verifying"
+        # Merged by an earlier run (say, one that stopped at a conflict): test what that merge changed.
+        merge=$(git rev-list --merges --ancestry-path "$commit..HEAD" -- "$app" | tail -n 1)
+        [ -z "$merge" ] || before=$(git rev-parse "$merge^1")
     else
         echo "  merging $(git rev-list --count "$commit" --not HEAD) upstream commits"
+        before=$(git rev-parse HEAD)
         if ! git subtree merge -q --prefix="$app" "$commit" -m "$app: merge upstream $tag" >"$out/$app-merge.log" 2>&1; then
             if merge_in_progress; then
                 if [ -z "$(git diff --name-only --diff-filter=U)" ]; then
@@ -216,6 +269,6 @@ for app in "${selected[@]}"; do
             exit 1
         fi
     fi
-    verify "$app" "$tag" || { echo "$app $tag: verification failed (branch $branch)"; exit 1; }
+    verify "$app" "$tag" "$before" || { echo "$app $tag: verification failed (branch $branch)"; exit 1; }
 done
 echo "All done on $branch. Review, then push the branch and open a merge request; nothing went to main."
