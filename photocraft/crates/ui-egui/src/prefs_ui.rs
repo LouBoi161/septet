@@ -111,6 +111,11 @@ fn selected_theme(interface: &prefs::Interface, system: Option<egui::Theme>) -> 
 }
 
 pub(crate) fn cycle_appearance(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    // The host sets the theme: open its settings instead.
+    if crate::hosted::theme().is_some() {
+        crate::hosted::open_appearance();
+        return;
+    }
     let next = match app.session.prefs().interface.appearance_mode {
         AppearanceMode::Auto => AppearanceMode::Light,
         AppearanceMode::Light => AppearanceMode::Dark,
@@ -408,8 +413,8 @@ pub(crate) fn sync_appearance(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // A restored or embedding-supplied pin must not suppress native appearance events.
     ctx.set_theme(egui::ThemePreference::System);
     // The native service also covers Wayland sessions where winit has no system theme.
-    let selected = selected_theme(&app.session.prefs().interface, system_theme(app, ctx));
-    if app.ui.theme != selected {
+    let selected = crate::hosted::theme().unwrap_or_else(|| selected_theme(&app.session.prefs().interface, system_theme(app, ctx)));
+    if app.ui.theme != selected || crate::hosted::take_restyle() {
         app.apply_theme(ctx, selected);
     }
 }

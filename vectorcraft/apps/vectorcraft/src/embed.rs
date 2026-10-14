@@ -185,7 +185,8 @@ impl Embedded {
 
     /// Septet's brightness, 0 (darkest) to 3 (lightest), instead of the app's own until `None`.
     /// It isn't saved as the app's: the standalone app keeps its own.
-    pub fn set_appearance(&mut self, level: Option<u8>) {
+    pub fn set_appearance(&mut self, level: Option<u8>, accent: Option<egui::Color32>) {
+        vectorcraft_ui_egui::hosted::set_accent(accent);
         use vectorcraft_ui_egui::theme::Brightness;
         vectorcraft_ui_egui::hosted::set_brightness(level.map(|l| Brightness::ALL[usize::from(l.min(3))]));
     }

@@ -3,7 +3,7 @@
 //! and one UI size for all of them. The apps never save it as their own; their theme menus open
 //! this dialog instead.
 
-use egui::{Context, Id, RichText};
+use egui::{Color32, Context, Id, RichText};
 use serde::{Deserialize, Serialize};
 
 use crate::theme::{self, ShellColors};
@@ -48,13 +48,28 @@ pub struct Appearance {
     pub theme: Theme,
     /// The whole UI's zoom, every app's included (1.0 = 100 %).
     pub ui_scale: f32,
+    /// Buttons, selections and focus in every app (one of [`ACCENTS`]); `None`: each app's own.
+    pub accent: Option<[u8; 3]>,
 }
 
 impl Default for Appearance {
     fn default() -> Self {
-        Appearance { theme: Theme::default(), ui_scale: 1.0 }
+        Appearance { theme: Theme::default(), ui_scale: 1.0, accent: None }
     }
 }
+
+/// The accent colours on offer. The apps write white on their accent (primary buttons, selected
+/// rows), so each of these keeps white text readable; a free colour picker could not.
+pub const ACCENTS: [(&str, [u8; 3]); 8] = [
+    ("Blue", [0x25, 0x63, 0xeb]),
+    ("Purple", [0x7c, 0x3a, 0xed]),
+    ("Pink", [0xdb, 0x27, 0x77]),
+    ("Red", [0xdc, 0x26, 0x26]),
+    ("Orange", [0xc2, 0x41, 0x0c]),
+    ("Green", [0x15, 0x80, 0x3d]),
+    ("Teal", [0x0f, 0x76, 0x6e]),
+    ("Graphite", [0x52, 0x52, 0x5b]),
+];
 
 pub const STORAGE_KEY: &str = "septet/appearance";
 
@@ -73,6 +88,10 @@ impl Appearance {
             Theme::Light => Some(2),
             Theme::Lightest => Some(3),
         }
+    }
+
+    pub fn accent(&self) -> Option<Color32> {
+        self.accent.map(|[r, g, b]| Color32::from_rgb(r, g, b))
     }
 
     pub fn ui_scale(&self) -> f32 {
@@ -137,6 +156,23 @@ pub fn dialog(open: &mut bool, ctx: &Context, appearance: &mut Appearance) {
             ui.label(RichText::new("Septet's own screens stay dark.").color(c.text_dim));
         }
         ui.add_space(12.0);
+        ui.label(RichText::new("Accent colour").font(theme::semibold(13.0)));
+        ui.horizontal_wrapped(|ui| {
+            ui.radio_value(&mut appearance.accent, None, "Each app's own");
+            ui.add_space(6.0);
+            for (name, rgb) in ACCENTS {
+                let (rect, resp) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
+                let [r, g, b] = rgb;
+                ui.painter().circle_filled(rect.center(), 9.0, Color32::from_rgb(r, g, b));
+                if appearance.accent == Some(rgb) {
+                    ui.painter().circle_stroke(rect.center(), 10.5, egui::Stroke::new(2.0, c.text));
+                }
+                if resp.on_hover_text(name).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    appearance.accent = Some(rgb);
+                }
+            }
+        });
+        ui.add_space(12.0);
         ui.label(RichText::new("UI size").font(theme::semibold(13.0)));
         let current = appearance.ui_scale();
         egui::ComboBox::from_id_salt("septet-ui-scale").selected_text(format!("{:.0} %", current * 100.0)).show_ui(ui, |ui| {
@@ -158,10 +194,10 @@ pub fn dialog(open: &mut bool, ctx: &Context, appearance: &mut Appearance) {
     }
 }
 
-/// Septet's own look at `level` (`None`: dark, as before A4): the shell's colours and egui's style
-/// for its own widgets.
-pub fn apply_to_shell(ctx: &Context, level: Option<u8>) {
-    theme::set_level(level);
+/// Septet's own look at `level` (`None`: dark, as before A4) with `accent`: the shell's colours and
+/// egui's style for its own widgets.
+pub fn apply_to_shell(ctx: &Context, level: Option<u8>, accent: Option<Color32>) {
+    theme::set_level(level, accent);
     let light = level.is_some_and(|l| l >= 2);
     ctx.set_theme(if light { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
 }
@@ -184,7 +220,7 @@ mod tests {
 
     #[test]
     fn saved_settings_read_back_and_bad_sizes_are_clamped() {
-        let a = Appearance { theme: Theme::Light, ui_scale: 1.25 };
+        let a = Appearance { theme: Theme::Light, ui_scale: 1.25, accent: Some(ACCENTS[2].1) };
         let back: Appearance = ron::from_str(&ron::to_string(&a).unwrap()).unwrap();
         assert_eq!(back, a);
         let partial: Appearance = ron::from_str("(theme: Darkest)").unwrap();

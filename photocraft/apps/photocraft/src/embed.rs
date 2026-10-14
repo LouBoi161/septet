@@ -265,6 +265,20 @@ impl Embedded {
         }
     }
 
+    /// Septet's brightness, 0 (darkest) to 3 (lightest): the four Pro themes, instead of
+    /// PhotoCraft's own until `None`. It isn't saved as PhotoCraft's.
+    pub fn set_appearance(&mut self, level: Option<u8>, accent: Option<egui::Color32>) {
+        photocraft_ui_egui::hosted::set_accent(accent);
+        use photocraft_ui_egui::theme::ThemeKind;
+        const PRO: [ThemeKind; 4] = [ThemeKind::Pro, ThemeKind::ProMedium, ThemeKind::ProLightGray, ThemeKind::ProLight];
+        photocraft_ui_egui::hosted::set_theme(level.map(|l| PRO[usize::from(l.min(3))]));
+    }
+
+    /// While Septet sets the theme, PhotoCraft's theme commands open Septet's settings.
+    pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
+        photocraft_ui_egui::hosted::set_open_appearance(handler);
+    }
+
     /// Links to a sibling ArtCraft app's page (`getartcraft.com/apps/<name>`) call `handler(name)`
     /// instead of opening the page. PhotoCraft shows none today (only its own page, the ArtCraft
     /// site, Discord and GitHub, which stay web links), so this is kept for when it does.

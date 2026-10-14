@@ -1626,7 +1626,7 @@ impl PdfCraftApp {
             }
         }
         let kind = crate::hosted::theme().unwrap_or_else(|| self.theme_preference.resolve(system, ThemeKind::Light));
-        if kind != self.theme {
+        if kind != self.theme || crate::hosted::take_restyle() {
             self.theme = kind;
             theme::apply(ctx, kind);
         }

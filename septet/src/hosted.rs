@@ -48,9 +48,9 @@ pub trait HostedApp {
     fn save_recovery(&mut self) -> bool {
         !self.has_unsaved_changes()
     }
-    /// Septet's brightness (`appearance.rs`), 0 (darkest) to 3 (lightest): shown instead of the
-    /// app's own theme and never saved as it. `None` gives the app its own theme back.
-    fn set_appearance(&mut self, _level: Option<u8>) {}
+    /// Septet's brightness (`appearance.rs`), 0 (darkest) to 3 (lightest), and accent colour:
+    /// shown instead of the app's own and never saved as them. `None` gives the app its own back.
+    fn set_appearance(&mut self, _level: Option<u8>, _accent: Option<egui::Color32>) {}
     /// While Septet sets the look, the app's theme commands open Septet's Appearance dialog
     /// through this.
     fn set_open_appearance(&mut self, _handler: Box<dyn FnMut()>) {}
@@ -146,8 +146,8 @@ macro_rules! hosted_part {
         }
     };
     (appearance, $ty:ty) => {
-        fn set_appearance(&mut self, level: Option<u8>) {
-            <$ty>::set_appearance(self, level)
+        fn set_appearance(&mut self, level: Option<u8>, accent: Option<egui::Color32>) {
+            <$ty>::set_appearance(self, level, accent)
         }
         fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
             <$ty>::set_open_appearance(self, handler)
@@ -156,7 +156,7 @@ macro_rules! hosted_part {
 }
 
 #[cfg(feature = "photocraft")]
-hosted!(photocraft_embed::Embedded, agent);
+hosted!(photocraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "vectorcraft")]
 hosted!(vectorcraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "lightcraft")]
@@ -166,9 +166,9 @@ hosted!(designcraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "pdfcraft")]
 hosted!(pdfcraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "filmcraft")]
-hosted!(filmcraft_embed::Embedded, agent);
+hosted!(filmcraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "effectcraft")]
-hosted!(effectcraft_embed::Embedded, agent);
+hosted!(effectcraft_embed::Embedded, agent, appearance);
 
 /// An app's [`EntryPoints`] from its `Embedded` type, for its entry in `kinds::APPS`.
 macro_rules! entry_points {

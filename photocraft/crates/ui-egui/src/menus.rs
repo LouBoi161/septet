@@ -345,6 +345,11 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             app.ui.windows.push(crate::state::DocWindow { id: wid, document: doc, view, open: true, position: None });
             Ok(json!({"window": wid}))
         }
+        // The host sets the theme: open its settings instead.
+        theme if theme.starts_with("window.theme.") && crate::hosted::theme().is_some() => {
+            crate::hosted::open_appearance();
+            Ok(json!("host"))
+        }
         "window.theme.toggle" => {
             crate::prefs_ui::cycle_appearance(app, ctx);
             Ok(Value::Null)
@@ -1503,6 +1508,33 @@ pub fn apply_workspace(app: &mut PhotocraftApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// While a host (Septet) sets the theme, its theme shows and the theme commands open the host's
+    /// settings without touching PhotoCraft's own preferences.
+    #[test]
+    fn a_host_theme_shows_and_theme_commands_open_its_settings() {
+        use crate::theme::ThemeKind;
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        let ctx = egui::Context::default();
+        crate::prefs_ui::tick(&mut app, &ctx);
+        let own = app.ui.theme;
+        let mode = app.session.prefs().interface.appearance_mode;
+        let opened = std::rc::Rc::new(std::cell::Cell::new(0));
+        let count = opened.clone();
+        crate::hosted::set_open_appearance(Box::new(move || count.set(count.get() + 1)));
+        crate::hosted::set_theme(Some(ThemeKind::ProLight));
+        crate::prefs_ui::tick(&mut app, &ctx);
+        assert_eq!(app.ui.theme, ThemeKind::ProLight);
+        assert_eq!(invoke(&mut app, &ctx, "window.theme.studio", json!({})).unwrap(), json!("host"));
+        invoke(&mut app, &ctx, "window.theme.toggle", json!({})).unwrap();
+        crate::prefs_ui::tick(&mut app, &ctx);
+        assert_eq!(opened.get(), 2);
+        assert_eq!(app.ui.theme, ThemeKind::ProLight);
+        assert_eq!(app.session.prefs().interface.appearance_mode, mode);
+        crate::hosted::set_theme(None);
+        crate::prefs_ui::tick(&mut app, &ctx);
+        assert_eq!(app.ui.theme, own);
+    }
 
     #[test]
     fn sync_with_system_menu_keeps_saved_slots_and_its_checkmark_across_palettes() {

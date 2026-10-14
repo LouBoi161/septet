@@ -319,6 +319,7 @@ pub fn semibold(size: f32) -> FontId {
 }
 
 pub fn apply(ctx: &egui::Context, t: &Tokens) {
+    let t = &crate::hosted::with_accent(*t);
     ctx.data_mut(|d| d.insert_temp(egui::Id::NULL, *t));
     let text_styles: std::collections::BTreeMap<TextStyle, FontId> = [
         (TextStyle::Small, FontId::proportional(10.0)),

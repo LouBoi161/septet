@@ -295,6 +295,23 @@ impl Embedded {
         write_still(&img, &file_stem(it), accept, dir)
     }
 
+    /// Septet's brightness, 0 (darkest) to 3 (lightest): Darkest, Dark, and Light for both light
+    /// levels, instead of FilmCraft's own until `None`. It isn't saved as FilmCraft's.
+    pub fn set_appearance(&mut self, level: Option<u8>, accent: Option<egui::Color32>) {
+        filmcraft_ui_egui::hosted::set_accent(accent);
+        use filmcraft_ui_egui::theme::ThemeKind;
+        filmcraft_ui_egui::hosted::set_theme(level.map(|l| match l {
+            0 => ThemeKind::Dark,
+            1 => ThemeKind::Medium,
+            _ => ThemeKind::Light,
+        }));
+    }
+
+    /// While Septet sets the theme, FilmCraft's theme commands open Septet's settings.
+    pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
+        filmcraft_ui_egui::hosted::set_open_appearance(handler);
+    }
+
     /// When hosted, links to a sibling app would call `handler(name)`; FilmCraft has none (its Help
     /// links go to its makers' community and website, and GitHub), so the handler is kept unused.
     pub fn set_open_app(&mut self, handler: Box<dyn FnMut(&str)>) {

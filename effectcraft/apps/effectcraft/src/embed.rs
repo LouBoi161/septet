@@ -198,6 +198,24 @@ impl Embedded {
         send::active_file(&mut self.app, accept, dir)
     }
 
+    /// Septet's brightness, 0 (darkest) to 3 (lightest): Darker, Dark, and Light for both light
+    /// levels, instead of EffectCraft's own until `None`. It isn't saved as EffectCraft's.
+    pub fn set_appearance(&mut self, level: Option<u8>, accent: Option<egui::Color32>) {
+        effectcraft_ui_egui::hosted::set_accent(accent);
+        use effectcraft_ui_egui::theme::ThemeKind;
+        effectcraft_ui_egui::hosted::set_theme(level.map(|l| match l {
+            0 => ThemeKind::Darker,
+            1 => ThemeKind::Dark,
+            _ => ThemeKind::Light,
+        }));
+        self.app.reapply_prefs();
+    }
+
+    /// While Septet sets the theme, EffectCraft's theme commands open Septet's settings.
+    pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
+        effectcraft_ui_egui::hosted::set_open_appearance(handler);
+    }
+
     /// The Home screen's More apps buttons (and `help.sibling` for an app's page) call
     /// `handler` with the app's lowercase name instead of opening its web page.
     pub fn set_open_app(&mut self, handler: Box<dyn FnMut(&str)>) {

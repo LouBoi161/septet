@@ -4,15 +4,19 @@
 
 use egui::{Color32, FontData, FontDefinitions, FontFamily, Visuals};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
 /// The level Home and empty windows show, 0 (darkest) to 3 (lightest); [`NO_LEVEL`]: dark.
 static LEVEL: AtomicU8 = AtomicU8::new(NO_LEVEL);
 const NO_LEVEL: u8 = u8::MAX;
+/// Their accent as `0xRRGGBB`, or [`NO_ACCENT`]: Septet's neutral one.
+static ACCENT: AtomicU32 = AtomicU32::new(NO_ACCENT);
+const NO_ACCENT: u32 = u32::MAX;
 
 /// Set by `appearance::apply_to_shell`.
-pub fn set_level(level: Option<u8>) {
+pub fn set_level(level: Option<u8>, accent: Option<Color32>) {
     LEVEL.store(level.unwrap_or(NO_LEVEL), Ordering::Relaxed);
+    ACCENT.store(accent.map_or(NO_ACCENT, |c| u32::from_be_bytes([0, c.r(), c.g(), c.b()])), Ordering::Relaxed);
 }
 
 /// Font family names the shell uses (registered next to the apps' own, see `fonts`).
@@ -74,7 +78,13 @@ impl ShellColors {
         v.panel_fill = panel;
         // Septet's mark is all seven app colours; its own accent stays neutral.
         let accent = if v.dark_mode { Color32::from_rgb(0xf4, 0xf4, 0xf6) } else { Color32::from_rgb(0x1b, 0x1b, 0x1d) };
-        let mut c = Self::for_app(&v, accent);
+        let mut c = match ACCENT.load(Ordering::Relaxed) {
+            NO_ACCENT => Self::for_app(&v, accent),
+            rgb => {
+                let [_, r, g, b] = rgb.to_be_bytes();
+                Self::for_app(&v, Color32::from_rgb(r, g, b))
+            }
+        };
         c.home_bg = panel;
         if level == 0 {
             c.card = Color32::from_rgb(0x1d, 0x1d, 0x20);

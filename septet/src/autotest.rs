@@ -65,6 +65,10 @@ enum Step {
     LoseGpu,
     /// Set Septet's appearance: brightness and UI size (`appearance.rs`).
     Appearance(crate::appearance::Theme, f32),
+    /// Close the Appearance dialog.
+    CloseAppearance,
+    /// Set Septet's accent colour (one of `appearance::ACCENTS`, by name; `None`: each app's own).
+    Accent(Option<&'static str>),
     Exit,
 }
 
@@ -229,46 +233,57 @@ impl Autotest {
             // opens Septet's dialog instead.
             Ok("appearance") => {
                 use crate::appearance::Theme;
-                let brightness = |app: &str, b: &str| {
-                    Step::Tool("app_execute", serde_json::json!({"app": app, "command": "window.brightness", "params": {"brightness": b}}))
-                };
-                vec![
+                let apps = [AppKind::Photocraft, AppKind::Vectorcraft, AppKind::Designcraft, AppKind::Pdfcraft, AppKind::Filmcraft, AppKind::Effectcraft];
+                // Each app's own theme command opens Septet's dialog while Septet sets the look. (Claude
+                // reaches only these apps' theme commands; the others' are tested in their crates.)
+                let commands = [
+                    (AppKind::Vectorcraft, "window.brightness", serde_json::json!({"brightness": "light"})),
+                    (AppKind::Designcraft, "window.brightness", serde_json::json!({"brightness": "light"})),
+                    (AppKind::Filmcraft, "view.theme.light", serde_json::json!({})),
+                ];
+                let short = |k: AppKind| k.name().to_ascii_lowercase();
+                let shot = |name: String| Step::Shot(Box::leak(name.into_boxed_str()));
+                let mut steps = vec![
                     Step::Wait(2.0),
                     Step::Shot("a01-home-dark"),
                     Step::Appearance(Theme::Lightest, 1.0),
                     Step::Wait(1.0),
                     Step::Shot("a02-home-lightest"),
-                    Step::Open(AppKind::Vectorcraft),
-                    Step::Wait(5.0),
-                    Step::Shot("a03-vectorcraft-lightest"),
-                    Step::Open(AppKind::Designcraft),
-                    Step::Wait(5.0),
-                    Step::Shot("a04-designcraft-lightest"),
-                    Step::Open(AppKind::Pdfcraft),
-                    Step::Wait(5.0),
-                    Step::Shot("a05-pdfcraft-lightest"),
-                    Step::Appearance(Theme::Darkest, 1.25),
-                    Step::Wait(1.0),
-                    Step::Shot("a06-pdfcraft-darkest-125"),
-                    Step::Activate(AppKind::Designcraft),
-                    Step::Wait(1.0),
-                    Step::Shot("a07-designcraft-darkest-125"),
-                    Step::Activate(AppKind::Vectorcraft),
-                    Step::Wait(1.0),
-                    Step::Shot("a08-vectorcraft-darkest-125"),
-                    brightness("vectorcraft", "light"),
-                    Step::ToolWait(10.0),
-                    Step::Wait(1.0),
-                    Step::Shot("a09-dialog-from-vectorcraft"),
-                    Step::Appearance(Theme::AppsOwn, 1.0),
-                    Step::Wait(1.0),
-                    Step::Shot("a10-vectorcraft-own"),
-                    Step::Activate(AppKind::Pdfcraft),
-                    Step::Wait(1.0),
-                    Step::Shot("a11-pdfcraft-own"),
-                    Step::Report,
-                    Step::Exit,
-                ]
+                ];
+                for kind in &apps {
+                    steps.extend([Step::Open(*kind), Step::Wait(6.0), shot(format!("a03-{}-lightest", short(*kind)))]);
+                }
+                steps.extend([Step::Appearance(Theme::Darkest, 1.25), Step::Wait(1.0)]);
+                for kind in &apps {
+                    steps.extend([Step::Activate(*kind), Step::Wait(1.5), shot(format!("a04-{}-darkest-125", short(*kind)))]);
+                }
+                steps.extend([Step::Accent(Some("Pink")), Step::Wait(1.0)]);
+                for kind in &apps {
+                    steps.extend([Step::Activate(*kind), Step::Wait(1.5), shot(format!("a06-{}-darkest-pink", short(*kind)))]);
+                }
+                steps.extend([Step::Appearance(Theme::Light, 1.0), Step::Wait(1.0)]);
+                for kind in &apps {
+                    steps.extend([Step::Activate(*kind), Step::Wait(1.5), shot(format!("a07-{}-light-pink", short(*kind)))]);
+                }
+                steps.extend([Step::Home, Step::Wait(1.0), Step::Shot("a08-home-light-pink")]);
+                for (kind, command, params) in commands {
+                    steps.extend([
+                        Step::Activate(kind),
+                        Step::Tool("app_execute", serde_json::json!({"app": short(kind), "command": command, "params": params})),
+                        Step::ToolWait(10.0),
+                        Step::Wait(0.5),
+                        Step::Report,
+                        shot(format!("a09-{}-dialog", short(kind))),
+                        Step::CloseAppearance,
+                    ]);
+                }
+                steps.push(Step::Accent(None));
+                steps.extend([Step::Appearance(Theme::AppsOwn, 1.0), Step::Wait(1.0)]);
+                for kind in &apps {
+                    steps.extend([Step::Activate(*kind), Step::Wait(1.5), shot(format!("a05-{}-own", short(*kind)))]);
+                }
+                steps.extend([Step::Report, Step::Exit]);
+                steps
             }
             Ok("gpu-lost") => {
                 let run = |command: &str, params: serde_json::Value| Step::Tool("app_execute", serde_json::json!({"app": "vectorcraft", "command": command, "params": params}));
@@ -1048,7 +1063,12 @@ impl Autotest {
                 }
                 Step::Appearance(theme, scale) => {
                     at.note(format!("appearance {theme:?} at {scale}"));
-                    shell.appearance = crate::appearance::Appearance { theme, ui_scale: scale };
+                    shell.appearance = crate::appearance::Appearance { theme, ui_scale: scale, accent: shell.appearance.accent };
+                }
+                Step::CloseAppearance => shell.appearance_dialog = None,
+                Step::Accent(name) => {
+                    at.note(format!("accent {name:?}"));
+                    shell.appearance.accent = name.and_then(|n| crate::appearance::ACCENTS.iter().find(|(a, _)| *a == n)).map(|(_, rgb)| *rgb);
                 }
                 Step::LoseGpu => {
                     at.note("losing the GPU device".into());

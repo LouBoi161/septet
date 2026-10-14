@@ -133,8 +133,8 @@ pub struct Shell {
     pub appearance_dialog: Option<ViewportId>,
     pub appearance: crate::appearance::Appearance,
     desktop: crate::appearance::Desktop,
-    /// The level and UI size last handed to the shell and the apps (`None`: not yet).
-    applied_appearance: Option<(Option<u8>, f32)>,
+    /// The level, accent and UI size last handed to the shell and the apps (`None`: not yet).
+    applied_appearance: Option<(Option<u8>, Option<egui::Color32>, f32)>,
     /// An app's theme command asked for the Appearance dialog.
     open_appearance: Rc<Cell<bool>>,
     pub home: HomeState,
@@ -681,8 +681,8 @@ impl Shell {
         if let Some(rs) = &render_state {
             self.gpu.install(&rs.device, ctx);
         }
-        if let Some((level, _)) = self.applied_appearance {
-            app.set_appearance(level);
+        if let Some((level, accent, _)) = self.applied_appearance {
+            app.set_appearance(level, accent);
         }
         let open_appearance = self.open_appearance.clone();
         app.set_open_appearance(Box::new(move || open_appearance.set(true)));
@@ -714,16 +714,17 @@ impl Shell {
     fn sync_appearance(&mut self, ctx: &Context) {
         let following = self.appearance.theme == crate::appearance::Theme::System;
         let level = self.appearance.level(self.desktop.dark(ctx, following));
+        let accent = self.appearance.accent();
         let scale = self.appearance.ui_scale();
-        let previous = self.applied_appearance.replace((level, scale));
-        if previous.is_none_or(|(l, _)| l != level) {
-            crate::appearance::apply_to_shell(ctx, level);
+        let previous = self.applied_appearance.replace((level, accent, scale));
+        if previous.is_none_or(|(l, a, _)| (l, a) != (level, accent)) {
+            crate::appearance::apply_to_shell(ctx, level, accent);
             for slot in self.apps.values() {
-                slot.borrow_mut().with_app(ctx, |app| app.set_appearance(level));
+                slot.borrow_mut().with_app(ctx, |app| app.set_appearance(level, accent));
             }
             ctx.request_repaint();
         }
-        if previous.is_none_or(|(_, s)| s != scale) {
+        if previous.is_none_or(|(_, _, s)| s != scale) {
             ctx.set_zoom_factor(scale);
         }
     }

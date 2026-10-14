@@ -153,7 +153,8 @@ impl Embedded {
 
     /// Septet's brightness, 0 (darkest) to 3 (lightest): Dark for 0 and 1, Light for 2 and 3,
     /// instead of PdfCraft's own until `None`. It isn't saved as PdfCraft's.
-    pub fn set_appearance(&mut self, level: Option<u8>) {
+    pub fn set_appearance(&mut self, level: Option<u8>, accent: Option<egui::Color32>) {
+        pdfcraft_ui_egui::hosted::set_accent(accent);
         use pdfcraft_ui_egui::theme::ThemeKind;
         pdfcraft_ui_egui::hosted::set_theme(level.map(|l| if l >= 2 { ThemeKind::Light } else { ThemeKind::Dark }));
     }

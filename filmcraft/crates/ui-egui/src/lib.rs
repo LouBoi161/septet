@@ -636,7 +636,8 @@ impl FilmcraftApp {
     /// Show theme `k` with the Settings ▸ Appearance highlight colour and contrast.
     pub fn set_theme(&mut self, ctx: &egui::Context, k: ThemeKind) {
         let a = &self.session.prefs.appearance;
-        let highlight = filmcraft_engine::settings::parse_hex(&a.highlight_color);
+        // A host's accent comes first ([`crate::hosted::set_accent`]).
+        let highlight = crate::hosted::accent().map(|c| [c.r(), c.g(), c.b()]).or_else(|| filmcraft_engine::settings::parse_hex(&a.highlight_color));
         self.tokens = Tokens::for_kind(k).with_appearance(highlight, a.accessible_contrast);
         theme::apply_visuals(ctx, &self.tokens);
         self.apply_tooltips(ctx);
@@ -651,6 +652,10 @@ impl FilmcraftApp {
     /// The theme Settings ▸ Appearance selects: the light or dark theme of the Appearance Mode,
     /// Auto following the system (dark when it gives no answer).
     pub fn appearance_kind(&self, ctx: &egui::Context) -> ThemeKind {
+        // A host's theme comes first ([`crate::hosted::set_theme`]).
+        if let Some(k) = crate::hosted::theme() {
+            return k;
+        }
         let light = self.system_theme(ctx).map(|t| t == egui::Theme::Light);
         ThemeKind::from_pref(self.session.prefs.appearance.shown_theme(light))
     }
@@ -691,7 +696,7 @@ impl FilmcraftApp {
         // changes as they happen (no polling) and wakes the UI only when the value changes.
         if self.applied_prefs.is_some() {
             let k = self.appearance_kind(ctx);
-            if k != self.tokens.kind {
+            if k != self.tokens.kind || crate::hosted::take_restyle() {
                 self.set_theme(ctx, k);
             }
         }

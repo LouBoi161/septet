@@ -5,14 +5,65 @@
 //! zoom and draws the window chrome. While hosted, FilmCraft leaves those alone. Standalone
 //! (the default) nothing changes. The host can also keep FilmCraft's per-user data in a folder of
 //! its own ([`set_data_root`], a portable install) and take project items dragged out of FilmCraft
-//! into its other apps ([`dragged_items`]).
+//! into its other apps ([`dragged_items`]), and set the colour theme for all the apps it shows
+//! ([`set_theme`]).
 
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use filmcraft_media::MediaKind;
 use filmcraft_project::{ItemId, ItemKind, MediaRef, Project};
 
 static HOSTED: AtomicBool = AtomicBool::new(false);
+
+thread_local! {
+    static THEME: Cell<Option<crate::theme::ThemeKind>> = const { Cell::new(None) };
+    static OPEN_APPEARANCE: RefCell<Option<Box<dyn FnMut()>>> = const { RefCell::new(None) };
+}
+
+/// The host's colour theme, shown instead of Settings ▸ Appearance and never saved as it; `None`
+/// (the default) shows FilmCraft's own.
+pub fn set_theme(theme: Option<crate::theme::ThemeKind>) {
+    THEME.set(theme);
+}
+
+/// The host's colour theme ([`set_theme`]), if it sets one.
+pub fn theme() -> Option<crate::theme::ThemeKind> {
+    THEME.get()
+}
+
+/// The host's appearance settings, which the theme commands open while the host sets the theme.
+pub fn set_open_appearance(open: Box<dyn FnMut()>) {
+    OPEN_APPEARANCE.set(Some(open));
+}
+
+/// Open the host's appearance settings ([`set_open_appearance`]) → whether there are any.
+pub fn open_appearance() -> bool {
+    OPEN_APPEARANCE.with_borrow_mut(|open| open.as_mut().map(|open| open()).is_some())
+}
+
+thread_local! {
+    static ACCENT: Cell<Option<egui::Color32>> = const { Cell::new(None) };
+    static RESTYLE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The host's accent colour, shown instead of the theme's (buttons, selections, focus) and never
+/// saved as it; `None` (the default) keeps the theme's.
+pub fn set_accent(accent: Option<egui::Color32>) {
+    if ACCENT.replace(accent) != accent {
+        RESTYLE.set(true);
+    }
+}
+
+/// The host's accent colour ([`set_accent`]), if it sets one.
+pub fn accent() -> Option<egui::Color32> {
+    ACCENT.get()
+}
+
+/// Whether the host's accent changed since the last call: the theme is applied again.
+pub fn take_restyle() -> bool {
+    RESTYLE.replace(false)
+}
 
 /// Say whether FilmCraft runs inside a host (set once, before the app is built).
 pub fn set_hosted(hosted: bool) {

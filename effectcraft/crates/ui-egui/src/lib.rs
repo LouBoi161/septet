@@ -470,19 +470,27 @@ impl EffectcraftApp {
         }
         self.applied_prefs = Some((self.session.prefs_revision, system));
         let p = &self.session.prefs;
-        self.ui.theme = theme::ThemeKind::from_name(p.appearance.resolved_theme(system)).unwrap_or_default();
-        self.tokens = Tokens::from_prefs(p, self.ui.theme);
+        self.ui.theme = hosted::theme().unwrap_or_else(|| theme::ThemeKind::from_name(p.appearance.resolved_theme(system)).unwrap_or_default());
+        self.tokens = hosted::with_accent(Tokens::from_prefs(p, self.ui.theme));
         theme::apply_visuals(ctx, &self.tokens);
         ctx.set_theme(theme::theme_preference(&p.appearance.appearance_mode, self.ui.theme.is_light()));
         let tips = p.general.show_tool_tips;
         ctx.all_styles_mut(|s| s.interaction.tooltip_delay = if tips { 0.5 } else { f32::INFINITY });
         // Settings ▸ Appearance ▸ UI Scale (#284). egui's own Ctrl+= / Ctrl+- / Ctrl+0 zoom stays
         // off: Ctrl+0 is Window ▸ Project, and the scale is a setting.
-        ctx.options_mut(|o| o.zoom_with_keyboard = false);
-        ctx.set_zoom_factor(p.appearance.ui_scale as f32 / 100.0);
+        // Hosted, the host owns the UI zoom.
+        if !hosted::is_hosted() {
+            ctx.options_mut(|o| o.zoom_with_keyboard = false);
+            ctx.set_zoom_factor(p.appearance.ui_scale as f32 / 100.0);
+        }
         self.ui.cache_when_idle = p.previews.cache_frames_when_idle;
         self.ui.viewer.fast_preview = p.previews.fast_previews;
         self.frames.set_budget(p.cache_budgets(self.session.sys_memory).preview);
+    }
+
+    /// Apply the settings again on the next frame (a host changed what they show).
+    pub fn reapply_prefs(&mut self) {
+        self.applied_prefs = None;
     }
 
     /// Change settings from the UI (applied next frame and saved).
@@ -501,6 +509,11 @@ impl EffectcraftApp {
     /// Show theme `k`: the appearance mode becomes its family's (Dark or Light), and `k` that
     /// family's theme.
     pub fn set_theme(&mut self, ctx: &egui::Context, k: theme::ThemeKind) {
+        // The host sets the theme: open its settings instead.
+        if hosted::theme().is_some() {
+            hosted::open_appearance();
+            return;
+        }
         if let Err(e) = self.set_pref("appearance.theme", json!(k.name())) {
             self.ui.status = e;
         }
@@ -516,6 +529,10 @@ impl EffectcraftApp {
     /// The Tools bar's appearance button (`view.theme.toggle`): Sync with System, then Light, then
     /// Dark, then Sync with System again. The light and dark theme choices are kept.
     pub fn cycle_appearance(&mut self, ctx: &egui::Context) {
+        if hosted::theme().is_some() {
+            hosted::open_appearance();
+            return;
+        }
         let next = match self.session.prefs.appearance.appearance_mode.as_str() {
             "auto" => "light",
             "light" => "dark",
@@ -2155,6 +2172,34 @@ mod appearance_tests {
 
     fn app() -> EffectcraftApp {
         EffectcraftApp::new(effectcraft_engine::Session::default())
+    }
+
+    /// While a host (Septet) sets the theme, its theme shows and the theme commands open the host's
+    /// settings without touching EffectCraft's own.
+    #[test]
+    fn a_host_theme_shows_and_theme_commands_open_its_settings() {
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.apply_prefs(&ctx);
+        let own = app.ui.theme;
+        let (mode, theme) = (app.session.prefs.appearance.appearance_mode.clone(), app.session.prefs.appearance.theme.clone());
+        let opened = std::rc::Rc::new(std::cell::Cell::new(0));
+        let count = opened.clone();
+        hosted::set_open_appearance(Box::new(move || count.set(count.get() + 1)));
+        hosted::set_theme(Some(ThemeKind::Light));
+        app.reapply_prefs();
+        app.apply_prefs(&ctx);
+        assert_eq!(app.ui.theme, ThemeKind::Light);
+        menus::invoke(&mut app, &ctx, "view.theme.toggle", json!({})).unwrap();
+        menus::invoke(&mut app, &ctx, "view.theme.darker", json!({})).unwrap();
+        app.apply_prefs(&ctx);
+        assert_eq!(opened.get(), 2);
+        assert_eq!(app.ui.theme, ThemeKind::Light);
+        assert_eq!((app.session.prefs.appearance.appearance_mode.clone(), app.session.prefs.appearance.theme.clone()), (mode, theme));
+        hosted::set_theme(None);
+        app.reapply_prefs();
+        app.apply_prefs(&ctx);
+        assert_eq!(app.ui.theme, own);
     }
 
     /// The Tools bar's appearance button: Sync with System, Light, Dark, then Sync with System
