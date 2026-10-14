@@ -117,6 +117,20 @@ impl Embedded {
         vectorcraft_ui_egui::unsaved::any_dirty(&self.app)
     }
 
+    /// Septet's handlers on the shared GPU device saw an error or its loss. The canvas draws on
+    /// the CPU; a lost device means the window won't draw again: recovery copies now.
+    pub fn gpu_failed(&mut self, lost: bool, message: &str) {
+        if lost {
+            self.app.graphics_lost(message);
+        }
+    }
+
+    /// Recovery copies of the modified documents now (Septet lost its graphics device and starts
+    /// again) → whether every one has an up-to-date copy.
+    pub fn save_recovery(&mut self) -> bool {
+        self.app.graphics_lost("the host is restarting")
+    }
+
     /// Open `paths` as documents, as the command line does.
     pub fn open_paths(&mut self, paths: &[PathBuf]) {
         desktop::open_files(&mut self.app, paths.iter().map(|p| p.to_string_lossy().into_owned()).collect());

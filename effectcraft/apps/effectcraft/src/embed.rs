@@ -35,6 +35,8 @@ pub struct Embedded {
     /// What the last drag from the Project panel or Media Browser carried, as of the last frame
     /// the app drew: the drag may end in another app after this tab was hidden.
     outgoing: Option<Outgoing>,
+    /// Where GPU failures go: the host's device handlers report them here ([`Self::gpu_failed`]).
+    gpu_failures: GpuFailureBridge,
 }
 
 impl Embedded {
@@ -58,7 +60,7 @@ impl Embedded {
         // reported in a toast and forgotten).
         let _ = session.execute("window.restoreScriptPanels", json!({}));
         let mut app = EffectcraftApp::new(session);
-        app.set_gpu_failure_bridge(gpu_failures);
+        app.set_gpu_failure_bridge(gpu_failures.clone());
         app.ui.start_screen = show_home;
         if let Some(r) = recovery {
             app.offer_recovery(r);
@@ -67,7 +69,7 @@ impl Embedded {
         // The commands' file dialogs open as sheets instead of nested modal loops (#511).
         #[cfg(target_os = "macos")]
         desktop::install_sheet_dialogs(&mut app, ctx);
-        Embedded { app, ctx: ctx.clone(), requests: Vec::new(), outgoing: None }
+        Embedded { app, ctx: ctx.clone(), requests: Vec::new(), outgoing: None, gpu_failures }
     }
 
     /// Before [`Embedded::new`]: keep everything EffectCraft stores per user under `root` (created
@@ -100,6 +102,28 @@ impl Embedded {
     /// The project has unsaved changes.
     pub fn has_unsaved_changes(&self) -> bool {
         self.app.session.is_dirty()
+    }
+
+    /// Septet's handlers on the shared GPU device saw an error or its loss (it sets them for every
+    /// app, replacing [`desktop::install_device_handlers`]'s): report it as those handlers would.
+    pub fn gpu_failed(&mut self, lost: bool, message: &str) {
+        let message = if lost { format!("GPU device lost: {message}") } else { format!("uncaptured GPU error: {message}") };
+        self.gpu_failures.report(&message, lost);
+    }
+
+    /// Septet is about to restart (it lost its graphics device): auto-save a project with unsaved
+    /// changes and wait for it; the crash-recovery marker stays, so the next start offers it.
+    pub fn save_recovery(&mut self) -> bool {
+        if !self.app.session.is_dirty() {
+            return true;
+        }
+        match self.app.session.autosave_now().and_then(|_| self.app.session.autosave_wait()) {
+            Ok(()) => true,
+            Err(e) => {
+                log::error!("effectcraft: no auto-save before the restart: {e}");
+                false
+            }
+        }
     }
 
     /// Open files as the command line does: a project opens (asking to save a modified one

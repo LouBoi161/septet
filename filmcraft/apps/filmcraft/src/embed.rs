@@ -141,6 +141,27 @@ impl Embedded {
         self.app.session.is_dirty()
     }
 
+    /// Septet's handlers on the shared GPU device saw an error or its loss (it sets them for every
+    /// app: wgpu keeps one of each): the monitors composite on the CPU from the next frame, as when
+    /// FilmCraft's own handler sees one.
+    pub fn gpu_failed(&mut self, _lost: bool, message: &str) {
+        if let Some(gpu) = &self.app.gpu {
+            log::error!("GPU error, switching to the CPU compositor: {message}");
+            gpu.broken.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.ctx.request_repaint();
+        }
+    }
+
+    /// Septet is about to restart (it lost its graphics device): bring the recovery journal up to
+    /// date and wait for it, so the next start offers the unsaved changes.
+    pub fn save_recovery(&mut self) -> bool {
+        self.app.session.sync_persistence();
+        if let Some(persistence) = &self.app.session.persistence {
+            persistence.flush();
+        }
+        true
+    }
+
     /// As on the command line: open the first project (`.fcproj`), import the other files into the
     /// project.
     pub fn open_paths(&mut self, paths: &[PathBuf]) {

@@ -41,6 +41,13 @@ pub trait HostedApp {
     fn export_active(&mut self, _accept: &[&str], _dir: &Path) -> Option<PathBuf> {
         None
     }
+    /// The shared GPU device reported an error, or was lost (`gpu.rs`): leave the GPU for the CPU.
+    fn gpu_failed(&mut self, _lost: bool, _message: &str) {}
+    /// Write recovery data for every document with unsaved changes now, before Septet restarts
+    /// (`gpu.rs`) → whether all of it was written.
+    fn save_recovery(&mut self) -> bool {
+        !self.has_unsaved_changes()
+    }
 
     // Claude drives the app (`docs/embedding/phase5-agent-control.md`). None: the app can't yet.
 
@@ -123,6 +130,12 @@ macro_rules! hosted {
             }
             fn set_open_app(&mut self, handler: Box<dyn FnMut(&str)>) {
                 <$ty>::set_open_app(self, handler)
+            }
+            fn gpu_failed(&mut self, lost: bool, message: &str) {
+                <$ty>::gpu_failed(self, lost, message)
+            }
+            fn save_recovery(&mut self) -> bool {
+                <$ty>::save_recovery(self)
             }
             $($agent)*
         }

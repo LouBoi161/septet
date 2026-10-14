@@ -149,6 +149,11 @@ pub struct Shell {
     /// Launches handed to this Septet by later ones (see `instance.rs`).
     pub instance: Option<crate::instance::Running>,
     quit_requested: bool,
+    /// The handlers on the shared GPU device (`gpu.rs`), set once there is a device.
+    gpu: crate::gpu::GpuWatch,
+    gpu_watched: bool,
+    /// Autotest: destroy the device on the next frame.
+    pub lose_gpu: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -191,6 +196,9 @@ impl Shell {
             open_app: Rc::new(RefCell::new(Vec::new())),
             instance: None,
             quit_requested: false,
+            gpu: Default::default(),
+            gpu_watched: false,
+            lose_gpu: false,
         };
         let root = shell.new_window(ViewportId::ROOT, ViewportBuilder::default());
         shell.windows.push(root);
@@ -412,6 +420,7 @@ impl Shell {
     /// Draw every window. The root window draws into `ui`; the others are immediate viewports.
     pub fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.watch_gpu(&ctx, frame);
         self.apply_actions(&ctx);
         self.process_opens(&ctx, frame);
         self.apply_actions(&ctx);
@@ -436,6 +445,12 @@ impl Shell {
         crate::content::finish(self, &ctx);
         self.sync_titles();
         self.apply_actions(&ctx);
+        // A device lost during this frame panics egui-wgpu as it draws the frame: poll now, so the
+        // loss is reported (and handled) first.
+        if let Some(rs) = frame.wgpu_render_state() {
+            let _ = rs.device.poll(eframe::egui_wgpu::wgpu::PollType::Poll);
+        }
+        self.watch_gpu(&ctx, frame);
     }
 
     fn window_ui(&mut self, wi: usize, ui: &mut Ui, frame: &mut eframe::Frame) {
@@ -638,6 +653,10 @@ impl Shell {
         let entry = &kind.spec().entry;
         (entry.set_data_root)(crate::recent::portable_root().map(|root| root.join(kind.name())));
         let mut app = (entry.create)(ctx, render_state.as_ref(), frame.storage());
+        // Photocraft, Filmcraft and Effectcraft set handlers of their own on the device: ours again.
+        if let Some(rs) = &render_state {
+            self.gpu.install(&rs.device, ctx);
+        }
         let external = self.external.clone();
         let open_app = self.open_app.clone();
         app.set_open_app(Box::new(move |name| {
@@ -1108,6 +1127,55 @@ impl Shell {
     pub fn window_size(&self, viewport: ViewportId) -> Vec2 {
         let ctx_size = self.windows.iter().find(|w| w.viewport == viewport).map(|w| w.strip.width()).unwrap_or(1280.0);
         Vec2::new(ctx_size.max(900.0), (ctx_size * 0.62).max(600.0))
+    }
+
+    /// The shared GPU device's errors go to every running app, which falls back to its CPU path.
+    /// A lost device can't be replaced: every app writes its recovery data, the session is saved
+    /// and Septet starts again (`gpu.rs`). Called at the start and the end of every frame.
+    fn watch_gpu(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
+        if !self.gpu_watched
+            && let Some(rs) = frame.wgpu_render_state()
+        {
+            self.gpu.install(&rs.device, ctx);
+            self.gpu_watched = true;
+        }
+        if std::mem::take(&mut self.lose_gpu)
+            && let Some(rs) = frame.wgpu_render_state()
+        {
+            rs.device.destroy();
+        }
+        let events = self.gpu.take();
+        for event in &events {
+            for slot in self.apps.values() {
+                slot.borrow_mut().with_app(ctx, |a| a.gpu_failed(event.lost, &event.message));
+            }
+        }
+        let Some(lost) = events.iter().find(|e| e.lost) else { return };
+        let mut unsaved = Vec::new();
+        for (kind, slot) in &self.apps {
+            if !slot.borrow_mut().with_app(ctx, |a| a.save_recovery()) {
+                unsaved.push(kind.name());
+            }
+        }
+        if let Some(storage) = frame.storage_mut() {
+            self.persist(storage);
+            storage.flush();
+        }
+        if let Some(instance) = &self.instance {
+            instance.release();
+        }
+        eprintln!("graphics device lost ({}): recovery data written, unsaved in: {unsaved:?}; restarting", lost.message);
+        if !crate::gpu::restart() {
+            let mut text = format!("Septet lost its graphics device ({}) and has to close.", lost.message);
+            if unsaved.is_empty() {
+                text.push_str(" Your unsaved changes were kept: the apps offer them when you start Septet again.");
+            } else {
+                text.push_str(&format!(" Recovery data couldn't be written for: {}.", unsaved.join(", ")));
+            }
+            rfd::MessageDialog::new().set_level(rfd::MessageLevel::Error).set_title("Septet").set_description(text).show();
+        }
+        // Not a normal quit: the apps' exit handlers would clear the recovery data just written.
+        std::process::exit(0);
     }
 
     pub fn persist(&self, storage: &mut dyn eframe::Storage) {

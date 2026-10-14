@@ -27,7 +27,10 @@ pub fn claim(files: &[PathBuf]) -> Option<Option<Primary>> {
         return Some(None);
     }
     let Some(file) = instance_file() else { return Some(None) };
-    if let Ok(text) = std::fs::read_to_string(&file)
+    // Started by a Septet that lost its graphics device and is exiting (`gpu::restart`): take over.
+    let restarted = std::env::var_os(crate::gpu::RESTART_ENV).is_some();
+    if !restarted
+        && let Ok(text) = std::fs::read_to_string(&file)
         && forward(&text, files).is_some()
     {
         return None;

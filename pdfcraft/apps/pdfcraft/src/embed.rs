@@ -109,6 +109,16 @@ impl Embedded {
         self.app.first_dirty().is_some()
     }
 
+    /// Pdfcraft draws on the CPU: nothing to fall back from.
+    pub fn gpu_failed(&mut self, _lost: bool, _message: &str) {}
+
+    /// Septet is about to restart: recovery entries for the changed documents now (offered at
+    /// the next start).
+    pub fn save_recovery(&mut self) -> bool {
+        self.app.autosave_now();
+        true
+    }
+
     /// Open files in their own tabs, as the command line does (images and text become new PDFs).
     pub fn open_paths(&mut self, paths: &[PathBuf]) {
         for path in paths {

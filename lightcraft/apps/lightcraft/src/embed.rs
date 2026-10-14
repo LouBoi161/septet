@@ -113,6 +113,18 @@ impl Embedded {
         self.app.session.unsaved().is_some() || (temporary && !self.app.session.catalog.is_empty())
     }
 
+    /// Lightcraft renders on devices of its own (and falls back to the CPU itself), not on the
+    /// host's shared one.
+    pub fn gpu_failed(&mut self, _lost: bool, _message: &str) {}
+
+    /// Septet is about to restart: write the library changes and settings still pending →
+    /// whether nothing is left unsaved.
+    pub fn save_recovery(&mut self) -> bool {
+        self.app.session.persist_if_dirty();
+        self.save_prefs();
+        !self.has_unsaved_changes()
+    }
+
     /// Import files and folders into the library and show the grid, as files on the command line
     /// are (presets are imported as presets, as when dropped). While the library couldn't be opened
     /// they wait, as command-line files do, until the user has chosen where to.

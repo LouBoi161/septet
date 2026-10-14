@@ -17,6 +17,7 @@ mod autotest;
 mod bridge;
 mod content;
 mod fonts;
+mod gpu;
 mod home;
 mod hosted;
 mod icon;

@@ -61,6 +61,8 @@ enum Step {
     ToolWait(f64),
     /// A Home tab in the first window, which hides the app shown there.
     Home,
+    /// Destroy the shared GPU device, as a driver reset would lose it (`gpu.rs`).
+    LoseGpu,
     Exit,
 }
 
@@ -218,6 +220,32 @@ impl Autotest {
                     })
                     .collect();
                 Self::layers(kind, &at)
+            }
+            // Losing the GPU device: apps that set device handlers of their own are open, Vectorcraft
+            // has unsaved changes; Septet should write recovery data and restart (logged, not done).
+            Ok("gpu-lost") => {
+                let run = |command: &str, params: serde_json::Value| Step::Tool("app_execute", serde_json::json!({"app": "vectorcraft", "command": command, "params": params}));
+                vec![
+                    Step::Wait(2.0),
+                    Step::Open(AppKind::Vectorcraft),
+                    Step::Wait(5.0),
+                    run("file.new", serde_json::json!({"width": 400, "height": 300})),
+                    Step::ToolWait(10.0),
+                    run("shape.rectangle", serde_json::json!({"x": 40, "y": 40, "width": 100, "height": 80})),
+                    Step::ToolWait(10.0),
+                    Step::Open(AppKind::Photocraft),
+                    Step::Wait(6.0),
+                    Step::Open(AppKind::Effectcraft),
+                    Step::Wait(6.0),
+                    Step::Open(AppKind::Filmcraft),
+                    Step::Wait(6.0),
+                    Step::Report,
+                    Step::Shot("g01-before"),
+                    Step::LoseGpu,
+                    Step::Wait(10.0),
+                    Step::Shot("g02-still-running"),
+                    Step::Exit,
+                ]
             }
             _ => Self::tour(file),
         };
@@ -969,6 +997,10 @@ impl Autotest {
                 Step::Home => {
                     let window = shell.windows[0].viewport;
                     shell.actions.push(Action::NewTab { window, kind: TabKind::Home });
+                }
+                Step::LoseGpu => {
+                    at.note("losing the GPU device".into());
+                    shell.lose_gpu = true;
                 }
                 Step::Exit => {
                     at.note("exit".into());
