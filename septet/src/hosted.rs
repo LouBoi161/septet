@@ -56,6 +56,19 @@ pub trait HostedApp {
     /// While Septet sets the look, the app's theme commands open Septet's Appearance dialog
     /// through this.
     fn set_open_appearance(&mut self, _handler: Box<dyn FnMut()>) {}
+    /// The app's Generative Fill and Generate Image commands call `handler` (`generate.rs`).
+    /// Apps without them never call it.
+    fn set_generate(&mut self, _handler: Box<dyn FnMut(Generate)>) {}
+    /// What to generate from: the active document's selection grown by `margin` px (the whole
+    /// canvas without one), as the document shows it.
+    fn generative_source(&mut self, _margin: u32) -> Result<GenerativeSource, String> {
+        Err("This app can't take generated images yet.".into())
+    }
+    /// Put a generated image into `document` as a new layer at `rect`, shown only where `mask`
+    /// says (one byte per pixel of `rect`), named `name`; one undo step.
+    fn place_generated(&mut self, _document: u64, _rect: [u32; 4], _image: &egui::ColorImage, _mask: Option<&[u8]>, _name: &str) -> Result<(), String> {
+        Err("This app can't take generated images yet.".into())
+    }
 
     // Claude drives the app (`docs/embedding/phase5-agent-control.md`). None: the app can't yet.
 
@@ -75,6 +88,27 @@ pub trait HostedApp {
     fn agent_render(&mut self, _ctx: &Context, _target: &Value) -> Option<Result<(String, AgentRender), String>> {
         None
     }
+}
+
+/// Which of an app's generation commands ran.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Generate {
+    /// Generative Fill: new content in the selection.
+    Fill,
+    /// Generate Image: a new layer over the canvas.
+    Image,
+}
+
+/// What an app hands over to generate from ([`HostedApp::generative_source`]).
+pub struct GenerativeSource {
+    /// Where the result goes back to.
+    pub document: u64,
+    /// x, y, width, height in the document.
+    pub rect: [u32; 4],
+    /// The document as it shows, inside `rect`.
+    pub image: egui::ColorImage,
+    /// The selection inside `rect`, one byte per pixel; `None` without one.
+    pub mask: Option<Vec<u8>>,
 }
 
 /// A picture the app makes for Claude, on a worker thread (premultiplied, transparent where empty).
@@ -158,10 +192,30 @@ macro_rules! hosted_part {
             <$ty>::set_open_appearance(self, handler)
         }
     };
+    (photocraft_generate, $ty:ty) => {
+        fn set_generate(&mut self, mut handler: Box<dyn FnMut(Generate)>) {
+            <$ty>::set_generate(
+                self,
+                Box::new(move |g| {
+                    handler(match g {
+                        photocraft_embed::Generate::Fill => Generate::Fill,
+                        photocraft_embed::Generate::Image => Generate::Image,
+                    })
+                }),
+            )
+        }
+        fn generative_source(&mut self, margin: u32) -> Result<GenerativeSource, String> {
+            let s = <$ty>::generative_source(self, margin)?;
+            Ok(GenerativeSource { document: s.document, rect: s.rect, image: s.image, mask: s.mask })
+        }
+        fn place_generated(&mut self, document: u64, rect: [u32; 4], image: &egui::ColorImage, mask: Option<&[u8]>, name: &str) -> Result<(), String> {
+            <$ty>::place_generated(self, document, rect, image, mask, name)
+        }
+    };
 }
 
 #[cfg(feature = "photocraft")]
-hosted!(photocraft_embed::Embedded, agent, appearance);
+hosted!(photocraft_embed::Embedded, agent, appearance, photocraft_generate);
 #[cfg(feature = "vectorcraft")]
 hosted!(vectorcraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "lightcraft")]

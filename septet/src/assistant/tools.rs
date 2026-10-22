@@ -79,6 +79,7 @@ pub fn definitions() -> Vec<Value> {
         }),
     ];
     tools.extend(super::apps::definitions(&apps));
+    tools.extend(super::images::definitions());
     tools
 }
 
@@ -97,7 +98,8 @@ pub fn system_prompt(workspace: &Path) -> String {
          Your working directory is the workspace {ws}. Create files there (you may write there without asking), then show them \
          with the septet_* tools: septet_open opens a file as a document, septet_place puts it into the open document. Check \
          septet_state to see what is open. Apps by file type: {types}.\n\n\
-         Prefer generating content as code (SVG, HTML, JSON, scripts) and opening it in the right app. Keep replies short; the \
+         Prefer generating content as code (SVG, HTML, JSON, scripts) and opening it in the right app. For photos and \
+         painted pictures, image_generate and image_edit make them locally (slow: a minute or more). Keep replies short; the \
          user watches the apps change.\n\n\
          To change what is open in an app, drive it with the app_* tools: find commands with app_commands \
          (always with a filter), run them with app_execute, read ids and properties with app_inspect, look at the result with \
@@ -126,6 +128,20 @@ pub fn drain(shell: &mut Shell, ctx: &Context) {
         }
         if super::apps::is_app_tool(&call.name) {
             super::apps::call(shell, ctx, call, false);
+            continue;
+        }
+        // Pictures from ComfyUI take a while: off the UI thread, in the apps' queue.
+        if super::images::is_image_tool(&call.name) {
+            let Some(workspace) = shell.assistant.conversation.as_ref().map(|c| c.workspace.clone()) else {
+                let _ = call.reply.send(ToolReply::error("No conversation is running."));
+                continue;
+            };
+            let inputs = if call.name == "image_edit" { allowed_paths(shell, &call.args["images"]) } else { Ok(Vec::new()) };
+            let comfy = shell.generation.comfy.handle();
+            std::thread::spawn(move || {
+                let r = inputs.and_then(|inputs| super::images::run(&comfy, &workspace, &call.name, &call.args, &inputs));
+                let _ = call.reply.send(r.unwrap_or_else(ToolReply::error));
+            });
             continue;
         }
         // File work off the UI thread.

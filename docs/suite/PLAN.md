@@ -336,6 +336,26 @@ Speicher und entlädt nach jedem Bild sofort.
 Reihenfolge: H0 mit Phase A, H1–H5 nach Phase A (vor oder parallel zu Phase B, berührt die neuen Apps kaum).
 Zuerst nur Linux und NVIDIA; Windows und macOS (dort zählt der gemeinsame RAM) danach.
 
+Stand 2026-10-23 (Branch `phase-h`, auf `appearance-lightcraft`): **H1–H5 umgesetzt, echter Lauf offen.**
+- H1 `septet/src/comfy/`: `client.rs` (HTTP, Fortschritt über ComfyUIs WebSocket, ohne neue Abhängigkeit),
+  `launch.rs` (Installation aus Comfy Desktops `installations.json`, `COMFYUI_MAIN` oder den üblichen Ordnern;
+  Start mit `nice`, `oom_score_adj=1000`, `--reserve-vram` aus den offenen Apps, `reserve_for`), `mod.rs` (ein
+  Worker-Thread, eine Warteschlange, Abbrechen, Entladen nach 2 min, eigenes ComfyUI beenden nach 10 min und beim
+  Schließen, fremdes nur `/free` nach jedem Bild, Entladen bei GPU-Fehlern), `dialog.rs` (Fenstermenü › Image
+  Generation…). Speicherprüfung über ComfyUIs `/system_stats` (mind. 4 GB frei, sonst Meldung mit den Belegern
+  aus `nvidia-smi`). Ein cgroup mit Speichergrenze gibt es noch nicht.
+- H2 `workflow.rs`: Qwen Image 2.1 Turbo (8 Schritte, Standard) und Base (40), Erzeugen und Bearbeiten im Code
+  gebaut, Ausgabe über `PreviewImage` (Temp-Ordner, füllt die Ausgaben des Users nicht). Generatives Füllen:
+  Ausschnitt um die Auswahl (ein Drittel Rand), Auswahl flach grau, Anweisung „fill the flat grey area with …“;
+  Photocraft behält das Ergebnis nur in der Auswahl (Ebenenmaske). Import eigener Workflows: noch nicht.
+- H3 Photocraft: Bearbeiten › Generative Fill… / Generate Image… (nur in Septet; auch im Rechtsklickmenü der
+  Auswahlwerkzeuge), `Embedded::generative_source`/`place_generated`, Engine-Modul `generative.rs` (Farbraum/Tiefe
+  des Dokuments, ein Undo-Schritt, Ebenenname = Prompt + Seed). Septet: `generate.rs` (Prompt-Dialog,
+  Fortschritt unten rechts mit Abbrechen). Die anderen Apps: noch nicht.
+- H4 Claude: `image_generate`, `image_edit` (`assistant/images.rs`), in derselben Warteschlange.
+- H5 `comfy/mock.rs` (Schein-ComfyUI) für Unit-Tests und Autotest `generate` (beide grün). Echter Lauf
+  (`generate::real`, `#[ignore]`) scheiterte bisher nur daran, dass Ollama (`gemma4-chatty`) die GPU belegt.
+
 ## Ein Erscheinungsbild für alle Apps (A4)
 
 Heute: Keine App lässt sich von außen umstellen; jede speichert ihr eigenes Theme. Die Shell ist fest dunkel

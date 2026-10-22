@@ -178,8 +178,8 @@ pub const VIEW_MENU: &[Row] = &[
 pub const FILL_SCREEN: &str = "view.fillScreen";
 
 /// Photoshop's selection-tool context menu with an active selection, in its order. Its Generative
-/// Fill row has no PhotoCraft command and is left out. Rows stay visible and grey out exactly like
-/// their menu-bar twins.
+/// Fill row exists only while a host app generates images ([`SELECTION_MENU_GENERATIVE`]). Rows
+/// stay visible and grey out exactly like their menu-bar twins.
 pub const SELECTION_MENU: &[Row] = &[
     Some(("Deselect", "select.deselect")),
     Some(("Select Inverse", "select.inverse")),
@@ -202,6 +202,37 @@ pub const SELECTION_MENU: &[Row] = &[
     Some(("Fill…", "edit.fill")),
     Some(("Stroke…", "edit.stroke")),
     Some(("Content-Aware Fill…", "edit.contentAwareFill")),
+    None,
+    Some(("Last Filter", "filter.lastFilter")),
+    None,
+    Some(("Fade…", "edit.fade")),
+];
+
+/// [`SELECTION_MENU`] with Photoshop's Generative Fill… row after Content-Aware Fill…, while a
+/// host app generates images (`hosted::set_generate`).
+pub const SELECTION_MENU_GENERATIVE: &[Row] = &[
+    Some(("Deselect", "select.deselect")),
+    Some(("Select Inverse", "select.inverse")),
+    Some(("Feather…", "select.modify.feather")),
+    Some(("Select and Mask…", "select.selectAndMask")),
+    None,
+    Some(("Save Selection…", "select.saveSelection")),
+    Some(("Make Work Path…", "select.toWorkPath")),
+    None,
+    Some(("Layer via Copy", "layer.new.layerViaCopy")),
+    Some(("Layer via Cut", "layer.new.layerViaCut")),
+    Some(("New Layer…", "layer.new.layer")),
+    None,
+    Some(("Free Transform", "edit.freeTransform")),
+    Some(("Transform Selection", "select.transformSelection")),
+    Some(("Distort", "edit.transform.distort")),
+    Some(("Perspective", "edit.transform.perspective")),
+    None,
+    Some(("Delete and Fill Selection", "edit.deleteAndFillSelection")),
+    Some(("Fill…", "edit.fill")),
+    Some(("Stroke…", "edit.stroke")),
+    Some(("Content-Aware Fill…", "edit.contentAwareFill")),
+    Some(("Generative Fill…", crate::hosted::GENERATIVE_FILL)),
     None,
     Some(("Last Filter", "filter.lastFilter")),
     None,
@@ -275,7 +306,11 @@ pub fn is_view_tool(tool: Tool) -> bool {
 
 /// The selection tools' rows, with or without an active selection.
 pub fn selection_rows(has_selection: bool) -> &'static [Row] {
-    if has_selection { SELECTION_MENU } else { NO_SELECTION_MENU }
+    match has_selection {
+        true if crate::hosted::generates() => SELECTION_MENU_GENERATIVE,
+        true => SELECTION_MENU,
+        false => NO_SELECTION_MENU,
+    }
 }
 
 /// The rows of an open menu.
@@ -1179,6 +1214,38 @@ mod tests {
         assert!(open(&mut app, &Context::default(), Tool::Lasso, [10.0, 10.0]));
         choose(&mut app, &Context::default(), "select.all");
         assert!(app.session.active().unwrap().doc.selection.is_some());
+    }
+
+    /// While a host generates images the selection menu is Photoshop's with its Generative Fill…
+    /// row, which asks the host; standalone it is [`SELECTION_MENU`].
+    #[test]
+    fn generative_fill_row_asks_the_host_generator() {
+        let gen_fill = crate::hosted::GENERATIVE_FILL;
+        let mut with: Vec<Row> = SELECTION_MENU.to_vec();
+        let at = with.iter().position(|r| r.is_some_and(|(_, id)| id == "edit.contentAwareFill")).unwrap();
+        with.insert(at + 1, Some(("Generative Fill…", gen_fill)));
+        assert_eq!(SELECTION_MENU_GENERATIVE, with.as_slice());
+        crate::hosted::clear_generate();
+        let mut app = app();
+        app.ui.tool = Tool::RectMarquee;
+        app.run("select.rect", json!({"x": 1, "y": 1, "width": 8, "height": 8})).unwrap();
+        assert!(open(&mut app, &Context::default(), Tool::RectMarquee, [10.0, 10.0]));
+        assert_eq!(rows(app.ui.canvas_tool_menu.as_ref().unwrap()), SELECTION_MENU);
+        choose(&mut app, &Context::default(), gen_fill);
+        let asked = std::rc::Rc::new(std::cell::Cell::new(0));
+        let count = asked.clone();
+        crate::hosted::set_generate(Box::new(move |kind| {
+            assert_eq!(kind, crate::hosted::Generate::Fill);
+            count.set(count.get() + 1);
+        }));
+        assert!(open(&mut app, &Context::default(), Tool::RectMarquee, [10.0, 10.0]));
+        let menu = app.ui.canvas_tool_menu.clone().unwrap();
+        assert_eq!(rows(&menu), SELECTION_MENU_GENERATIVE);
+        assert!(entry_enabled(&app, &menu, gen_fill));
+        choose(&mut app, &Context::default(), gen_fill);
+        assert_eq!(asked.get(), 1);
+        assert!(app.ui.canvas_tool_menu.is_none() && !app.ui.status_error);
+        crate::hosted::clear_generate();
     }
 
     #[test]

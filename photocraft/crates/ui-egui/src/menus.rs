@@ -169,6 +169,17 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     if id == "ui.symmetryTransform" {
         return crate::symmetry_ui::begin(app).map(|_| Value::Null);
     }
+    // Generative Fill and Generate Image ask the host's image generator (`hosted::set_generate`).
+    if let Some(kind) = crate::hosted::generate_command(id) {
+        if !generation_enabled(app, kind) {
+            return Err(match kind {
+                crate::hosted::Generate::Fill => "Generative Fill needs a pixel selection: select the area to fill first.".into(),
+                crate::hosted::Generate::Image => "Generate Image needs an open document.".into(),
+            });
+        }
+        crate::hosted::generate(kind);
+        return Ok(json!("host"));
+    }
     if let Some(r) = crate::tool_reset::invoke(app, id, &params) {
         return r;
     }
@@ -709,6 +720,9 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     if id == "ui.symmetryTransform" {
         return crate::symmetry_ui::can_transform(app);
     }
+    if let Some(kind) = crate::hosted::generate_command(id) {
+        return generation_enabled(app, kind);
+    }
     // Draft Pen points can be undone even when the document has no History entries.
     if id == "edit.undo" && app.ui.pen.as_ref().is_some_and(|pen| !pen.knots.is_empty()) {
         return true;
@@ -797,6 +811,15 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         },
         // A targeted layer mask enables what edits it (Invert on an adjustment layer's mask).
         i => app.session.is_enabled_with(i, &app.with_mask_target(i, Value::Null)),
+    }
+}
+
+/// Generative Fill needs a pixel selection in the active document, Generate Image a document.
+fn generation_enabled(app: &PhotocraftApp, kind: crate::hosted::Generate) -> bool {
+    let Some(st) = app.session.active() else { return false };
+    match kind {
+        crate::hosted::Generate::Fill => st.doc.selection.is_some(),
+        crate::hosted::Generate::Image => true,
     }
 }
 
@@ -948,6 +971,7 @@ pub fn is_live(id: &str) -> bool {
         || crate::preset_panels::handles(id)
         || crate::type_panels_ui::handles(id)
         || crate::timeline_ui::handles(id)
+        || crate::hosted::generate_command(id).is_some()
 }
 
 /// Commands outside the catalogue that belong right after a catalogue item: `(id, after)`.
@@ -1014,6 +1038,23 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
             let at = after.or_else(|| items.iter().rposition(|i| i.path.first() == top.as_ref())).map_or(items.len(), |p| p + 1);
             items.insert(at, e);
         }
+    }
+    // A host's image generator: Generative Fill… and Generate Image… right after Content-Aware
+    // Fill, as in Photoshop. Standalone they don't exist.
+    if crate::hosted::generates()
+        && let Some(at) = items.iter().position(|i| i.id == "edit.contentAwareFill")
+    {
+        let path = items.get(at).map(|i| i.path.clone()).unwrap_or_default();
+        let rows = crate::hosted::GENERATE_COMMANDS.iter().map(|&(id, label, _)| MenuItem {
+            id: id.into(),
+            label: label.into(),
+            path: path.clone(),
+            shortcut: None,
+            enabled: is_enabled(app, id),
+            checked: None,
+            color: None,
+        });
+        items.splice(at + 1..at + 1, rows.collect::<Vec<_>>());
     }
     crate::plugin_ui::insert_menu_items(app, &mut items);
     if let Some(mask) = app.session.active().and_then(|s| s.active_layer.and_then(|id| s.doc.layer(id))).and_then(|l| l.mask.as_ref())
@@ -1596,6 +1637,62 @@ mod tests {
         crate::hosted::set_theme(None);
         crate::prefs_ui::tick(&mut app, &ctx);
         assert_eq!(app.ui.theme, own);
+    }
+
+    /// Generative Fill and Generate Image exist only while a host generates images: then they sit
+    /// right after Content-Aware Fill, Generative Fill needs a pixel selection, and running them
+    /// asks the host.
+    #[test]
+    fn generation_commands_exist_only_with_a_host_generator() {
+        use crate::hosted::{GENERATE_IMAGE, GENERATIVE_FILL, Generate};
+        crate::hosted::clear_generate();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        let ctx = egui::Context::default();
+        app.run("file.new", json!({"width": 32, "height": 32})).unwrap();
+        let ids = |app: &PhotocraftApp| menu_items(app).into_iter().map(|i| i.id).collect::<Vec<_>>();
+        // Standalone: no such items, commands or rows.
+        let standalone = ids(&app);
+        assert!(!standalone.iter().any(|i| i == GENERATIVE_FILL || i == GENERATE_IMAGE));
+        assert!(!is_live(GENERATIVE_FILL) && !is_enabled(&app, GENERATIVE_FILL));
+        assert!(invoke(&mut app, &ctx, GENERATIVE_FILL, json!({})).is_err());
+        assert!(invoke(&mut app, &ctx, GENERATE_IMAGE, json!({})).is_err());
+        assert!(!crate::hosted::generate(Generate::Image), "nobody to ask");
+        app.run("select.rect", json!({"x": 2, "y": 2, "width": 8, "height": 8})).unwrap();
+        assert_eq!(crate::canvas_tool_menu::selection_rows(true), crate::canvas_tool_menu::SELECTION_MENU);
+        app.run("select.deselect", json!({})).unwrap();
+
+        let asked = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let log = asked.clone();
+        crate::hosted::set_generate(Box::new(move |kind| log.borrow_mut().push(kind)));
+        let hosted = ids(&app);
+        let at = hosted.iter().position(|i| i == "edit.contentAwareFill").unwrap();
+        assert_eq!(hosted[at + 1..at + 3], [GENERATIVE_FILL, GENERATE_IMAGE]);
+        assert_eq!(hosted.len(), standalone.len() + 2, "nothing else changes");
+        let item = |app: &PhotocraftApp, id: &str| menu_items(app).into_iter().find(|i| i.id == id).unwrap();
+        assert_eq!(
+            (item(&app, GENERATIVE_FILL).label.as_str(), item(&app, GENERATIVE_FILL).path.as_slice()),
+            ("Generative Fill…", ["Edit".to_string()].as_slice())
+        );
+        assert!(is_live(GENERATIVE_FILL));
+        // Without a selection Generative Fill is greyed and doesn't ask; Generate Image does.
+        assert!(!item(&app, GENERATIVE_FILL).enabled && item(&app, GENERATE_IMAGE).enabled);
+        assert!(invoke(&mut app, &ctx, GENERATIVE_FILL, json!({})).unwrap_err().contains("selection"));
+        assert_eq!(invoke(&mut app, &ctx, GENERATE_IMAGE, json!({})).unwrap(), json!("host"));
+        app.run("select.rect", json!({"x": 2, "y": 2, "width": 8, "height": 8})).unwrap();
+        assert!(item(&app, GENERATIVE_FILL).enabled);
+        let history = app.session.active().unwrap().history.entries().len();
+        assert_eq!(invoke(&mut app, &ctx, GENERATIVE_FILL, json!({})).unwrap(), json!("host"));
+        assert_eq!(*asked.borrow(), [Generate::Image, Generate::Fill]);
+        assert_eq!(app.session.active().unwrap().history.entries().len(), history, "asking changes nothing");
+        // The selection tools' context menu has the row after Content-Aware Fill….
+        let rows = crate::canvas_tool_menu::selection_rows(true);
+        let fill = rows.iter().position(|r| r.is_some_and(|(_, id)| id == "edit.contentAwareFill")).unwrap();
+        assert_eq!(rows[fill + 1], Some(("Generative Fill…", GENERATIVE_FILL)));
+        // With no document Generate Image is greyed too.
+        let empty = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        assert!(!is_enabled(&empty, GENERATE_IMAGE) && !is_enabled(&empty, GENERATIVE_FILL));
+        crate::hosted::clear_generate();
+        assert!(!ids(&app).iter().any(|i| i == GENERATIVE_FILL));
     }
 
     #[test]

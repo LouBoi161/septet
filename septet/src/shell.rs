@@ -139,6 +139,8 @@ pub struct Shell {
     open_appearance: Rc<Cell<bool>>,
     pub home: HomeState,
     pub assistant: crate::assistant::Assistant,
+    /// Generative Fill and Generate Image (ComfyUI).
+    pub generation: crate::generate::Generation,
     pub recent: Recent,
     pub bridge: Bridge,
     /// Files an app wanted to open in another program (e.g. Lightcraft's "Edit in"), shared with the
@@ -199,6 +201,7 @@ impl Shell {
             open_appearance: Rc::new(Cell::new(false)),
             home: HomeState::default(),
             assistant: crate::assistant::Assistant::new(ctx),
+            generation: crate::generate::Generation::new(ctx),
             recent: Recent::load(),
             bridge: Bridge::new(ctx),
             external: Rc::new(RefCell::new(Vec::new())),
@@ -402,6 +405,7 @@ impl Shell {
         if self.open_appearance.take() {
             self.appearance_dialog = Some(self.focused_window(ctx));
         }
+        crate::generate::logic(self, ctx);
         let wanted: Vec<AppKind> = self.open_app.borrow_mut().drain(..).collect();
         for kind in wanted {
             let window = self.focused_window(ctx);
@@ -584,6 +588,7 @@ impl Shell {
         if self.assistant.dialog == Some(viewport) {
             crate::assistant::settings::dialog(&mut self.assistant, &ctx);
         }
+        crate::generate::window_ui(self, &ctx, viewport);
         self.bridge.window_ui(&ctx, viewport);
     }
 
@@ -687,6 +692,8 @@ impl Shell {
         }
         let open_appearance = self.open_appearance.clone();
         app.set_open_appearance(Box::new(move || open_appearance.set(true)));
+        let generate = self.generation.requests.clone();
+        app.set_generate(Box::new(move |g| generate.borrow_mut().push((kind, g))));
         let external = self.external.clone();
         let open_app = self.open_app.clone();
         app.set_open_app(Box::new(move |name| {
@@ -1199,6 +1206,10 @@ impl Shell {
             rs.device.destroy();
         }
         let events = self.gpu.take();
+        if !events.is_empty() {
+            // Out of graphics memory, or the device is gone: ComfyUI gives back what it holds.
+            self.generation.comfy.unload();
+        }
         for event in &events {
             for slot in self.apps.values() {
                 slot.borrow_mut().with_app(ctx, |a| a.gpu_failed(event.lost, &event.message));
@@ -1251,6 +1262,7 @@ impl Shell {
             instance.release();
         }
         self.assistant.exit();
+        self.generation.comfy.shutdown();
         for slot in self.apps.values() {
             if let Ok(mut s) = slot.try_borrow_mut() {
                 s.app.app().on_exit();
