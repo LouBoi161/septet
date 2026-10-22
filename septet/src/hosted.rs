@@ -160,7 +160,7 @@ hosted!(photocraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "vectorcraft")]
 hosted!(vectorcraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "lightcraft")]
-hosted!(lightcraft_embed::Embedded, agent);
+hosted!(lightcraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "designcraft")]
 hosted!(designcraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "pdfcraft")]

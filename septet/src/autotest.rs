@@ -233,13 +233,22 @@ impl Autotest {
             // opens Septet's dialog instead.
             Ok("appearance") => {
                 use crate::appearance::Theme;
-                let apps = [AppKind::Photocraft, AppKind::Vectorcraft, AppKind::Designcraft, AppKind::Pdfcraft, AppKind::Filmcraft, AppKind::Effectcraft];
+                let apps = [
+                    AppKind::Photocraft,
+                    AppKind::Vectorcraft,
+                    AppKind::Lightcraft,
+                    AppKind::Designcraft,
+                    AppKind::Pdfcraft,
+                    AppKind::Filmcraft,
+                    AppKind::Effectcraft,
+                ];
                 // Each app's own theme command opens Septet's dialog while Septet sets the look. (Claude
                 // reaches only these apps' theme commands; the others' are tested in their crates.)
                 let commands = [
                     (AppKind::Vectorcraft, "window.brightness", serde_json::json!({"brightness": "light"})),
                     (AppKind::Designcraft, "window.brightness", serde_json::json!({"brightness": "light"})),
                     (AppKind::Filmcraft, "view.theme.light", serde_json::json!({})),
+                    (AppKind::Lightcraft, "view.theme", serde_json::json!({"theme": "paper"})),
                 ];
                 let short = |k: AppKind| k.name().to_ascii_lowercase();
                 let shot = |name: String| Step::Shot(Box::leak(name.into_boxed_str()));

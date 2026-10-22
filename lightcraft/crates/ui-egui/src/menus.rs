@@ -477,6 +477,11 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             app.ui.sidebar = Default::default();
             Ok(json!({"sidebar": app.ui.sidebar}))
         }
+        // while the host sets the theme, its appearance settings are the place to change it
+        "view.appearance" | "view.theme" if crate::hosted::theme().is_some() => {
+            crate::hosted::open_appearance();
+            Ok(appearance_json(app))
+        }
         "view.appearance" => appearance_command(app, p),
         "view.theme" => theme_command(app, p),
         "library.selectOnlyActive" => {
