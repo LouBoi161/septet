@@ -1,7 +1,8 @@
 # Plan: Aus sieben Apps werden zwölf
 
-Stand: 2026-10-14. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
-erledigt (MR !2 am 2026-10-14 gemergt), dritter Abgleich auf `upstream/2026-10-14`, **Phase A läuft** (Branch `phase-a`: A1–A5 und H0 fertig (A4 ohne Lightcraft und hohen Kontrast)); ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
+Stand: 2026-10-22. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
+erledigt (MR !2 am 2026-10-14 gemergt), **Phase A gemergt** (MR !3 am 2026-10-22: A1–A5 und H0 fertig, von A4
+fehlen Lightcraft und hoher Kontrast), dritter Abgleich gemergt (MR !4 am 2026-10-22); ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
 (`storytold/wordcraft`, `deckcraft`, `gridcraft`, `cadcraft`, `soundcraft`, `craft-launcher`, alle v0.4.0 vom
 2026-10-10) und des Septet-Codes.
 
@@ -126,7 +127,8 @@ Erledigt 2026-10-10, gemergt 2026-10-13 (MR !1). Upstream war da schon weiter (P
 v0.10.0, Lightcraft/Designcraft/Pdfcraft v0.7.1, Filmcraft v0.7.2, Effectcraft v0.9.2; die fünf neuen Apps
 v0.6.x). Vor Phase A deshalb ein zweiter Abgleich mit `scripts/sync-upstream.sh all`: erledigt, gemergt
 2026-10-14 (MR !2; Photocraft v0.8.2, Vectorcraft v0.10.0, Effectcraft v0.9.2, Filmcraft v0.7.2, die übrigen v0.7.1).
-Dritter Abgleich am 2026-10-14 auf Basis von `phase-a` (Branch `upstream/2026-10-14`, Draft-MR nach MR !3):
+Dritter Abgleich am 2026-10-14 auf Basis von `phase-a` (Branch `upstream/2026-10-14`, MR !4, gemergt 2026-10-22
+nach MR !3; die GPU-Tests von Lightcraft und Photocraft am 2026-10-22 bei freier GPU nachgeholt, alle grün):
 Photocraft v0.9.0, Vectorcraft v0.11.0, Effectcraft v0.10.0, die übrigen v0.8.0. Dabei: Vectorcraft nutzt
 hayro 0.8, daher Pdfcrafts JBIG2-Patch auf hayro-jbig2 0.3.1 übertragen (sonst ungepatcht für alle Apps).
 
@@ -140,7 +142,7 @@ hayro 0.8, daher Pdfcrafts JBIG2-Patch auf hayro-jbig2 0.3.1 übertragen (sonst 
 | A4 Ein Erscheinungsbild | siehe eigener Abschnitt | M (dazu L für Lightcraft und CADCraft) |
 | A5 CI für Pushes und MRs | Check-Job pro App, Cache | S |
 
-Stand 2026-10-14 (Branch `phase-a`, MR !3 als Draft): **A1–A5 und H0 erledigt**; von A4 fehlen nur Lightcraft
+Stand 2026-10-22 (MR !3 auf `main` gemergt): **A1–A5 und H0 erledigt**; von A4 fehlen nur Lightcraft
 (helle Palette fehlt) und hoher Kontrast.
 - A1: Crate `shared/craft-fonts` bettet jede Schrift einmal ein; die Apps verweisen mit dem Feature
   `shared-craft-fonts` darauf (Adresse, nicht Wert: sonst kopiert der Compiler die Bytes). Gemessen: jede Schrift
