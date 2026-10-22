@@ -159,6 +159,11 @@ impl Embedded {
         pdfcraft_ui_egui::hosted::set_theme(level.map(|l| if l >= 2 { ThemeKind::Light } else { ThemeKind::Dark }));
     }
 
+    /// More contrast (secondary text, borders, icons), as Septet's Appearance asks; never saved.
+    pub fn set_contrast(&mut self, more: bool) {
+        pdfcraft_ui_egui::hosted::set_contrast(more);
+    }
+
     /// While Septet sets the theme, PdfCraft's theme commands open Septet's settings.
     pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
         pdfcraft_ui_egui::hosted::set_open_appearance(handler);

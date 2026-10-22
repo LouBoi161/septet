@@ -274,6 +274,11 @@ impl Embedded {
         photocraft_ui_egui::hosted::set_theme(level.map(|l| PRO[usize::from(l.min(3))]));
     }
 
+    /// More contrast (secondary text, borders, icons), as Septet's Appearance asks; never saved.
+    pub fn set_contrast(&mut self, more: bool) {
+        photocraft_ui_egui::hosted::set_contrast(more);
+    }
+
     /// While Septet sets the theme, PhotoCraft's theme commands open Septet's settings.
     pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
         photocraft_ui_egui::hosted::set_open_appearance(handler);

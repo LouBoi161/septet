@@ -83,6 +83,8 @@ struct Applied {
     brightness: Brightness,
     /// The host's accent colour (`hosted::set_accent`).
     accent: Option<egui::Color32>,
+    /// The host asks for more contrast (`hosted::set_contrast`).
+    contrast: bool,
     /// User Interface › Canvas Color, unless it matches the interface brightness.
     canvas: Option<egui::Color32>,
     threads: i32,
@@ -114,6 +116,7 @@ pub fn apply_runtime(app: &mut VectorcraftApp, ctx: &egui::Context) {
     let want = Applied {
         brightness: crate::hosted::brightness().unwrap_or(app.ui.brightness),
         accent: crate::hosted::accent(),
+        contrast: crate::hosted::contrast(),
         canvas: canvas_color(&p.canvas_color),
         threads: p.render_threads,
         tool_tips: p.show_tool_tips,

@@ -198,6 +198,12 @@ impl Embedded {
         self.ctx.request_repaint();
     }
 
+    /// More contrast (secondary text, borders, icons), as Septet's Appearance asks; never saved.
+    pub fn set_contrast(&mut self, more: bool) {
+        lightcraft_ui_egui::hosted::set_contrast(more);
+        self.ctx.request_repaint();
+    }
+
     /// While Septet sets the theme, the app's appearance commands and settings open Septet's.
     pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
         lightcraft_ui_egui::hosted::set_open_appearance(handler);

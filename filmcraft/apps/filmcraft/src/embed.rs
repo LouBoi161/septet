@@ -307,6 +307,11 @@ impl Embedded {
         }));
     }
 
+    /// More contrast (secondary text, borders, icons), as Septet's Appearance asks; never saved.
+    pub fn set_contrast(&mut self, more: bool) {
+        filmcraft_ui_egui::hosted::set_contrast(more);
+    }
+
     /// While Septet sets the theme, FilmCraft's theme commands open Septet's settings.
     pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
         filmcraft_ui_egui::hosted::set_open_appearance(handler);

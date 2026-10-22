@@ -51,6 +51,8 @@ pub trait HostedApp {
     /// Septet's brightness (`appearance.rs`), 0 (darkest) to 3 (lightest), and accent colour:
     /// shown instead of the app's own and never saved as them. `None` gives the app its own back.
     fn set_appearance(&mut self, _level: Option<u8>, _accent: Option<egui::Color32>) {}
+    /// More contrast (secondary text, borders, icons), as Septet's Appearance asks; never saved.
+    fn set_contrast(&mut self, _more: bool) {}
     /// While Septet sets the look, the app's theme commands open Septet's Appearance dialog
     /// through this.
     fn set_open_appearance(&mut self, _handler: Box<dyn FnMut()>) {}
@@ -148,6 +150,9 @@ macro_rules! hosted_part {
     (appearance, $ty:ty) => {
         fn set_appearance(&mut self, level: Option<u8>, accent: Option<egui::Color32>) {
             <$ty>::set_appearance(self, level, accent)
+        }
+        fn set_contrast(&mut self, more: bool) {
+            <$ty>::set_contrast(self, more)
         }
         fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
             <$ty>::set_open_appearance(self, handler)
