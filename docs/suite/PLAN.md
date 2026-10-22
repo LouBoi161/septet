@@ -1,8 +1,8 @@
 # Plan: Aus sieben Apps werden zwölf
 
-Stand: 2026-10-22. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
-erledigt (MR !2 am 2026-10-14 gemergt), **Phase A gemergt** (MR !3 am 2026-10-22: A1–A5 und H0 fertig, von A4
-fehlen Lightcraft und hoher Kontrast), dritter Abgleich gemergt (MR !4 am 2026-10-22); ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
+Stand: 2026-10-23. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
+erledigt (MR !2 am 2026-10-14 gemergt), **Phase A gemergt** (MR !3 am 2026-10-22: A1–A5 und H0 fertig; der Rest von A4,
+Lightcraft und hoher Kontrast, liegt seit 2026-10-23 auf Branch `appearance-lightcraft`), dritter Abgleich gemergt (MR !4 am 2026-10-22); ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
 (`storytold/wordcraft`, `deckcraft`, `gridcraft`, `cadcraft`, `soundcraft`, `craft-launcher`, alle v0.4.0 vom
 2026-10-10) und des Septet-Codes.
 
@@ -142,8 +142,8 @@ hayro 0.8, daher Pdfcrafts JBIG2-Patch auf hayro-jbig2 0.3.1 übertragen (sonst 
 | A4 Ein Erscheinungsbild | siehe eigener Abschnitt | M (dazu L für Lightcraft und CADCraft) |
 | A5 CI für Pushes und MRs | Check-Job pro App, Cache | S |
 
-Stand 2026-10-22 (MR !3 auf `main` gemergt): **A1–A5 und H0 erledigt**; von A4 fehlen nur Lightcraft
-(helle Palette fehlt) und hoher Kontrast.
+Stand 2026-10-22 (MR !3 auf `main` gemergt): **A1–A5 und H0 erledigt**; von A4 fehlten nur Lightcraft
+und hoher Kontrast, beides seit 2026-10-23 auf Branch `appearance-lightcraft` (siehe A4).
 - A1: Crate `shared/craft-fonts` bettet jede Schrift einmal ein; die Apps verweisen mit dem Feature
   `shared-craft-fonts` darauf (Adresse, nicht Wert: sonst kopiert der Compiler die Bytes). Gemessen: jede Schrift
   einmal im Binary statt sechsmal; Test `fonts::tests::craft_fonts_are_embedded_once`.
@@ -368,6 +368,12 @@ Abweichungen vom Plan: statt eines gemeinsamen Typs bekommt jede App Stufe (0–
 Akzent (`Option<egui::Color32>`) einzeln, damit die Apps keine neue Abhängigkeit brauchen; Standard ist „Dark“
 und der Akzent jeder App. Die Akzente sind eine feste Auswahl statt eines Farbwählers (Kontrast zu weißem
 Text). Offen: hoher Kontrast (Designcraft und Filmcraft haben ihn schon, die anderen nicht), Lightcraft (L).
+
+Stand 2026-10-23 (Branch `appearance-lightcraft`): **A4 fertig.** Lightcraft brauchte keine eigene helle
+Palette mehr, Upstream v0.8.0 hat Midnight, Charcoal, Silver und Paper (Stufen 0–3). Hoher Kontrast ist kein
+fünftes Theme, sondern ein Schalter „More contrast“ zu jeder Stufe und jedem Akzent (`HostedApp::set_contrast`):
+Nebentext, Rahmen und Icons rücken zur Textfarbe hin; Filmcraft zeigt dafür seinen eigenen Barrierefreiheits-
+Kontrast. Autotest `appearance` mit allen 7 Apps.
 
 ## Namensideen für die Suite
 
