@@ -6,7 +6,7 @@
 //! off into a new one. The first window is eframe's root viewport; the others are immediate
 //! viewports rendered from the root's frame.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -129,6 +129,14 @@ pub struct Shell {
     pub confirm: Option<ConfirmClose>,
     /// The About dialog, in this window.
     pub about: Option<ViewportId>,
+    /// The Appearance dialog, in this window.
+    pub appearance_dialog: Option<ViewportId>,
+    pub appearance: crate::appearance::Appearance,
+    desktop: crate::appearance::Desktop,
+    /// The level, accent and UI size last handed to the shell and the apps (`None`: not yet).
+    applied_appearance: Option<(Option<u8>, Option<egui::Color32>, f32)>,
+    /// An app's theme command asked for the Appearance dialog.
+    open_appearance: Rc<Cell<bool>>,
     pub home: HomeState,
     pub assistant: crate::assistant::Assistant,
     pub recent: Recent,
@@ -149,6 +157,11 @@ pub struct Shell {
     /// Launches handed to this Septet by later ones (see `instance.rs`).
     pub instance: Option<crate::instance::Running>,
     quit_requested: bool,
+    /// The handlers on the shared GPU device (`gpu.rs`), set once there is a device.
+    gpu: crate::gpu::GpuWatch,
+    gpu_watched: bool,
+    /// Autotest: destroy the device on the next frame.
+    pub lose_gpu: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -161,13 +174,8 @@ pub struct OpenRequest {
     pub place: Option<Option<Pos2>>,
 }
 
-/// Apps that ask about unsaved work themselves when their window closes.
-fn has_own_close_prompt(kind: AppKind) -> bool {
-    !matches!(kind, AppKind::Designcraft | AppKind::Filmcraft)
-}
-
 impl Shell {
-    pub fn new(ctx: &Context, router: Router, files: Vec<PathBuf>, restore: Option<crate::recent::Session>) -> Self {
+    pub fn new(ctx: &Context, router: Router, files: Vec<PathBuf>, restore: Option<crate::recent::Session>, appearance: crate::appearance::Appearance) -> Self {
         router.lock().windows.insert(ViewportId::ROOT);
         let mut shell = Shell {
             router,
@@ -184,6 +192,11 @@ impl Shell {
             opens: Vec::new(),
             confirm: None,
             about: None,
+            appearance_dialog: None,
+            appearance,
+            desktop: crate::appearance::Desktop::new(),
+            applied_appearance: None,
+            open_appearance: Rc::new(Cell::new(false)),
             home: HomeState::default(),
             assistant: crate::assistant::Assistant::new(ctx),
             recent: Recent::load(),
@@ -196,6 +209,9 @@ impl Shell {
             open_app: Rc::new(RefCell::new(Vec::new())),
             instance: None,
             quit_requested: false,
+            gpu: Default::default(),
+            gpu_watched: false,
+            lose_gpu: false,
         };
         let root = shell.new_window(ViewportId::ROOT, ViewportBuilder::default());
         shell.windows.push(root);
@@ -268,9 +284,10 @@ impl Shell {
             let active = saved.active;
             let mut kinds: Vec<TabKind> = Vec::new();
             for k in saved.tabs {
-                // One tab per app, also across the windows restored before this one.
+                // One tab per app, also across the windows restored before this one. Apps this build
+                // doesn't have (left out at build time, or unknown to it) are skipped.
                 if let TabKind::App(kind) = k
-                    && (kinds.contains(&k) || self.find_app_tab(kind).is_some())
+                    && (kinds.contains(&k) || self.find_app_tab(kind).is_some() || !kind.installed())
                 {
                     continue;
                 }
@@ -312,6 +329,7 @@ impl Shell {
     /// Router traffic and closing, once per frame before any window is drawn.
     pub fn logic(&mut self, ctx: &Context) {
         self.frame_no += 1;
+        self.sync_appearance(ctx);
         let (os_close, delivered, requests) = {
             let mut sh = self.router.lock();
             (std::mem::take(&mut sh.os_close), std::mem::take(&mut sh.close_delivered), std::mem::take(&mut sh.app_requests))
@@ -381,6 +399,9 @@ impl Shell {
                 ctx.request_repaint_after(std::time::Duration::from_millis(30));
             }
         }
+        if self.open_appearance.take() {
+            self.appearance_dialog = Some(self.focused_window(ctx));
+        }
         let wanted: Vec<AppKind> = self.open_app.borrow_mut().drain(..).collect();
         for kind in wanted {
             let window = self.focused_window(ctx);
@@ -416,6 +437,7 @@ impl Shell {
     /// Draw every window. The root window draws into `ui`; the others are immediate viewports.
     pub fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.watch_gpu(&ctx, frame);
         self.apply_actions(&ctx);
         self.process_opens(&ctx, frame);
         self.apply_actions(&ctx);
@@ -440,6 +462,12 @@ impl Shell {
         crate::content::finish(self, &ctx);
         self.sync_titles();
         self.apply_actions(&ctx);
+        // A device lost during this frame panics egui-wgpu as it draws the frame: poll now, so the
+        // loss is reported (and handled) first.
+        if let Some(rs) = frame.wgpu_render_state() {
+            let _ = rs.device.poll(eframe::egui_wgpu::wgpu::PollType::Poll);
+        }
+        self.watch_gpu(&ctx, frame);
     }
 
     fn window_ui(&mut self, wi: usize, ui: &mut Ui, frame: &mut eframe::Frame) {
@@ -546,6 +574,13 @@ impl Shell {
                 self.about = None;
             }
         }
+        if self.appearance_dialog == Some(viewport) {
+            let mut open = true;
+            crate::appearance::dialog(&mut open, &ctx, &mut self.appearance);
+            if !open {
+                self.appearance_dialog = None;
+            }
+        }
         if self.assistant.dialog == Some(viewport) {
             crate::assistant::settings::dialog(&mut self.assistant, &ctx);
         }
@@ -583,7 +618,7 @@ impl Shell {
         }
         let Some(at) = crate::pointer::in_viewport(ctx) else { return };
         let take = || ctx.input_mut(|i| i.raw.dropped_files.clear());
-        if matches!(slot.kind, AppKind::Photocraft | AppKind::Effectcraft | AppKind::Designcraft | AppKind::Filmcraft) {
+        if slot.kind.spec().drops_at_pointer {
             take();
             for p in &dropped {
                 self.recent.add(p, slot.kind);
@@ -611,9 +646,9 @@ impl Shell {
         if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL | Modifiers::SHIFT, Key::T))) {
             self.actions.push(Action::NewTab { window: viewport, kind: TabKind::Home });
         }
-        // Ctrl+Alt+1…7: the apps, in Home's order.
-        let keys = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7];
-        for (key, kind) in keys.into_iter().zip(AppKind::ALL) {
+        // Ctrl+Alt+1…9: the apps, in Home's order.
+        let keys = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9];
+        for (key, kind) in keys.into_iter().zip(AppKind::all()) {
             if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(ctrl_alt, key))) {
                 self.actions.push(Action::NewTab { window: viewport, kind: TabKind::App(kind) });
             }
@@ -639,12 +674,22 @@ impl Shell {
         }
         iso.swap(ctx);
         let render_state = frame.wgpu_render_state().cloned();
-        crate::hosted::set_data_root(kind, crate::recent::portable_root().map(|root| root.join(kind.name())));
-        let mut app = crate::hosted::create(kind, ctx, render_state.as_ref(), frame.storage());
+        let entry = &kind.spec().entry;
+        (entry.set_data_root)(crate::recent::portable_root().map(|root| root.join(kind.name())));
+        let mut app = (entry.create)(ctx, render_state.as_ref(), frame.storage());
+        // Photocraft, Filmcraft and Effectcraft set handlers of their own on the device: ours again.
+        if let Some(rs) = &render_state {
+            self.gpu.install(&rs.device, ctx);
+        }
+        if let Some((level, accent, _)) = self.applied_appearance {
+            app.set_appearance(level, accent);
+        }
+        let open_appearance = self.open_appearance.clone();
+        app.set_open_appearance(Box::new(move || open_appearance.set(true)));
         let external = self.external.clone();
         let open_app = self.open_app.clone();
         app.set_open_app(Box::new(move |name| {
-            if let Some(kind) = AppKind::ALL.into_iter().find(|k| k.name().eq_ignore_ascii_case(name)) {
+            if let Some(kind) = AppKind::by_name(name) {
                 open_app.borrow_mut().push(kind);
             }
         }));
@@ -662,6 +707,26 @@ impl Shell {
         let slot = Rc::new(RefCell::new(slot));
         self.apps.insert(kind, slot.clone());
         slot
+    }
+
+    /// Hand the appearance's level to the shell and every running app, and its UI size to egui,
+    /// when they change (the desktop's preference may, too).
+    fn sync_appearance(&mut self, ctx: &Context) {
+        let following = self.appearance.theme == crate::appearance::Theme::System;
+        let level = self.appearance.level(self.desktop.dark(ctx, following));
+        let accent = self.appearance.accent();
+        let scale = self.appearance.ui_scale();
+        let previous = self.applied_appearance.replace((level, accent, scale));
+        if previous.is_none_or(|(l, a, _)| (l, a) != (level, accent)) {
+            crate::appearance::apply_to_shell(ctx, level, accent);
+            for slot in self.apps.values() {
+                slot.borrow_mut().with_app(ctx, |app| app.set_appearance(level, accent));
+            }
+            ctx.request_repaint();
+        }
+        if previous.is_none_or(|(_, _, s)| s != scale) {
+            ctx.set_zoom_factor(scale);
+        }
     }
 
     fn process_opens(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
@@ -782,7 +847,7 @@ impl Shell {
         if matches!(s.close, CloseState::Requested | CloseState::Delivered) {
             return;
         }
-        if has_own_close_prompt(kind) {
+        if kind.spec().own_close_prompt {
             s.close = CloseState::Requested;
         } else if s.app.has_unsaved_changes() {
             if let Some((wi, ti)) = self.find_app_tab(kind) {
@@ -1113,9 +1178,59 @@ impl Shell {
         Vec2::new(ctx_size.max(900.0), (ctx_size * 0.62).max(600.0))
     }
 
+    /// The shared GPU device's errors go to every running app, which falls back to its CPU path.
+    /// A lost device can't be replaced: every app writes its recovery data, the session is saved
+    /// and Septet starts again (`gpu.rs`). Called at the start and the end of every frame.
+    fn watch_gpu(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
+        if !self.gpu_watched
+            && let Some(rs) = frame.wgpu_render_state()
+        {
+            self.gpu.install(&rs.device, ctx);
+            self.gpu_watched = true;
+        }
+        if std::mem::take(&mut self.lose_gpu)
+            && let Some(rs) = frame.wgpu_render_state()
+        {
+            rs.device.destroy();
+        }
+        let events = self.gpu.take();
+        for event in &events {
+            for slot in self.apps.values() {
+                slot.borrow_mut().with_app(ctx, |a| a.gpu_failed(event.lost, &event.message));
+            }
+        }
+        let Some(lost) = events.iter().find(|e| e.lost) else { return };
+        let mut unsaved = Vec::new();
+        for (kind, slot) in &self.apps {
+            if !slot.borrow_mut().with_app(ctx, |a| a.save_recovery()) {
+                unsaved.push(kind.name());
+            }
+        }
+        if let Some(storage) = frame.storage_mut() {
+            self.persist(storage);
+            storage.flush();
+        }
+        if let Some(instance) = &self.instance {
+            instance.release();
+        }
+        eprintln!("graphics device lost ({}): recovery data written, unsaved in: {unsaved:?}; restarting", lost.message);
+        if !crate::gpu::restart() {
+            let mut text = format!("Septet lost its graphics device ({}) and has to close.", lost.message);
+            if unsaved.is_empty() {
+                text.push_str(" Your unsaved changes were kept: the apps offer them when you start Septet again.");
+            } else {
+                text.push_str(&format!(" Recovery data couldn't be written for: {}.", unsaved.join(", ")));
+            }
+            rfd::MessageDialog::new().set_level(rfd::MessageLevel::Error).set_title("Septet").set_description(text).show();
+        }
+        // Not a normal quit: the apps' exit handlers would clear the recovery data just written.
+        std::process::exit(0);
+    }
+
     pub fn persist(&self, storage: &mut dyn eframe::Storage) {
         let session = self.quit_session.clone().unwrap_or_else(|| self.session());
         eframe::set_value(storage, "septet/session", &session);
+        eframe::set_value(storage, crate::appearance::STORAGE_KEY, &self.appearance);
         for (kind, slot) in &self.apps {
             if let Ok(mut s) = slot.try_borrow_mut() {
                 s.app.app().save(storage);

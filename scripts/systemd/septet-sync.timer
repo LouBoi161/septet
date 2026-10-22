@@ -1,0 +1,11 @@
+# Twice a week at night (scripts/systemd/septet-sync.service). A night the computer is off is skipped,
+# not made up after the next start.
+[Unit]
+Description=Septet: upstream sync twice a week
+
+[Timer]
+OnCalendar=Tue,Fri *-*-* 03:17
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

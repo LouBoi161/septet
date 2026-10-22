@@ -7,19 +7,17 @@ use serde_json::{Value, json};
 
 use super::mcp::{ToolCall, ToolReply};
 use super::{Approval, approval_key};
-use crate::kinds::AppKind;
+use crate::kinds::{APPS, AppKind};
 use crate::shell::{OpenRequest, Shell, TabKind};
 
 fn app_names() -> Vec<String> {
-    AppKind::ALL.iter().map(|k| k.name().to_ascii_lowercase()).collect()
+    AppKind::all().map(|k| k.name().to_ascii_lowercase()).collect()
 }
 
 pub fn app_from(v: &Value) -> Result<Option<AppKind>, String> {
     match v.as_str() {
         None => Ok(None),
-        Some(name) => AppKind::ALL
-            .into_iter()
-            .find(|k| k.name().eq_ignore_ascii_case(name))
+        Some(name) => AppKind::by_name(name)
             .map(Some)
             .ok_or_else(|| format!("Unknown app {name:?}; use one of {}", app_names().join(", "))),
     }
@@ -27,7 +25,7 @@ pub fn app_from(v: &Value) -> Result<Option<AppKind>, String> {
 
 /// Which files each app opens, for the tool descriptions and the system prompt.
 pub fn file_types() -> String {
-    AppKind::ALL.iter().map(|k| format!("{}: {}", k.name(), k.extensions().join(", "))).collect::<Vec<_>>().join("; ")
+    AppKind::all().map(|k| format!("{}: {}", k.name(), k.extensions().join(", "))).collect::<Vec<_>>().join("; ")
 }
 
 /// The `tools/list` answer.
@@ -86,10 +84,16 @@ pub fn definitions() -> Vec<Value> {
 
 /// Added to Claude Code's system prompt for every conversation.
 pub fn system_prompt(workspace: &Path) -> String {
+    let apps: Vec<String> = APPS.iter().map(|a| format!("{} ({})", a.name, a.role)).collect();
+    let apps = match apps.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        _ => apps.join(""),
+    };
+    let skills = APPS.iter().map(|a| format!("septet:{}", a.name.to_ascii_lowercase())).collect::<Vec<_>>().join(", ");
+    let limits = APPS.iter().map(|a| a.limits).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("; ");
     format!(
-        "You are working inside Septet, a desktop suite of seven creative apps shown as tabs: Photocraft (photo editing), \
-         Vectorcraft (vector illustration), Lightcraft (raw photo library), Designcraft (page layout), Pdfcraft (PDF editing), \
-         Filmcraft (video editing) and Effectcraft (motion graphics). The user sees Septet next to this chat.\n\n\
+        "You are working inside Septet, a desktop suite of creative apps shown as tabs: {apps}. The user sees Septet next to \
+         this chat.\n\n\
          Your working directory is the workspace {ws}. Create files there (you may write there without asking), then show them \
          with the septet_* tools: septet_open opens a file as a document, septet_place puts it into the open document. Check \
          septet_state to see what is open. Apps by file type: {types}.\n\n\
@@ -98,15 +102,11 @@ pub fn system_prompt(workspace: &Path) -> String {
          To change what is open in an app, drive it with the app_* tools: find commands with app_commands \
          (always with a filter), run them with app_execute, read ids and properties with app_inspect, look at the result with \
          app_render (the whole artboard or page, or one object or layer alone) and take mistakes back with app_undo. Check your \
-         work with app_render before you say it is done. Before driving an app, load its skill (septet:photocraft, \
-         septet:vectorcraft, septet:lightcraft, septet:designcraft, septet:pdfcraft, septet:filmcraft, septet:effectcraft).\n\n\
+         work with app_render before you say it is done. Before driving an app, load its skill ({skills}).\n\n\
          Septet's skills (septet:*) explain how to do creative work with these apps: load septet:septet-apps with the Skill tool \
          at the start of a creative task, then the skill for the job (svg-graphics, logo-and-icons, typography, color, \
          print-and-pdf, image-editing, video-editing, motion-lottie). Skills named my:* are the user's own; use them when they fit.\n\n\
-         Know the limits: Photocraft opens no SVG or PDF; Designcraft opens only .designcraft and .idml documents (make a new \
-         layout with app_execute `file.new`); in Filmcraft, opening or placing media only adds it to the bin: put \
-         clips on the timeline with app_execute (`timeline.place`), or build whole edits as OTIO/FCPXML/EDL; Effectcraft imports Lottie only with app_execute `file.importLottie`, not \
-         through septet_open; Vectorcraft drops most SVG filters and uses installed fonts only, so outline text you want exact.",
+         Know the limits: {limits}.",
         ws = workspace.display(),
         types = file_types(),
     )

@@ -141,6 +141,27 @@ impl Embedded {
         self.app.session.is_dirty()
     }
 
+    /// Septet's handlers on the shared GPU device saw an error or its loss (it sets them for every
+    /// app: wgpu keeps one of each): the monitors composite on the CPU from the next frame, as when
+    /// FilmCraft's own handler sees one.
+    pub fn gpu_failed(&mut self, _lost: bool, message: &str) {
+        if let Some(gpu) = &self.app.gpu {
+            log::error!("GPU error, switching to the CPU compositor: {message}");
+            gpu.broken.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.ctx.request_repaint();
+        }
+    }
+
+    /// Septet is about to restart (it lost its graphics device): bring the recovery journal up to
+    /// date and wait for it, so the next start offers the unsaved changes.
+    pub fn save_recovery(&mut self) -> bool {
+        self.app.session.sync_persistence();
+        if let Some(persistence) = &self.app.session.persistence {
+            persistence.flush();
+        }
+        true
+    }
+
     /// As on the command line: open the first project (`.fcproj`), import the other files into the
     /// project.
     pub fn open_paths(&mut self, paths: &[PathBuf]) {
@@ -272,6 +293,23 @@ impl Embedded {
         let provider = s.media.provider(s.project.clone(), s.services.clone());
         let img = filmcraft_engine::render::render_item(&s.project, item, s.state.source_playhead, 1.0, &provider)?;
         write_still(&img, &file_stem(it), accept, dir)
+    }
+
+    /// Septet's brightness, 0 (darkest) to 3 (lightest): Darkest, Dark, and Light for both light
+    /// levels, instead of FilmCraft's own until `None`. It isn't saved as FilmCraft's.
+    pub fn set_appearance(&mut self, level: Option<u8>, accent: Option<egui::Color32>) {
+        filmcraft_ui_egui::hosted::set_accent(accent);
+        use filmcraft_ui_egui::theme::ThemeKind;
+        filmcraft_ui_egui::hosted::set_theme(level.map(|l| match l {
+            0 => ThemeKind::Dark,
+            1 => ThemeKind::Medium,
+            _ => ThemeKind::Light,
+        }));
+    }
+
+    /// While Septet sets the theme, FilmCraft's theme commands open Septet's settings.
+    pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
+        filmcraft_ui_egui::hosted::set_open_appearance(handler);
     }
 
     /// When hosted, links to a sibling app would call `handler(name)`; FilmCraft has none (its Help

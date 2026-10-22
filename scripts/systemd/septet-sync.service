@@ -1,0 +1,16 @@
+# Septet's automatic upstream sync (scripts/sync-nightly.sh). Installed as a user unit:
+#   ln -s "$PWD"/scripts/systemd/septet-sync.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now septet-sync.timer
+# Run it now: systemctl --user start septet-sync.service; logs in ~/.cache/septet-sync/logs/<date>/.
+[Unit]
+Description=Septet: sync the apps with their newest ArtCraft releases
+
+[Service]
+Type=oneshot
+ExecStart=%h/Documents/code/Septet/scripts/sync-nightly.sh
+# Lowest priority, and a memory ceiling: the desktop (and whatever else runs at night) comes first.
+Nice=19
+IOSchedulingClass=idle
+CPUSchedulingPolicy=idle
+MemoryHigh=16G
+TimeoutStartSec=8h

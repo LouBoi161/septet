@@ -80,6 +80,11 @@ pub fn label_color(app: &FilmcraftApp, l: Label) -> Color32 {
 
 /// Choose a theme from View ▸ Appearance or `ui.set`: stored as Settings ▸ Appearance ▸ Color Theme.
 pub fn set_theme(app: &mut FilmcraftApp, ctx: &egui::Context, k: crate::theme::ThemeKind) {
+    // The host sets the theme: open its settings instead.
+    if crate::hosted::theme().is_some() {
+        crate::hosted::open_appearance();
+        return;
+    }
     if let Err(e) = app.session.execute("prefs.set", json!({"key": "appearance.colorTheme", "value": k.pref_name()})) {
         app.ui.status = e.to_string();
     }
@@ -90,6 +95,10 @@ pub fn set_theme(app: &mut FilmcraftApp, ctx: &egui::Context, k: crate::theme::T
 /// The header's appearance button and View ▸ Appearance ▸ Next Appearance Mode: Auto, Light, Dark,
 /// then Auto again. The light and dark theme choices are kept.
 pub fn cycle_appearance(app: &mut FilmcraftApp, ctx: &egui::Context) {
+    if crate::hosted::theme().is_some() {
+        crate::hosted::open_appearance();
+        return;
+    }
     let next = app.session.prefs.appearance.next_mode();
     if let Err(e) = app.session.execute("prefs.set", json!({"key": "appearance.appearanceMode", "value": next})) {
         app.ui.status = e.to_string();

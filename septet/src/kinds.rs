@@ -1,9 +1,16 @@
-//! The seven apps Septet hosts: names, brand colours, icons and the files each one opens.
+//! The apps Septet hosts, as one table ([`APPS`]): names, brand colours, icons, the files each one
+//! opens and takes, and its entry points. Adding an app is one [`AppKind`] variant and one entry
+//! here; the shell, the clipboard and content bridges and the assistant all read from the table.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use egui::Color32;
+use egui::{Color32, Context, FontDefinitions};
 
+use crate::hosted::HostedApp;
+
+/// An app of the suite. Saved sessions and recent files name apps by these variants, so a kind
+/// stays even when its app isn't built in (`AppKind::installed`); one this build has never heard of
+/// (a newer build's) reads as [`AppKind::Unknown`]. Both are skipped where sessions are restored.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum AppKind {
     Photocraft,
@@ -13,128 +20,272 @@ pub enum AppKind {
     Pdfcraft,
     Filmcraft,
     Effectcraft,
+    #[serde(other)]
+    Unknown,
 }
 
-impl AppKind {
-    pub const ALL: [AppKind; 7] =
-        [AppKind::Photocraft, AppKind::Vectorcraft, AppKind::Lightcraft, AppKind::Designcraft, AppKind::Pdfcraft, AppKind::Filmcraft, AppKind::Effectcraft];
+/// How an app takes a paste from another app's clipboard (`bridge.rs`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // in builds without the apps that use a variant
+pub enum Paste {
+    /// It reads everything it understands itself: the shell leaves pastes alone.
+    Itself,
+    /// It reads images and copied files itself; SVG arrives as a PNG.
+    ItselfImages,
+    /// SVG stays SVG; images and files arrive as files to place.
+    Svg,
+    /// Everything arrives as a file to place, SVG rasterized to PNG.
+    Files,
+}
 
-    pub fn name(self) -> &'static str {
-        match self {
-            AppKind::Photocraft => "Photocraft",
-            AppKind::Vectorcraft => "Vectorcraft",
-            AppKind::Lightcraft => "Lightcraft",
-            AppKind::Designcraft => "Designcraft",
-            AppKind::Pdfcraft => "Pdfcraft",
-            AppKind::Filmcraft => "Filmcraft",
-            AppKind::Effectcraft => "Effectcraft",
-        }
+/// The calls into an app's `Embedded` (each app's `apps/<app>/src/embed.rs`).
+pub struct EntryPoints {
+    pub create: fn(&Context, Option<&eframe::egui_wgpu::RenderState>, Option<&dyn eframe::Storage>) -> Box<dyn HostedApp>,
+    /// Portable mode: keep the app's settings and data under this folder (call before `create`).
+    pub set_data_root: fn(Option<PathBuf>),
+    /// The fonts the app would install in a context of its own (`fonts.rs` merges them).
+    pub font_definitions: fn() -> FontDefinitions,
+}
+
+pub struct AppSpec {
+    pub kind: AppKind,
+    pub name: &'static str,
+    /// Two-letter badge, the way the suite's apps are told apart at a glance.
+    pub badge: &'static str,
+    pub tagline: &'static str,
+    /// What the app is for, in the assistant's system prompt.
+    pub role: &'static str,
+    /// The brand colour of the app icon (`<app>/assets/app-icon/<app>-small.svg`).
+    pub color: Color32,
+    pub icon: egui::ImageSource<'static>,
+    /// Lower-case file extensions it opens as documents (the first app in [`APPS`] that lists an
+    /// extension is its default; see [`AppKind::for_path`]).
+    pub extensions: &'static [&'static str],
+    /// Other apps' files it opens too (lists of extensions), offered after theirs in "Open in…" menus.
+    pub also_opens: &'static [&'static [&'static str]],
+    /// Formats it places well, best first, when content is dragged or sent to it (`content.rs`).
+    pub accepts: &'static [&'static str],
+    pub paste: Paste,
+    /// It asks about unsaved work itself when its window closes; otherwise the shell asks.
+    pub own_close_prompt: bool,
+    /// Files dropped from the file manager are placed where they landed (winit drops carry no
+    /// position, so the shell reads the pointer and hands it over); otherwise the app handles drops.
+    pub drops_at_pointer: bool,
+    /// What `app_inspect` reads in this app (`what` values), for the tool description.
+    pub inspect: &'static str,
+    /// What `app_render` draws in this app (`target` values), for the tool description.
+    pub render: &'static str,
+    /// What Claude should know before using the app, or "".
+    pub limits: &'static str,
+    pub entry: EntryPoints,
+}
+
+/// The raster formats Photocraft opens; Lightcraft, Vectorcraft, Designcraft and Pdfcraft take them too.
+const RASTER: &[&str] = &[
+    "pcraft", "psd", "psb", "png", "jpg", "jpeg", "webp", "gif", "bmp", "tga", "ico", "pnm", "pbm", "pgm", "ppm", "exr", "hdr", "avif", "qoi", "tif", "tiff",
+    "heic", "heif", "jxl",
+];
+
+/// Every app built into this binary (cargo features, one per app), in Home's order.
+pub static APPS: &[AppSpec] = &[
+    #[cfg(feature = "photocraft")]
+    AppSpec {
+        kind: AppKind::Photocraft,
+        name: "Photocraft",
+        badge: "Ph",
+        tagline: "Photos, compositing and painting",
+        role: "photo editing",
+        color: Color32::from_rgb(0x2f, 0x7b, 0xf5),
+        icon: egui::include_image!("../../photocraft/assets/app-icon/photocraft-small.svg"),
+        extensions: RASTER,
+        also_opens: &[&["pdf", "svg", "ai", "eps"]],
+        accepts: &["psd", "tif", "tiff", "png", "jpg", "jpeg", "webp"],
+        paste: Paste::ItselfImages,
+        own_close_prompt: true,
+        drops_at_pointer: true,
+        inspect: "document (layer tree), layer (`id`), selection, history, documents",
+        render: "document, layer (`id`, alone), selection",
+        limits: "Photocraft opens no SVG or PDF",
+        entry: crate::hosted::entry_points!(photocraft_embed::Embedded),
+    },
+    #[cfg(feature = "vectorcraft")]
+    AppSpec {
+        kind: AppKind::Vectorcraft,
+        name: "Vectorcraft",
+        badge: "Vc",
+        tagline: "Vector graphics and illustration",
+        role: "vector illustration",
+        color: Color32::from_rgb(0xe8, 0x57, 0x3f),
+        icon: egui::include_image!("../../vectorcraft/assets/app-icon/vectorcraft-small.svg"),
+        extensions: &["vectorcraft", "drawcraft", "svg", "svgz", "ai", "eps", "epsf", "epsi", "emf", "wmf", "dxf", "cdr"],
+        also_opens: &[RASTER, &["pdf"]],
+        accepts: &["svg", "pdf", "ai", "eps", "png", "jpg", "jpeg"],
+        paste: Paste::Itself,
+        own_close_prompt: true,
+        drops_at_pointer: false,
+        inspect: "document (layer tree; `depth`), object (`id`), selection, find (params name/kind/text), history, documents",
+        render: "document (artboard in view, or `page`), object or layer (`id`, cut out alone), selection",
+        limits: "Vectorcraft drops most SVG filters and uses installed fonts only, so outline text you want exact",
+        entry: crate::hosted::entry_points!(vectorcraft_embed::Embedded),
+    },
+    #[cfg(feature = "lightcraft")]
+    AppSpec {
+        kind: AppKind::Lightcraft,
+        name: "Lightcraft",
+        badge: "Lc",
+        tagline: "Raw photo library and development",
+        role: "raw photo library",
+        color: Color32::from_rgb(0xf2, 0xa5, 0x16),
+        icon: egui::include_image!("../../lightcraft/assets/app-icon/lightcraft-small.svg"),
+        extensions: &[
+            "dng", "arw", "srf", "sr2", "cr2", "cr3", "crw", "nef", "nrw", "raf", "orf", "rw2", "rwl", "pef", "srw", "x3f", "3fr", "fff", "iiq", "mos", "mef",
+            "mrw", "erf", "kdc", "dcr", "lrcat", "lccat",
+        ],
+        also_opens: &[RASTER],
+        accepts: &["dng", "tif", "tiff", "jpg", "jpeg", "png", "webp"],
+        paste: Paste::Itself,
+        own_close_prompt: true,
+        drops_at_pointer: false,
+        inspect: "document, photos (params filter/limit), photo, develop (with masks), controls (slider ids), albums, history",
+        render: "photo (`id`), before (unedited), mask (`mask` id, `view`)",
+        limits: "",
+        entry: crate::hosted::entry_points!(lightcraft_embed::Embedded),
+    },
+    #[cfg(feature = "designcraft")]
+    AppSpec {
+        kind: AppKind::Designcraft,
+        name: "Designcraft",
+        badge: "Dc",
+        tagline: "Page layout and publishing",
+        role: "page layout",
+        color: Color32::from_rgb(0x7b, 0xb5, 0x1c),
+        icon: egui::include_image!("../../designcraft/assets/app-icon/designcraft-small.svg"),
+        extensions: &["designcraft", "dcraft", "idml", "indd", "epub"],
+        also_opens: &[RASTER, &["pdf", "svg", "ai", "eps"]],
+        accepts: &["pdf", "svg", "psd", "tif", "tiff", "png", "jpg", "jpeg", "txt"],
+        paste: Paste::Svg,
+        own_close_prompt: false,
+        drops_at_pointer: true,
+        inspect: "document (pages; params.page), page, object (`id`), story (`id`: its text), selection, history, documents",
+        render: "page (`page`), object (`id`), selection, layer (`id`)",
+        limits: "Designcraft opens only .designcraft and .idml documents (make a new layout with app_execute `file.new`)",
+        entry: crate::hosted::entry_points!(designcraft_embed::Embedded),
+    },
+    #[cfg(feature = "pdfcraft")]
+    AppSpec {
+        kind: AppKind::Pdfcraft,
+        name: "Pdfcraft",
+        badge: "Pd",
+        tagline: "Read, edit, sign and organize PDFs",
+        role: "PDF editing",
+        color: Color32::from_rgb(0x12, 0xa5, 0x8a),
+        icon: egui::include_image!("../../pdfcraft/assets/app-icon/pdfcraft-small.svg"),
+        extensions: &["pdf", "xfdf", "fdf"],
+        also_opens: &[RASTER],
+        accepts: &["pdf", "png", "jpg", "jpeg"],
+        paste: Paste::Files,
+        own_close_prompt: true,
+        drops_at_pointer: false,
+        inspect: "document, documents, page (params.page: its text), comments, fields, bookmarks, links, history",
+        render: "page (`page`)",
+        limits: "",
+        entry: crate::hosted::PDFCRAFT,
+    },
+    #[cfg(feature = "filmcraft")]
+    AppSpec {
+        kind: AppKind::Filmcraft,
+        name: "Filmcraft",
+        badge: "Fc",
+        tagline: "Video editing",
+        role: "video editing",
+        color: Color32::from_rgb(0x8b, 0x5c, 0xf6),
+        icon: egui::include_image!("../../filmcraft/assets/app-icon/filmcraft-small.svg"),
+        extensions: &[
+            "filmcraft", "fcproj", "mp4", "m4v", "mov", "mkv", "webm", "mxf", "mts", "m2ts", "ts", "avi", "mpg", "mpeg", "ogv", "wav", "mp3", "aif", "aiff",
+            "flac", "m4a", "aac", "ogg", "opus", "srt", "vtt", "edl", "fcpxml", "otio",
+        ],
+        also_opens: &[],
+        accepts: &["mp4", "mov", "mkv", "webm", "wav", "mp3", "m4a", "png", "jpg", "jpeg"],
+        paste: Paste::Files,
+        own_close_prompt: false,
+        drops_at_pointer: true,
+        inspect: "document (bins), sequence, clip (`id`), selection, history",
+        render: "frame (`time`, else the playhead), clip (`id`), selection, item (`id`)",
+        limits: "in Filmcraft, opening or placing media only adds it to the bin: put clips on the timeline with app_execute (`timeline.place`), or build whole edits as OTIO/FCPXML/EDL",
+        entry: crate::hosted::entry_points!(filmcraft_embed::Embedded),
+    },
+    #[cfg(feature = "effectcraft")]
+    AppSpec {
+        kind: AppKind::Effectcraft,
+        name: "Effectcraft",
+        badge: "Ec",
+        tagline: "Motion graphics and visual effects",
+        role: "motion graphics",
+        color: Color32::from_rgb(0xe0, 0x36, 0x8f),
+        icon: egui::include_image!("../../effectcraft/assets/app-icon/effectcraft-small.svg"),
+        extensions: &["effectcraft", "ecproj", "ectemplate", "lottie", "aep"],
+        also_opens: &[&["svg", "ai", "eps"]],
+        accepts: &["mp4", "mov", "mkv", "webm", "wav", "mp3", "svg", "psd", "pdf", "png", "jpg", "jpeg"],
+        paste: Paste::Svg,
+        own_close_prompt: true,
+        drops_at_pointer: true,
+        inspect: "document, comp, layer (`id`: property tree), property (params layer/path), selection, history",
+        render: "frame (`comp`, `time`), layer (`id`, alone), selection",
+        limits: "Effectcraft imports Lottie only with app_execute `file.importLottie`, not through septet_open",
+        entry: crate::hosted::entry_points!(effectcraft_embed::Embedded),
+    },
+];
+
+impl AppKind {
+    /// The apps built in, in Home's order.
+    pub fn all() -> impl Iterator<Item = AppKind> {
+        APPS.iter().map(|a| a.kind)
     }
 
-    /// Two-letter badge, the way the suite's apps are told apart at a glance.
+    /// Whether this build has the app (sessions and recent files may name one it hasn't).
+    pub fn installed(self) -> bool {
+        APPS.iter().any(|a| a.kind == self)
+    }
+
+    /// The app called `name` (any case), if it is built in.
+    pub fn by_name(name: &str) -> Option<AppKind> {
+        APPS.iter().find(|a| a.name.eq_ignore_ascii_case(name)).map(|a| a.kind)
+    }
+
+    /// The app's entry in [`APPS`]. Only for installed apps: the places that read kinds from disk
+    /// (session, recent files) drop the others.
+    pub fn spec(self) -> &'static AppSpec {
+        APPS.iter().find(|a| a.kind == self).unwrap_or_else(|| panic!("{self:?} is not built into this Septet"))
+    }
+
+    pub fn name(self) -> &'static str {
+        self.spec().name
+    }
+
     pub fn badge(self) -> &'static str {
-        match self {
-            AppKind::Photocraft => "Ph",
-            AppKind::Vectorcraft => "Vc",
-            AppKind::Lightcraft => "Lc",
-            AppKind::Designcraft => "Dc",
-            AppKind::Pdfcraft => "Pd",
-            AppKind::Filmcraft => "Fc",
-            AppKind::Effectcraft => "Ec",
-        }
+        self.spec().badge
     }
 
     pub fn tagline(self) -> &'static str {
-        match self {
-            AppKind::Photocraft => "Photos, compositing and painting",
-            AppKind::Vectorcraft => "Vector graphics and illustration",
-            AppKind::Lightcraft => "Raw photo library and development",
-            AppKind::Designcraft => "Page layout and publishing",
-            AppKind::Pdfcraft => "Read, edit, sign and organize PDFs",
-            AppKind::Filmcraft => "Video editing",
-            AppKind::Effectcraft => "Motion graphics and visual effects",
-        }
+        self.spec().tagline
     }
 
-    /// The brand colour of the app icon (`<app>/assets/app-icon/<app>-small.svg`).
     pub fn color(self) -> Color32 {
-        match self {
-            AppKind::Photocraft => Color32::from_rgb(0x2f, 0x7b, 0xf5),
-            AppKind::Vectorcraft => Color32::from_rgb(0xe8, 0x57, 0x3f),
-            AppKind::Lightcraft => Color32::from_rgb(0xf2, 0xa5, 0x16),
-            AppKind::Designcraft => Color32::from_rgb(0x7b, 0xb5, 0x1c),
-            AppKind::Pdfcraft => Color32::from_rgb(0x12, 0xa5, 0x8a),
-            AppKind::Filmcraft => Color32::from_rgb(0x8b, 0x5c, 0xf6),
-            AppKind::Effectcraft => Color32::from_rgb(0xe0, 0x36, 0x8f),
-        }
+        self.spec().color
     }
 
     pub fn icon(self) -> egui::ImageSource<'static> {
-        match self {
-            AppKind::Photocraft => egui::include_image!("../../photocraft/assets/app-icon/photocraft-small.svg"),
-            AppKind::Vectorcraft => egui::include_image!("../../vectorcraft/assets/app-icon/vectorcraft-small.svg"),
-            AppKind::Lightcraft => egui::include_image!("../../lightcraft/assets/app-icon/lightcraft-small.svg"),
-            AppKind::Designcraft => egui::include_image!("../../designcraft/assets/app-icon/designcraft-small.svg"),
-            AppKind::Pdfcraft => egui::include_image!("../../pdfcraft/assets/app-icon/pdfcraft-small.svg"),
-            AppKind::Filmcraft => egui::include_image!("../../filmcraft/assets/app-icon/filmcraft-small.svg"),
-            AppKind::Effectcraft => egui::include_image!("../../effectcraft/assets/app-icon/effectcraft-small.svg"),
-        }
+        self.spec().icon.clone()
     }
 
-    /// Lower-case file extensions this app opens as documents (the first app that lists an
-    /// extension in [`AppKind::ALL`] order is its default; see [`AppKind::for_path`]).
     pub fn extensions(self) -> &'static [&'static str] {
-        match self {
-            AppKind::Photocraft => &[
-                "pcraft", "psd", "psb", "png", "jpg", "jpeg", "webp", "gif", "bmp", "tga", "ico", "pnm", "pbm", "pgm", "ppm", "exr", "hdr", "avif", "qoi",
-                "tif", "tiff", "heic", "heif", "jxl",
-            ],
-            AppKind::Vectorcraft => &["vectorcraft", "drawcraft", "svg", "svgz", "ai", "eps", "epsf", "epsi", "emf", "wmf", "dxf", "cdr"],
-            AppKind::Lightcraft => &[
-                "dng", "arw", "srf", "sr2", "cr2", "cr3", "crw", "nef", "nrw", "raf", "orf", "rw2", "rwl", "pef", "srw", "x3f", "3fr", "fff", "iiq", "mos",
-                "mef", "mrw", "erf", "kdc", "dcr", "lrcat", "lccat",
-            ],
-            AppKind::Designcraft => &["designcraft", "dcraft", "idml", "indd", "epub"],
-            AppKind::Pdfcraft => &["pdf", "xfdf", "fdf"],
-            AppKind::Filmcraft => &[
-                "filmcraft",
-                "fcproj",
-                "mp4",
-                "m4v",
-                "mov",
-                "mkv",
-                "webm",
-                "mxf",
-                "mts",
-                "m2ts",
-                "ts",
-                "avi",
-                "mpg",
-                "mpeg",
-                "ogv",
-                "wav",
-                "mp3",
-                "aif",
-                "aiff",
-                "flac",
-                "m4a",
-                "aac",
-                "ogg",
-                "opus",
-                "srt",
-                "vtt",
-                "edl",
-                "fcpxml",
-                "otio",
-            ],
-            AppKind::Effectcraft => &["effectcraft", "ecproj", "ectemplate", "lottie", "aep"],
-        }
+        self.spec().extensions
     }
 
     /// The app that opens `path` by default, by its extension.
     pub fn for_path(path: &Path) -> Option<AppKind> {
         let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-        AppKind::ALL.into_iter().find(|k| k.extensions().contains(&ext.as_str()))
+        APPS.iter().find(|a| a.extensions.contains(&ext.as_str())).map(|a| a.kind)
     }
 
     /// Every app that can open `path` (the default first), for "Open in…" menus.
@@ -142,29 +293,32 @@ impl AppKind {
         let Some(ext) = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase) else {
             return Vec::new();
         };
-        let mut v: Vec<AppKind> = AppKind::ALL.into_iter().filter(|k| k.extensions().contains(&ext.as_str())).collect();
-        // Raster images are also good Lightcraft/Designcraft/Vectorcraft inputs.
-        if AppKind::Photocraft.extensions().contains(&ext.as_str()) {
-            for k in [AppKind::Lightcraft, AppKind::Vectorcraft, AppKind::Designcraft, AppKind::Pdfcraft] {
-                if !v.contains(&k) {
-                    v.push(k);
-                }
-            }
-        }
-        if ext == "pdf" {
-            for k in [AppKind::Vectorcraft, AppKind::Designcraft, AppKind::Photocraft] {
-                if !v.contains(&k) {
-                    v.push(k);
-                }
-            }
-        }
-        if ext == "svg" || ext == "ai" || ext == "eps" {
-            for k in [AppKind::Photocraft, AppKind::Designcraft, AppKind::Effectcraft] {
-                if !v.contains(&k) {
-                    v.push(k);
-                }
-            }
-        }
-        v
+        let ext = ext.as_str();
+        let own = APPS.iter().filter(|a| a.extensions.contains(&ext));
+        let also = APPS.iter().filter(|a| !a.extensions.contains(&ext) && a.also_opens.iter().any(|list| list.contains(&ext)));
+        own.chain(also).map(|a| a.kind).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(feature = "default")]
+    fn open_in_lists_the_owner_first() {
+        let png = AppKind::all_for_path(Path::new("a.PNG"));
+        assert_eq!(png.first(), Some(&AppKind::Photocraft));
+        assert!(png.contains(&AppKind::Lightcraft) && png.contains(&AppKind::Pdfcraft));
+        assert_eq!(AppKind::all_for_path(Path::new("a.pdf"))[0], AppKind::Pdfcraft);
+        assert_eq!(AppKind::for_path(Path::new("cut.otio")), Some(AppKind::Filmcraft));
+        assert!(AppKind::all_for_path(Path::new("noext")).is_empty());
+    }
+
+    #[test]
+    fn unknown_apps_read_as_unknown() {
+        let tabs: Vec<AppKind> = ron::from_str("[Pdfcraft, Wordcraft]").unwrap();
+        assert_eq!(tabs, [AppKind::Pdfcraft, AppKind::Unknown]);
+        assert!(!AppKind::Unknown.installed());
     }
 }

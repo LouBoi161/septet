@@ -86,7 +86,9 @@ impl Recent {
     }
 
     pub fn load() -> Self {
-        let files = Self::file().and_then(|f| std::fs::read(f).ok()).and_then(|b| serde_json::from_slice::<Vec<RecentFile>>(&b).ok()).unwrap_or_default();
+        let mut files = Self::file().and_then(|f| std::fs::read(f).ok()).and_then(|b| serde_json::from_slice::<Vec<RecentFile>>(&b).ok()).unwrap_or_default();
+        // Files of apps this build doesn't have are dropped (from disk too, at the next save).
+        files.retain(|f| f.app.installed());
         Recent { files, dirty: false }
     }
 

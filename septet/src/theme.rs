@@ -1,9 +1,23 @@
 //! The shell's own look: the tab strip and the Home screen. Colours follow the active app's
 //! panel colour, so the selected tab flows into that app's menu bar the way a browser tab flows
-//! into its page.
+//! into its page. Home and empty windows follow the brightness level of `appearance.rs`.
 
 use egui::{Color32, FontData, FontDefinitions, FontFamily, Visuals};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
+
+/// The level Home and empty windows show, 0 (darkest) to 3 (lightest); [`NO_LEVEL`]: dark.
+static LEVEL: AtomicU8 = AtomicU8::new(NO_LEVEL);
+const NO_LEVEL: u8 = u8::MAX;
+/// Their accent as `0xRRGGBB`, or [`NO_ACCENT`]: Septet's neutral one.
+static ACCENT: AtomicU32 = AtomicU32::new(NO_ACCENT);
+const NO_ACCENT: u32 = u32::MAX;
+
+/// Set by `appearance::apply_to_shell`.
+pub fn set_level(level: Option<u8>, accent: Option<Color32>) {
+    LEVEL.store(level.unwrap_or(NO_LEVEL), Ordering::Relaxed);
+    ACCENT.store(accent.map_or(NO_ACCENT, |c| u32::from_be_bytes([0, c.r(), c.g(), c.b()])), Ordering::Relaxed);
+}
 
 /// Font family names the shell uses (registered next to the apps' own, see `fonts`).
 pub const SHELL_MEDIUM: &str = "septet-medium";
@@ -21,6 +35,8 @@ pub struct ShellColors {
     pub separator: Color32,
     pub close_hover: Color32,
     pub accent: Color32,
+    /// Text on an `accent` fill.
+    pub on_accent: Color32,
     pub home_bg: Color32,
     pub card: Color32,
     pub card_hover: Color32,
@@ -42,6 +58,7 @@ impl ShellColors {
             separator: if dark { lighten(strip, 0.10) } else { darken(strip, 0.15) },
             close_hover: Color32::from_rgb(0xc4, 0x2b, 0x1c),
             accent,
+            on_accent: if luma(accent) > 0.6 { Color32::from_rgb(0x14, 0x14, 0x17) } else { Color32::WHITE },
             home_bg: if dark { Color32::from_rgb(0x1b, 0x1b, 0x1d) } else { Color32::from_rgb(0xf3, 0xf3, 0xf5) },
             card: if dark { Color32::from_rgb(0x26, 0x26, 0x29) } else { Color32::WHITE },
             card_hover: if dark { Color32::from_rgb(0x30, 0x30, 0x34) } else { Color32::from_rgb(0xea, 0xea, 0xee) },
@@ -49,13 +66,38 @@ impl ShellColors {
         }
     }
 
-    /// The Home screen and empty windows: Septet's own dark look.
+    /// The Home screen and empty windows: Septet's own look at the appearance's level.
     pub fn home() -> Self {
-        let mut v = Visuals::dark();
-        v.panel_fill = Color32::from_rgb(0x1b, 0x1b, 0x1d);
+        let level = LEVEL.load(Ordering::Relaxed);
+        let (mut v, panel) = match level {
+            0 => (Visuals::dark(), Color32::from_rgb(0x12, 0x12, 0x14)),
+            2 => (Visuals::light(), Color32::from_rgb(0xe9, 0xe9, 0xec)),
+            3 => (Visuals::light(), Color32::from_rgb(0xf6, 0xf6, 0xf8)),
+            _ => (Visuals::dark(), Color32::from_rgb(0x1b, 0x1b, 0x1d)),
+        };
+        v.panel_fill = panel;
         // Septet's mark is all seven app colours; its own accent stays neutral.
-        Self::for_app(&v, Color32::from_rgb(0xf4, 0xf4, 0xf6))
+        let accent = if v.dark_mode { Color32::from_rgb(0xf4, 0xf4, 0xf6) } else { Color32::from_rgb(0x1b, 0x1b, 0x1d) };
+        let mut c = match ACCENT.load(Ordering::Relaxed) {
+            NO_ACCENT => Self::for_app(&v, accent),
+            rgb => {
+                let [_, r, g, b] = rgb.to_be_bytes();
+                Self::for_app(&v, Color32::from_rgb(r, g, b))
+            }
+        };
+        c.home_bg = panel;
+        if level == 0 {
+            c.card = Color32::from_rgb(0x1d, 0x1d, 0x20);
+            c.card_hover = Color32::from_rgb(0x27, 0x27, 0x2b);
+            c.card_border = Color32::from_rgb(0x2c, 0x2c, 0x30);
+        }
+        c
     }
+}
+
+/// Relative brightness, 0 to 1.
+fn luma(c: Color32) -> f32 {
+    (0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32) / 255.0
 }
 
 pub fn darken(c: Color32, amount: f32) -> Color32 {

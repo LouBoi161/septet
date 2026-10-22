@@ -109,6 +109,16 @@ impl Embedded {
         self.app.first_dirty().is_some()
     }
 
+    /// Pdfcraft draws on the CPU: nothing to fall back from.
+    pub fn gpu_failed(&mut self, _lost: bool, _message: &str) {}
+
+    /// Septet is about to restart: recovery entries for the changed documents now (offered at
+    /// the next start).
+    pub fn save_recovery(&mut self) -> bool {
+        self.app.autosave_now();
+        true
+    }
+
     /// Open files in their own tabs, as the command line does (images and text become new PDFs).
     pub fn open_paths(&mut self, paths: &[PathBuf]) {
         for path in paths {
@@ -139,6 +149,19 @@ impl Embedded {
     /// Kept, but never called: PdfCraft shows no links to the other ArtCraft apps.
     pub fn set_open_app(&mut self, handler: Box<dyn FnMut(&str)>) {
         self._open_app = Some(handler);
+    }
+
+    /// Septet's brightness, 0 (darkest) to 3 (lightest): Dark for 0 and 1, Light for 2 and 3,
+    /// instead of PdfCraft's own until `None`. It isn't saved as PdfCraft's.
+    pub fn set_appearance(&mut self, level: Option<u8>, accent: Option<egui::Color32>) {
+        pdfcraft_ui_egui::hosted::set_accent(accent);
+        use pdfcraft_ui_egui::theme::ThemeKind;
+        pdfcraft_ui_egui::hosted::set_theme(level.map(|l| if l >= 2 { ThemeKind::Light } else { ThemeKind::Dark }));
+    }
+
+    /// While Septet sets the theme, PdfCraft's theme commands open Septet's settings.
+    pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
+        pdfcraft_ui_egui::hosted::set_open_appearance(handler);
     }
 
     /// While pages are dragged in the Organize grid (or the Pages panel's thumbnails): "Page 4",

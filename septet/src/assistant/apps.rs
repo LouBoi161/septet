@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use super::mcp::{ToolCall, ToolReply};
 use super::{Approval, approval_key};
 use crate::hosted::AgentRender;
-use crate::kinds::AppKind;
+use crate::kinds::{APPS, AppKind, AppSpec};
 use crate::shell::{Action, Shell, TabKind};
 
 /// Longest side of an image for Claude (larger ones are scaled down by the API anyway).
@@ -83,6 +83,11 @@ pub fn is_app_tool(name: &str) -> bool {
     name.starts_with("app_")
 }
 
+/// "Photocraft …; Vectorcraft …" for the apps built in.
+fn per_app(part: fn(&AppSpec) -> &'static str) -> String {
+    APPS.iter().map(|a| format!("{} {}", a.name, part(a))).collect::<Vec<_>>().join("; ")
+}
+
 pub fn definitions(apps: &[String]) -> Vec<Value> {
     let app = json!({"type": "string", "enum": apps});
     let id = json!({"type": ["integer", "string"], "description": "An id from app_inspect (Vectorcraft's objects and Photocraft's layers are numbers)."});
@@ -108,7 +113,7 @@ pub fn definitions(apps: &[String]) -> Vec<Value> {
         }),
         json!({
             "name": "app_inspect",
-            "description": "Read an app's document as JSON. `what` per app: Vectorcraft document (layer tree; `depth`), object (`id`), selection, find (params name/kind/text), history, documents; Photocraft document (layer tree), layer (`id`), selection, history, documents; Designcraft document (pages; params.page), page, object (`id`), story (`id`: its text), selection, history, documents; Effectcraft document, comp, layer (`id`: property tree), property (params layer/path), selection, history; Filmcraft document (bins), sequence, clip (`id`), selection, history; Lightcraft document, photos (params filter/limit), photo, develop (with masks), controls (slider ids), albums, history; Pdfcraft document, documents, page (params.page: its text), comments, fields, bookmarks, links, history. An unknown `what` lists the app's views.",
+            "description": format!("Read an app's document as JSON. `what` per app: {}. An unknown `what` lists the app's views.", per_app(|a| a.inspect)),
             "inputSchema": {"type": "object", "properties": {
                 "app": app,
                 "what": {"type": "string"},
@@ -120,7 +125,7 @@ pub fn definitions(apps: &[String]) -> Vec<Value> {
         }),
         json!({
             "name": "app_render",
-            "description": "Look at an app's document as a picture, made off-screen (not a screenshot), also while its tab is hidden. Use it after changes to check them. `target` per app: Vectorcraft document (artboard in view, or `page`), object or layer (`id`, cut out alone), selection; Photocraft document, layer (`id`, alone), selection; Designcraft page (`page`), object (`id`), selection, layer (`id`); Effectcraft frame (`comp`, `time`), layer (`id`, alone), selection; Filmcraft frame (`time`, else the playhead), clip (`id`), selection, item (`id`); Lightcraft photo (`id`), before (unedited), mask (`mask` id, `view`); Pdfcraft page (`page`). The picture is shown over `background` (auto: white for documents, a checkerboard for parts; or white, black, checker, transparent, #rrggbb). `save_as` also writes it as a transparent PNG into the workspace.",
+            "description": format!("Look at an app's document as a picture, made off-screen (not a screenshot), also while its tab is hidden. Use it after changes to check them. `target` per app: {}. The picture is shown over `background` (auto: white for documents, a checkerboard for parts; or white, black, checker, transparent, #rrggbb). `save_as` also writes it as a transparent PNG into the workspace.", per_app(|a| a.render)),
             "inputSchema": {"type": "object", "properties": {
                 "app": app,
                 "target": {"type": "string"},

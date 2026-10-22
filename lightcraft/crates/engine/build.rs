@@ -9,6 +9,10 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+// Septet: with the `shared-craft-fonts` feature, entries point at the suite's one embedded copy.
+#[path = "../../../shared/craft-fonts/names.rs"]
+mod suite_fonts;
+
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-env-changed=CRAFT_FONTS_DIR");
@@ -84,9 +88,9 @@ fn craft_fonts(dir: &Path, required: bool) -> Result<String, String> {
         let scripts: Vec<String> = scripts.split(',').map(|s| format!("{:?}", s.trim())).collect();
         let _ = writeln!(
             out,
-            "    CraftFont {{ family: {family:?}, style: {style:?}, scripts: &[{}], bytes: include_bytes!({:?}) }},",
+            "    CraftFont {{ family: {family:?}, style: {style:?}, scripts: &[{}], bytes: {} }},",
             scripts.join(", "),
-            path.display().to_string(),
+            suite_fonts::bytes_expr(file, &path),
         );
     }
     if required && !has_japanese_ui {

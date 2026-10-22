@@ -12,11 +12,13 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod about;
+mod appearance;
 mod assistant;
 mod autotest;
 mod bridge;
 mod content;
 mod fonts;
+mod gpu;
 mod home;
 mod hosted;
 mod icon;
@@ -154,7 +156,8 @@ fn main() -> eframe::Result {
             let router = router::Router::default();
             ctx.add_plugin(router.clone());
             let session = cc.storage.and_then(|s| eframe::get_value::<recent::Session>(s, "septet/session"));
-            let mut shell = shell::Shell::new(ctx, router, files, session);
+            let appearance = cc.storage.and_then(|s| eframe::get_value(s, appearance::STORAGE_KEY)).unwrap_or_default();
+            let mut shell = shell::Shell::new(ctx, router, files, session, appearance);
             shell.instance = primary.map(|p| p.serve(ctx.clone()));
             Ok(Box::new(Septet { shell }))
         }),

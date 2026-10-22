@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
-use egui::{Context, FontDefinitions, Pos2, Style, ThemePreference};
+use egui::{Context, Pos2, Style, ThemePreference};
 use serde_json::Value;
 
-use crate::kinds::AppKind;
+use crate::kinds::{AppKind, EntryPoints};
 
 /// What the shell needs from an app (implemented for each app's `Embedded`).
 pub trait HostedApp {
@@ -41,6 +41,19 @@ pub trait HostedApp {
     fn export_active(&mut self, _accept: &[&str], _dir: &Path) -> Option<PathBuf> {
         None
     }
+    /// The shared GPU device reported an error, or was lost (`gpu.rs`): leave the GPU for the CPU.
+    fn gpu_failed(&mut self, _lost: bool, _message: &str) {}
+    /// Write recovery data for every document with unsaved changes now, before Septet restarts
+    /// (`gpu.rs`) → whether all of it was written.
+    fn save_recovery(&mut self) -> bool {
+        !self.has_unsaved_changes()
+    }
+    /// Septet's brightness (`appearance.rs`), 0 (darkest) to 3 (lightest), and accent colour:
+    /// shown instead of the app's own and never saved as them. `None` gives the app its own back.
+    fn set_appearance(&mut self, _level: Option<u8>, _accent: Option<egui::Color32>) {}
+    /// While Septet sets the look, the app's theme commands open Septet's Appearance dialog
+    /// through this.
+    fn set_open_appearance(&mut self, _handler: Box<dyn FnMut()>) {}
 
     // Claude drives the app (`docs/embedding/phase5-agent-control.md`). None: the app can't yet.
 
@@ -65,28 +78,10 @@ pub trait HostedApp {
 /// A picture the app makes for Claude, on a worker thread (premultiplied, transparent where empty).
 pub type AgentRender = Box<dyn FnOnce() -> Result<egui::ColorImage, String> + Send>;
 
+/// Implement [`HostedApp`] for an app's `Embedded`, with the optional parts it has: `agent`
+/// (phase 5) and `appearance` (A4).
 macro_rules! hosted {
-    ($ty:ty) => {
-        hosted!($ty, {});
-    };
-    // Apps that implement the agent methods of phase 5.
-    ($ty:ty, agent) => {
-        hosted!($ty, {
-            fn agent_commands(&mut self, ctx: &Context) -> Option<Vec<Value>> {
-                Some(<$ty>::agent_commands(self, ctx))
-            }
-            fn agent_execute(&mut self, ctx: &Context, command: &str, params: Value) -> Option<Receiver<Value>> {
-                Some(<$ty>::agent_execute(self, ctx, command, params))
-            }
-            fn agent_inspect(&mut self, ctx: &Context, what: &str, params: &Value) -> Option<Result<Value, String>> {
-                Some(<$ty>::agent_inspect(self, ctx, what, params))
-            }
-            fn agent_render(&mut self, ctx: &Context, target: &Value) -> Option<Result<(String, AgentRender), String>> {
-                Some(<$ty>::agent_render(self, ctx, target))
-            }
-        });
-    };
-    ($ty:ty, { $($agent:tt)* }) => {
+    ($ty:ty $(, $part:ident)*) => {
         impl HostedApp for $ty {
             fn app(&mut self) -> &mut dyn eframe::App {
                 self
@@ -124,62 +119,91 @@ macro_rules! hosted {
             fn set_open_app(&mut self, handler: Box<dyn FnMut(&str)>) {
                 <$ty>::set_open_app(self, handler)
             }
-            $($agent)*
+            fn gpu_failed(&mut self, lost: bool, message: &str) {
+                <$ty>::gpu_failed(self, lost, message)
+            }
+            fn save_recovery(&mut self) -> bool {
+                <$ty>::save_recovery(self)
+            }
+            $(hosted_part!($part, $ty);)*
         }
     };
 }
 
-hosted!(photocraft_embed::Embedded, agent);
-hosted!(vectorcraft_embed::Embedded, agent);
-hosted!(lightcraft_embed::Embedded, agent);
-hosted!(designcraft_embed::Embedded, agent);
-hosted!(pdfcraft_embed::Embedded, agent);
-hosted!(filmcraft_embed::Embedded, agent);
-hosted!(effectcraft_embed::Embedded, agent);
-
-/// Portable mode: keep `kind`'s settings and data under `root` (call before `create`).
-pub fn set_data_root(kind: AppKind, root: Option<PathBuf>) {
-    match kind {
-        AppKind::Photocraft => photocraft_embed::Embedded::set_data_root(root),
-        AppKind::Vectorcraft => vectorcraft_embed::Embedded::set_data_root(root),
-        AppKind::Lightcraft => lightcraft_embed::Embedded::set_data_root(root),
-        AppKind::Designcraft => designcraft_embed::Embedded::set_data_root(root),
-        AppKind::Pdfcraft => pdfcraft_embed::Embedded::set_data_root(root),
-        AppKind::Filmcraft => filmcraft_embed::Embedded::set_data_root(root),
-        AppKind::Effectcraft => effectcraft_embed::Embedded::set_data_root(root),
-    }
-}
-
-pub fn create(
-    kind: AppKind,
-    ctx: &Context,
-    render_state: Option<&eframe::egui_wgpu::RenderState>,
-    storage: Option<&dyn eframe::Storage>,
-) -> Box<dyn HostedApp> {
-    match kind {
-        AppKind::Photocraft => Box::new(photocraft_embed::Embedded::new(ctx, render_state, storage)),
-        AppKind::Vectorcraft => Box::new(vectorcraft_embed::Embedded::new(ctx, render_state, storage)),
-        AppKind::Lightcraft => Box::new(lightcraft_embed::Embedded::new(ctx, render_state, storage)),
-        AppKind::Designcraft => Box::new(designcraft_embed::Embedded::new(ctx, render_state, storage)),
-        AppKind::Pdfcraft => {
-            // Pdfcraft keeps its settings (recent files, signatures, digital IDs, stamps) in eframe
-            // storage. Until Septet has saved its own copy, start from the standalone app's.
-            // (Not in portable mode: that copy must not pick up this computer's settings.)
-            let fallback = if crate::recent::portable_root().is_some() { Default::default() } else { standalone_storage("PdfCraft") };
-            let storage = WithFallback { primary: storage, fallback };
-            Box::new(pdfcraft_embed::Embedded::new(ctx, render_state, Some(&storage)))
+macro_rules! hosted_part {
+    (agent, $ty:ty) => {
+        fn agent_commands(&mut self, ctx: &Context) -> Option<Vec<Value>> {
+            Some(<$ty>::agent_commands(self, ctx))
         }
-        AppKind::Filmcraft => Box::new(filmcraft_embed::Embedded::new(ctx, render_state, storage)),
-        AppKind::Effectcraft => Box::new(effectcraft_embed::Embedded::new(ctx, render_state, storage)),
-    }
+        fn agent_execute(&mut self, ctx: &Context, command: &str, params: Value) -> Option<Receiver<Value>> {
+            Some(<$ty>::agent_execute(self, ctx, command, params))
+        }
+        fn agent_inspect(&mut self, ctx: &Context, what: &str, params: &Value) -> Option<Result<Value, String>> {
+            Some(<$ty>::agent_inspect(self, ctx, what, params))
+        }
+        fn agent_render(&mut self, ctx: &Context, target: &Value) -> Option<Result<(String, AgentRender), String>> {
+            Some(<$ty>::agent_render(self, ctx, target))
+        }
+    };
+    (appearance, $ty:ty) => {
+        fn set_appearance(&mut self, level: Option<u8>, accent: Option<egui::Color32>) {
+            <$ty>::set_appearance(self, level, accent)
+        }
+        fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
+            <$ty>::set_open_appearance(self, handler)
+        }
+    };
 }
 
+#[cfg(feature = "photocraft")]
+hosted!(photocraft_embed::Embedded, agent, appearance);
+#[cfg(feature = "vectorcraft")]
+hosted!(vectorcraft_embed::Embedded, agent, appearance);
+#[cfg(feature = "lightcraft")]
+hosted!(lightcraft_embed::Embedded, agent);
+#[cfg(feature = "designcraft")]
+hosted!(designcraft_embed::Embedded, agent, appearance);
+#[cfg(feature = "pdfcraft")]
+hosted!(pdfcraft_embed::Embedded, agent, appearance);
+#[cfg(feature = "filmcraft")]
+hosted!(filmcraft_embed::Embedded, agent, appearance);
+#[cfg(feature = "effectcraft")]
+hosted!(effectcraft_embed::Embedded, agent, appearance);
+
+/// An app's [`EntryPoints`] from its `Embedded` type, for its entry in `kinds::APPS`.
+macro_rules! entry_points {
+    ($ty:ty) => {
+        $crate::kinds::EntryPoints {
+            create: |ctx, render_state, storage| Box::new(<$ty>::new(ctx, render_state, storage)),
+            set_data_root: <$ty>::set_data_root,
+            font_definitions: <$ty>::font_definitions,
+        }
+    };
+}
+#[allow(unused_imports)] // a build with Pdfcraft alone uses it only here
+pub(crate) use entry_points;
+
+/// Pdfcraft keeps its settings (recent files, signatures, digital IDs, stamps) in eframe storage.
+/// Until Septet has saved its own copy, it starts from the standalone app's. (Not in portable mode:
+/// that copy must not pick up this computer's settings.)
+#[cfg(feature = "pdfcraft")]
+pub const PDFCRAFT: EntryPoints = EntryPoints {
+    create: |ctx, render_state, storage| {
+        let fallback = if crate::recent::portable_root().is_some() { Default::default() } else { standalone_storage("PdfCraft") };
+        let storage = WithFallback { primary: storage, fallback };
+        Box::new(pdfcraft_embed::Embedded::new(ctx, render_state, Some(&storage)))
+    },
+    ..entry_points!(pdfcraft_embed::Embedded)
+};
+
+#[cfg(feature = "pdfcraft")]
 /// Storage that falls back to another app's saved settings for keys Septet hasn't written yet.
 struct WithFallback<'a> {
     primary: Option<&'a dyn eframe::Storage>,
     fallback: std::collections::HashMap<String, String>,
 }
 
+#[cfg(feature = "pdfcraft")]
 impl eframe::Storage for WithFallback<'_> {
     fn get_string(&self, key: &str) -> Option<String> {
         self.primary.and_then(|p| p.get_string(key)).or_else(|| self.fallback.get(key).cloned())
@@ -189,24 +213,13 @@ impl eframe::Storage for WithFallback<'_> {
     fn flush(&mut self) {}
 }
 
+#[cfg(feature = "pdfcraft")]
 /// A standalone eframe app's saved settings (`<storage dir>/app.ron`).
 fn standalone_storage(app_name: &str) -> std::collections::HashMap<String, String> {
     eframe::storage_dir(app_name)
         .and_then(|dir| std::fs::read_to_string(dir.join("app.ron")).ok())
         .and_then(|text| ron::from_str(&text).ok())
         .unwrap_or_default()
-}
-
-pub fn font_definitions(kind: AppKind) -> FontDefinitions {
-    match kind {
-        AppKind::Photocraft => photocraft_embed::Embedded::font_definitions(),
-        AppKind::Vectorcraft => vectorcraft_embed::Embedded::font_definitions(),
-        AppKind::Lightcraft => lightcraft_embed::Embedded::font_definitions(),
-        AppKind::Designcraft => designcraft_embed::Embedded::font_definitions(),
-        AppKind::Pdfcraft => pdfcraft_embed::Embedded::font_definitions(),
-        AppKind::Filmcraft => filmcraft_embed::Embedded::font_definitions(),
-        AppKind::Effectcraft => effectcraft_embed::Embedded::font_definitions(),
-    }
 }
 
 /// The parts of the shared `egui::Context` an app treats as its own.

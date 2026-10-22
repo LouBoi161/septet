@@ -1213,6 +1213,11 @@ pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<R
                 (None, _) => Err(format!("unknown panel `{raw}`")),
             }
         }
+        // The host sets the brightness: open its settings instead.
+        "window.brightness" if crate::hosted::brightness().is_some() => {
+            crate::hosted::open_appearance();
+            Ok(json!("host"))
+        }
         "window.brightness" => match s("brightness").as_deref().and_then(Brightness::parse) {
             Some(b) => {
                 app.ui.brightness = b;
@@ -1524,7 +1529,9 @@ pub fn checked(app: &VectorcraftApp, id: &str, p: &Value) -> Option<bool> {
         }
         "window.collapseDock" => app.ui.dock_collapsed,
         "window.workspace" => p.get("name").and_then(Value::as_str) == Some(app.ui.workspace.as_str()),
-        "window.brightness" => p.get("brightness").and_then(Value::as_str).and_then(Brightness::parse) == Some(app.ui.brightness),
+        "window.brightness" => {
+            p.get("brightness").and_then(Value::as_str).and_then(Brightness::parse) == Some(crate::hosted::brightness().unwrap_or(app.ui.brightness))
+        }
         "view.slices.lock" => app.session.slices_locked(),
         "object.slice.clipToArtboard" => app.session.active().is_some_and(|d| d.doc.slices_clip_to_artboard),
         "view.proofColors" => vectorcraft_render::proof::view().proof_colors,

@@ -61,6 +61,14 @@ enum Step {
     ToolWait(f64),
     /// A Home tab in the first window, which hides the app shown there.
     Home,
+    /// Destroy the shared GPU device, as a driver reset would lose it (`gpu.rs`).
+    LoseGpu,
+    /// Set Septet's appearance: brightness and UI size (`appearance.rs`).
+    Appearance(crate::appearance::Theme, f32),
+    /// Close the Appearance dialog.
+    CloseAppearance,
+    /// Set Septet's accent colour (one of `appearance::ACCENTS`, by name; `None`: each app's own).
+    Accent(Option<&'static str>),
     Exit,
 }
 
@@ -124,7 +132,7 @@ impl Autotest {
                 Step::Wait(2.0),
                 Step::Open({
                     let name = std::env::var("SEPTET_AUTOTEST_APP").unwrap_or_else(|_| "vectorcraft".into());
-                    AppKind::ALL.into_iter().find(|k| k.name().eq_ignore_ascii_case(&name))?
+                    AppKind::by_name(&name)?
                 }),
                 Step::Wait(5.0),
                 Step::ClaudePanel,
@@ -168,7 +176,7 @@ impl Autotest {
             // commands, inspecting and rendering (also while the tab is hidden), a blocked command, undo.
             Ok("assistant-apps") => {
                 let name = std::env::var("SEPTET_AUTOTEST_APP").unwrap_or_else(|_| "vectorcraft".into());
-                let kind = AppKind::ALL.into_iter().find(|k| k.name().eq_ignore_ascii_case(&name))?;
+                let kind = AppKind::by_name(&name)?;
                 Self::app_tools(kind)
             }
             // Run 1 of 2: a few tabs and a torn-off window, then quit (the layout is saved).
@@ -207,7 +215,7 @@ impl Autotest {
             // `SEPTET_AUTOTEST_AT` ("x,y"), press Delete, then right-click it.
             Ok("layers") => {
                 let name = std::env::var("SEPTET_AUTOTEST_APP").unwrap_or_else(|_| "vectorcraft".into());
-                let kind = AppKind::ALL.into_iter().find(|k| k.name().eq_ignore_ascii_case(&name))?;
+                let kind = AppKind::by_name(&name)?;
                 // "x,y;x,y;…": clicks before (a panel tab), the last one on the row.
                 let at: Vec<Pos2> = std::env::var("SEPTET_AUTOTEST_AT")
                     .unwrap_or_default()
@@ -218,6 +226,88 @@ impl Autotest {
                     })
                     .collect();
                 Self::layers(kind, &at)
+            }
+            // Losing the GPU device: apps that set device handlers of their own are open, Vectorcraft
+            // has unsaved changes; Septet should write recovery data and restart (logged, not done).
+            // One brightness for the shell and the apps that take it; an app's own theme command
+            // opens Septet's dialog instead.
+            Ok("appearance") => {
+                use crate::appearance::Theme;
+                let apps = [AppKind::Photocraft, AppKind::Vectorcraft, AppKind::Designcraft, AppKind::Pdfcraft, AppKind::Filmcraft, AppKind::Effectcraft];
+                // Each app's own theme command opens Septet's dialog while Septet sets the look. (Claude
+                // reaches only these apps' theme commands; the others' are tested in their crates.)
+                let commands = [
+                    (AppKind::Vectorcraft, "window.brightness", serde_json::json!({"brightness": "light"})),
+                    (AppKind::Designcraft, "window.brightness", serde_json::json!({"brightness": "light"})),
+                    (AppKind::Filmcraft, "view.theme.light", serde_json::json!({})),
+                ];
+                let short = |k: AppKind| k.name().to_ascii_lowercase();
+                let shot = |name: String| Step::Shot(Box::leak(name.into_boxed_str()));
+                let mut steps = vec![
+                    Step::Wait(2.0),
+                    Step::Shot("a01-home-dark"),
+                    Step::Appearance(Theme::Lightest, 1.0),
+                    Step::Wait(1.0),
+                    Step::Shot("a02-home-lightest"),
+                ];
+                for kind in &apps {
+                    steps.extend([Step::Open(*kind), Step::Wait(6.0), shot(format!("a03-{}-lightest", short(*kind)))]);
+                }
+                steps.extend([Step::Appearance(Theme::Darkest, 1.25), Step::Wait(1.0)]);
+                for kind in &apps {
+                    steps.extend([Step::Activate(*kind), Step::Wait(1.5), shot(format!("a04-{}-darkest-125", short(*kind)))]);
+                }
+                steps.extend([Step::Accent(Some("Pink")), Step::Wait(1.0)]);
+                for kind in &apps {
+                    steps.extend([Step::Activate(*kind), Step::Wait(1.5), shot(format!("a06-{}-darkest-pink", short(*kind)))]);
+                }
+                steps.extend([Step::Appearance(Theme::Light, 1.0), Step::Wait(1.0)]);
+                for kind in &apps {
+                    steps.extend([Step::Activate(*kind), Step::Wait(1.5), shot(format!("a07-{}-light-pink", short(*kind)))]);
+                }
+                steps.extend([Step::Home, Step::Wait(1.0), Step::Shot("a08-home-light-pink")]);
+                for (kind, command, params) in commands {
+                    steps.extend([
+                        Step::Activate(kind),
+                        Step::Tool("app_execute", serde_json::json!({"app": short(kind), "command": command, "params": params})),
+                        Step::ToolWait(10.0),
+                        Step::Wait(0.5),
+                        Step::Report,
+                        shot(format!("a09-{}-dialog", short(kind))),
+                        Step::CloseAppearance,
+                    ]);
+                }
+                steps.push(Step::Accent(None));
+                steps.extend([Step::Appearance(Theme::AppsOwn, 1.0), Step::Wait(1.0)]);
+                for kind in &apps {
+                    steps.extend([Step::Activate(*kind), Step::Wait(1.5), shot(format!("a05-{}-own", short(*kind)))]);
+                }
+                steps.extend([Step::Report, Step::Exit]);
+                steps
+            }
+            Ok("gpu-lost") => {
+                let run = |command: &str, params: serde_json::Value| Step::Tool("app_execute", serde_json::json!({"app": "vectorcraft", "command": command, "params": params}));
+                vec![
+                    Step::Wait(2.0),
+                    Step::Open(AppKind::Vectorcraft),
+                    Step::Wait(5.0),
+                    run("file.new", serde_json::json!({"width": 400, "height": 300})),
+                    Step::ToolWait(10.0),
+                    run("shape.rectangle", serde_json::json!({"x": 40, "y": 40, "width": 100, "height": 80})),
+                    Step::ToolWait(10.0),
+                    Step::Open(AppKind::Photocraft),
+                    Step::Wait(6.0),
+                    Step::Open(AppKind::Effectcraft),
+                    Step::Wait(6.0),
+                    Step::Open(AppKind::Filmcraft),
+                    Step::Wait(6.0),
+                    Step::Report,
+                    Step::Shot("g01-before"),
+                    Step::LoseGpu,
+                    Step::Wait(10.0),
+                    Step::Shot("g02-still-running"),
+                    Step::Exit,
+                ]
             }
             _ => Self::tour(file),
         };
@@ -261,6 +351,7 @@ impl Autotest {
                 ("layer.new", json!({"name": "One"})),
                 ("layer.new", json!({"name": "Two"})),
             ],
+            AppKind::Unknown => unreachable!("autotests name installed apps"),
             AppKind::Effectcraft => vec![
                 ("comp.new", json!({"name": "Main", "width": 640, "height": 360, "duration": 4})),
                 ("layer.newSolid", json!({"name": "Orange", "color": "#e8a33d"})),
@@ -389,6 +480,7 @@ impl Autotest {
                 2,
                 vec![run("file.place", json!({}))],
             ),
+            AppKind::Unknown => unreachable!("autotests name installed apps"),
             AppKind::Effectcraft => (
                 run("comp.new", json!({"name": "Main", "width": 640, "height": 360, "duration": 4, "background": "#202830"})),
                 "solid",
@@ -476,8 +568,8 @@ impl Autotest {
     /// Every app once, a torn-off window, a closed tab, quit.
     fn tour(file: Option<PathBuf>) -> Vec<Step> {
         let mut steps = vec![Step::Wait(3.0), Step::Shot("01-home"), Step::Report];
-        let names = ["photocraft", "vectorcraft", "lightcraft", "designcraft", "pdfcraft", "filmcraft", "effectcraft"];
-        for (n, (kind, name)) in AppKind::ALL.into_iter().zip(names).enumerate() {
+        for (n, kind) in AppKind::all().enumerate() {
+            let name = kind.name().to_ascii_lowercase();
             steps.push(Step::Open(kind));
             steps.push(Step::Wait(7.0));
             steps.push(Step::Shot(Box::leak(format!("{:02}-{name}", n + 2).into_boxed_str())));
@@ -691,6 +783,7 @@ impl Autotest {
                     }
                     let focus = shell.windows.iter().map(|w| ctx.memory(|m| m.focused()).map(|f| format!("{:?}:{f:?}", w.viewport))).collect::<Vec<_>>();
                     at.note(format!("keyboard focus: {focus:?}"));
+                    at.note(format!("appearance dialog: {:?}", shell.appearance_dialog));
                 }
                 Step::Keys(kind, keys) => {
                     if let Some((wi, _)) = shell.find_app_tab(kind) {
@@ -967,6 +1060,19 @@ impl Autotest {
                 Step::Home => {
                     let window = shell.windows[0].viewport;
                     shell.actions.push(Action::NewTab { window, kind: TabKind::Home });
+                }
+                Step::Appearance(theme, scale) => {
+                    at.note(format!("appearance {theme:?} at {scale}"));
+                    shell.appearance = crate::appearance::Appearance { theme, ui_scale: scale, accent: shell.appearance.accent };
+                }
+                Step::CloseAppearance => shell.appearance_dialog = None,
+                Step::Accent(name) => {
+                    at.note(format!("accent {name:?}"));
+                    shell.appearance.accent = name.and_then(|n| crate::appearance::ACCENTS.iter().find(|(a, _)| *a == n)).map(|(_, rgb)| *rgb);
+                }
+                Step::LoseGpu => {
+                    at.note("losing the GPU device".into());
+                    shell.lose_gpu = true;
                 }
                 Step::Exit => {
                     at.note("exit".into());

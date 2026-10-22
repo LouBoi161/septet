@@ -1,0 +1,50 @@
+# A quick check on every push and pull request: the shell with one app at a time (`--features
+# <app>`, see septet/Cargo.toml), so a broken app shows up in its own job, and each job's cache stays
+# small. Linux only; the release workflow builds every platform.
+name: Check
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  HOSTED_BUILD: "1"
+
+jobs:
+  check:
+    name: ${{ matrix.app }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [photocraft, vectorcraft, lightcraft, designcraft, pdfcraft, filmcraft, effectcraft]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config cmake nasm libasound2-dev libwayland-dev libxkbcommon-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libvulkan-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: check-${{ matrix.app }}
+
+      - name: Check
+        run: cargo check --locked -p septet --no-default-features --features ${{ matrix.app }}

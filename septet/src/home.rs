@@ -96,7 +96,7 @@ fn sidebar_ui(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellCol
     ui.add_space(22.0);
     ui.label(egui::RichText::new("RUNNING").font(theme::semibold(10.5)).color(c.text_dim));
     ui.add_space(6.0);
-    let running: Vec<AppKind> = AppKind::ALL.into_iter().filter(|k| shell.apps.contains_key(k)).collect();
+    let running: Vec<AppKind> = AppKind::all().filter(|k| shell.apps.contains_key(k)).collect();
     if running.is_empty() {
         ui.label(egui::RichText::new("No apps open").font(FontId::proportional(12.0)).color(c.text_dim));
     }
@@ -112,9 +112,9 @@ fn sidebar_ui(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellCol
             shell.actions.push(Action::NewTab { window: viewport, kind: TabKind::App(kind) });
         }
     }
-    // Claude, About and Open file, pinned to the bottom.
+    // Claude, Appearance, About and Open file, pinned to the bottom.
     let bottom = ui.max_rect().bottom();
-    let claude = egui::Rect::from_min_max(pos2(ui.max_rect().left(), bottom - 96.0), pos2(ui.max_rect().right(), bottom - 74.0));
+    let claude = egui::Rect::from_min_max(pos2(ui.max_rect().left(), bottom - 122.0), pos2(ui.max_rect().right(), bottom - 100.0));
     let resp = ui.interact(claude, Id::new(("septet-home-claude", viewport)), Sense::click());
     ui.painter().text(
         claude.left_center() + vec2(4.0, 0.0),
@@ -125,6 +125,18 @@ fn sidebar_ui(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellCol
     );
     if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
         shell.assistant.toggle_panel(ui.ctx(), viewport);
+    }
+    let appearance = egui::Rect::from_min_max(pos2(ui.max_rect().left(), bottom - 96.0), pos2(ui.max_rect().right(), bottom - 74.0));
+    let resp = ui.interact(appearance, Id::new(("septet-home-appearance", viewport)), Sense::click());
+    ui.painter().text(
+        appearance.left_center() + vec2(4.0, 0.0),
+        Align2::LEFT_CENTER,
+        "Appearance",
+        theme::medium(12.5),
+        if resp.hovered() { c.text } else { c.text_dim },
+    );
+    if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
+        shell.appearance_dialog = Some(viewport);
     }
     let about = egui::Rect::from_min_max(pos2(ui.max_rect().left(), bottom - 70.0), pos2(ui.max_rect().right(), bottom - 48.0));
     let resp = ui.interact(about, Id::new(("septet-home-about", viewport)), Sense::click());
@@ -141,7 +153,7 @@ fn sidebar_ui(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellCol
     let r = Rect::from_min_max(pos2(ui.max_rect().left(), bottom - 38.0), pos2(ui.max_rect().right(), bottom));
     let resp = ui.interact(r, Id::new(("septet-home-open", viewport)), Sense::click());
     ui.painter().rect_filled(r, 9.0, if resp.hovered() { theme::lighten(c.accent, 0.1) } else { c.accent });
-    ui.painter().text(r.center(), Align2::CENTER_CENTER, "Open File…", theme::semibold(13.5), Color32::from_rgb(0x14, 0x14, 0x17));
+    ui.painter().text(r.center(), Align2::CENTER_CENTER, "Open File…", theme::semibold(13.5), c.on_accent);
     if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
         pick_and_open(shell, Some(viewport), None);
     }
@@ -185,7 +197,8 @@ fn app_grid(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellColor
     let width = ui.available_width();
     let cols = (((width + gap) / (card_w + gap)).floor() as usize).max(1);
     let card_w = (width - gap * (cols as f32 - 1.0)) / cols as f32;
-    for row in AppKind::ALL.chunks(cols) {
+    let apps: Vec<AppKind> = AppKind::all().collect();
+    for row in apps.chunks(cols) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             for &kind in row {
@@ -332,14 +345,14 @@ pub fn open_in_system(path: &std::path::Path) {
 /// File › Open: every file type the apps know, or just `app`'s.
 pub fn pick_and_open(shell: &mut Shell, window: Option<ViewportId>, app: Option<AppKind>) {
     let mut dialog = rfd::FileDialog::new().set_title("Open in Septet");
-    let all: Vec<&str> = AppKind::ALL.iter().flat_map(|k| k.extensions().iter().copied()).collect();
+    let all: Vec<&str> = AppKind::all().flat_map(|k| k.extensions().iter().copied()).collect();
     match app {
         Some(kind) => {
             dialog = dialog.add_filter(kind.name(), kind.extensions());
         }
         None => {
             dialog = dialog.add_filter("All supported files", &all);
-            for kind in AppKind::ALL {
+            for kind in AppKind::all() {
                 dialog = dialog.add_filter(kind.name(), kind.extensions());
             }
         }

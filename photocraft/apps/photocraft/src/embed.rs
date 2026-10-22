@@ -182,6 +182,52 @@ impl Embedded {
         self.app.session.documents().iter().any(|d| d.is_dirty())
     }
 
+    /// Septet's handlers on the shared GPU device saw an error or the loss of the device (it sets
+    /// them for every app: wgpu keeps one of each). The GPU canvas falls back to the CPU on the
+    /// next frame, as when its own handler saw it.
+    pub fn gpu_failed(&mut self, lost: bool, message: &str) {
+        use photocraft_ui_egui::gpu_canvas::Fault;
+        if let Some(health) = self.app.gpu_health() {
+            health.mark(if lost { Fault::Lost(message.to_string()) } else { Fault::Error(message.to_string()) });
+        }
+    }
+
+    /// Write recovery copies of the documents with unsaved changes now, whatever the autosave
+    /// preference, and wait for them (up to 20 s): Septet lost its graphics device and starts
+    /// again. Whether every one was written.
+    pub fn save_recovery(&mut self) -> bool {
+        let jobs: Vec<_> = self.app.session.documents().iter().filter(|d| d.is_dirty()).map(|d| (d.doc.clone(), d.revision, d.path.clone())).collect();
+        let Some(save) = self.app.services.autosave.as_mut() else { return jobs.is_empty() };
+        let mut ok = true;
+        let mut waiting = std::collections::HashSet::new();
+        for (doc, revision, path) in jobs {
+            match save(&doc, revision, path.as_deref()) {
+                Ok(()) => {
+                    waiting.insert((doc.id.0, revision));
+                }
+                Err(e) => {
+                    log::error!("photocraft: no recovery copy of {}: {e}", doc.id.0);
+                    ok = false;
+                }
+            }
+        }
+        // Without a results poll the writes were synchronous.
+        let Some(results) = self.app.services.autosave_results.as_mut() else { return ok };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !waiting.is_empty() && std::time::Instant::now() < deadline {
+            for (id, revision, result) in results() {
+                if waiting.remove(&(id, revision))
+                    && let Err(e) = result
+                {
+                    log::error!("photocraft: no recovery copy of {id}: {e}");
+                    ok = false;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        ok && waiting.is_empty()
+    }
+
     /// Open files as command-line paths do (documents; brushes and gradients go to their
     /// libraries).
     pub fn open_paths(&mut self, paths: &[PathBuf]) {
@@ -217,6 +263,20 @@ impl Embedded {
             Ok(mut slot) => *slot = Some(handler),
             Err(_) => log::warn!("the open-externally handler is in use; keeping the previous one"),
         }
+    }
+
+    /// Septet's brightness, 0 (darkest) to 3 (lightest): the four Pro themes, instead of
+    /// PhotoCraft's own until `None`. It isn't saved as PhotoCraft's.
+    pub fn set_appearance(&mut self, level: Option<u8>, accent: Option<egui::Color32>) {
+        photocraft_ui_egui::hosted::set_accent(accent);
+        use photocraft_ui_egui::theme::ThemeKind;
+        const PRO: [ThemeKind; 4] = [ThemeKind::Pro, ThemeKind::ProMedium, ThemeKind::ProLightGray, ThemeKind::ProLight];
+        photocraft_ui_egui::hosted::set_theme(level.map(|l| PRO[usize::from(l.min(3))]));
+    }
+
+    /// While Septet sets the theme, PhotoCraft's theme commands open Septet's settings.
+    pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
+        photocraft_ui_egui::hosted::set_open_appearance(handler);
     }
 
     /// Links to a sibling ArtCraft app's page (`getartcraft.com/apps/<name>`) call `handler(name)`

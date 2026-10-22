@@ -31,10 +31,14 @@ unicode-segmentation = "1.13"
 # Builds a small variable font for tests (`test_fonts`; no font file is committed). MIT OR
 # Apache-2.0, already in the build through subsetter.
 write-fonts = { version = "0.48", optional = true }
+# Septet: the suite's single copy of the craft fonts (`shared-craft-fonts` feature, see build.rs).
+shared-craft-fonts = { path = "../../../shared/craft-fonts", optional = true }
 
 [features]
 # `vectorcraft_text::test_fonts` for other crates' tests (dev-dependencies only).
 test-fonts = ["dep:write-fonts"]
+# Septet turns this on: CRAFT_FONTS refers to the fonts embedded once for all apps.
+shared-craft-fonts = ["dep:shared-craft-fonts"]
 
 [dev-dependencies]
 write-fonts = "0.48"

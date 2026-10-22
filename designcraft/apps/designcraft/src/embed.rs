@@ -163,18 +163,34 @@ impl Embedded {
                 (path, time)
             })
             .collect();
+        self.save_recovery();
+    }
+
+    /// Write the crash-recovery data of edited documents not written since their last change →
+    /// whether they all have it (also Septet's call before it restarts after losing its graphics
+    /// device).
+    pub fn save_recovery(&mut self) -> bool {
         if self.app.session.recovery_dir.is_none() {
-            return;
+            return !self.has_unsaved_changes();
         }
         let dirty: Vec<(u64, u64)> = self.app.session.documents().iter().filter(|d| d.is_dirty()).map(|d| (d.uid, d.revision)).collect();
         if dirty.is_empty() || dirty == self.recovery_written {
-            return;
+            return true;
         }
         match self.app.session.execute("file.recovery.save", &json!({})) {
-            Ok(_) => self.recovery_written = dirty,
-            Err(e) => self.app.status(format!("Couldn't write recovery data: {e}")),
+            Ok(_) => {
+                self.recovery_written = dirty;
+                true
+            }
+            Err(e) => {
+                self.app.status(format!("Couldn't write recovery data: {e}"));
+                false
+            }
         }
     }
+
+    /// The canvas draws on the CPU: nothing to fall back from.
+    pub fn gpu_failed(&mut self, _lost: bool, _message: &str) {}
 
     /// `links.update` for the linked files changed since the tab was hidden, in every document.
     fn update_changed_links(&mut self) {
@@ -224,6 +240,20 @@ impl Embedded {
     /// call `handler` with the app's lowercase name instead of opening its web page.
     pub fn set_open_app(&mut self, handler: Box<dyn FnMut(&str)>) {
         self.app.services.open_app = Some(handler);
+    }
+
+    /// Septet's brightness, 0 (darkest) to 3 (lightest), instead of the app's own until `None`.
+    /// It isn't saved as the app's: the standalone app keeps its own.
+    pub fn set_appearance(&mut self, level: Option<u8>, accent: Option<egui::Color32>) {
+        designcraft_ui_egui::hosted::set_accent(accent);
+        use designcraft_ui_egui::theme::Brightness;
+        hosted::set_brightness(level.map(|l| Brightness::ALL[usize::from(l.min(3))]));
+        self.app.restyle = true;
+    }
+
+    /// While Septet sets the brightness, the app's theme commands open Septet's settings.
+    pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
+        hosted::set_open_appearance(handler);
     }
 
     /// A page dragged from the Pages panel ("Page 3"), or objects dragged off the canvas with

@@ -430,7 +430,7 @@ fn approval_card(a: &mut Assistant, ui: &mut Ui) {
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.add(egui::Button::new(RichText::new("Allow").color(Color32::BLACK)).fill(c.accent)).clicked() {
+            if ui.add(egui::Button::new(RichText::new("Allow").color(c.on_accent)).fill(c.accent)).clicked() {
                 choice = Some(Choice::Once);
             }
             if ui.button("Always in this chat").clicked() {
@@ -470,12 +470,12 @@ fn send_button(ui: &mut Ui, busy: bool, can_send: bool, c: &ShellColors) -> egui
     let painter = ui.painter();
     let center = rect.center();
     if busy {
-        painter.circle_filled(center, 14.0, if resp.hovered() { Color32::WHITE } else { c.text });
+        painter.circle_filled(center, 14.0, if resp.hovered() { theme::mix(c.text, c.text_dim, 0.5) } else { c.text });
         painter.rect_filled(Rect::from_center_size(center, vec2(9.0, 9.0)), 2.0, c.home_bg);
         return resp.on_hover_text("Stop").on_hover_cursor(CursorIcon::PointingHand);
     }
     let (bg, fg) = if can_send {
-        (if resp.hovered() { theme::lighten(c.accent, 0.12) } else { c.accent }, Color32::from_rgb(0x14, 0x14, 0x17))
+        (if resp.hovered() { theme::lighten(c.accent, 0.12) } else { c.accent }, c.on_accent)
     } else {
         (theme::mix(c.card, c.text_dim, 0.18), theme::mix(c.card, c.text_dim, 0.7))
     };
@@ -526,7 +526,7 @@ fn composer_ui(a: &mut Assistant, ui: &mut Ui, ctx: &Context, viewport: Viewport
     let text_h = out.inner.galley.rect.height().max(18.0);
 
     let mut bu = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(Layout::left_to_right(Align::Center)));
-    let hover_bg = theme::mix(c.card, Color32::WHITE, 0.06);
+    let hover_bg = theme::mix(c.card, c.text, 0.06);
     let model = chip(&mut bu, super::model_name(a.settings.model.as_deref()), c.text_dim, hover_bg).on_hover_text("Model (always the newest of each)");
     egui::Popup::menu(&model).show(|ui| {
         for (m, name) in super::MODELS {

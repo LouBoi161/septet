@@ -8,8 +8,10 @@
 //! (`docs/brand/LICENSE-brand.txt`). Standalone (the default) nothing changes.
 //!
 //! A host can also keep everything PhotoCraft stores per user under one folder of its own
-//! ([`set_data_root`]), as PhotoCraft's portable mode does.
+//! ([`set_data_root`]), as PhotoCraft's portable mode does, and set the interface brightness for
+//! all the apps it shows ([`set_theme`]).
 
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{PoisonError, RwLock};
@@ -20,6 +22,80 @@ static DATA_ROOT: RwLock<Option<PathBuf>> = RwLock::new(None);
 /// Where this modified version of PhotoCraft comes from, in plain text (the About box): the
 /// ArtCraft marks are removed from it (`docs/brand/README.md`).
 pub const ATTRIBUTION: &str = "Based on PhotoCraft by the ArtCraft team (MIT OR Apache-2.0)";
+
+thread_local! {
+    static THEME: Cell<Option<crate::theme::ThemeKind>> = const { Cell::new(None) };
+    static OPEN_APPEARANCE: RefCell<Option<Box<dyn FnMut()>>> = const { RefCell::new(None) };
+}
+
+/// The host's theme, shown instead of Preferences › Interface › Appearance and never saved as it;
+/// `None` (the default) shows PhotoCraft's own.
+pub fn set_theme(theme: Option<crate::theme::ThemeKind>) {
+    THEME.set(theme);
+}
+
+/// The host's theme ([`set_theme`]), if it sets one.
+pub fn theme() -> Option<crate::theme::ThemeKind> {
+    THEME.get()
+}
+
+/// The host's appearance settings, which the theme commands open while the host sets the theme.
+pub fn set_open_appearance(open: Box<dyn FnMut()>) {
+    OPEN_APPEARANCE.set(Some(open));
+}
+
+/// Open the host's appearance settings ([`set_open_appearance`]) → whether there are any.
+pub fn open_appearance() -> bool {
+    OPEN_APPEARANCE.with_borrow_mut(|open| open.as_mut().map(|open| open()).is_some())
+}
+
+thread_local! {
+    static ACCENT: Cell<Option<egui::Color32>> = const { Cell::new(None) };
+    static RESTYLE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The host's accent colour, shown instead of the theme's (buttons, selections, focus) and never
+/// saved as it; `None` (the default) keeps the theme's.
+pub fn set_accent(accent: Option<egui::Color32>) {
+    if ACCENT.replace(accent) != accent {
+        RESTYLE.set(true);
+    }
+}
+
+/// The host's accent colour ([`set_accent`]), if it sets one.
+pub fn accent() -> Option<egui::Color32> {
+    ACCENT.get()
+}
+
+/// Whether the host's accent changed since the last call: the theme is applied again.
+pub fn take_restyle() -> bool {
+    RESTYLE.replace(false)
+}
+
+/// `c` recoloured from the theme's accent `from` to `to`: `to`'s hue, with `c`'s saturation and
+/// brightness relative to `from` and its own alpha. Greys (white text, grey fills) stay.
+pub(crate) fn recolor(c: egui::Color32, from: egui::Color32, to: egui::Color32) -> egui::Color32 {
+    use egui::ecolor::HsvaGamma;
+    let (c, from, to) = (HsvaGamma::from(c), HsvaGamma::from(from), HsvaGamma::from(to));
+    if c.s < 0.04 || from.s < 0.05 || from.v < 0.05 {
+        return c.into();
+    }
+    HsvaGamma { h: to.h, s: (to.s * c.s / from.s).clamp(0.0, 1.0), v: (to.v * c.v / from.v).clamp(0.0, 1.0), a: c.a }.into()
+}
+
+/// Tokens `t` with the host's accent ([`set_accent`]) in place of the theme's.
+pub(crate) fn with_accent(mut t: crate::theme::Tokens) -> crate::theme::Tokens {
+    if let Some(to) = accent() {
+        let from = t.accent;
+        t.accent = recolor(t.accent, from, to);
+        t.accent_soft = recolor(t.accent_soft, from, to);
+        t.accent_border = recolor(t.accent_border, from, to);
+        t.accent_text = recolor(t.accent_text, from, to);
+        t.primary_bg = recolor(t.primary_bg, from, to);
+        t.row_selected = recolor(t.row_selected, from, to);
+    }
+    t
+}
 
 /// Switch hosted mode on (before the app is built) or off.
 pub fn set_hosted(hosted: bool) {

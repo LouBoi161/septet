@@ -297,7 +297,7 @@ fn add_craft_fonts(fonts: &mut FontDefinitions) {
 
 /// Apply tokens to egui's global style.
 pub fn apply(ctx: &egui::Context, b: Brightness) {
-    let t = Tokens::for_brightness(b);
+    let t = crate::hosted::with_accent(Tokens::for_brightness(b));
     ctx.data_mut(|d| d.insert_temp(egui::Id::NULL, t));
     let mut v = if t.dark { Visuals::dark() } else { Visuals::light() };
     v.panel_fill = t.panel;
