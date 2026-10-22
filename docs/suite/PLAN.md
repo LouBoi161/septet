@@ -353,8 +353,13 @@ Stand 2026-10-23 (Branch `phase-h`, auf `appearance-lightcraft`): **H1–H5 umge
   des Dokuments, ein Undo-Schritt, Ebenenname = Prompt + Seed). Septet: `generate.rs` (Prompt-Dialog,
   Fortschritt unten rechts mit Abbrechen). Die anderen Apps: noch nicht.
 - H4 Claude: `image_generate`, `image_edit` (`assistant/images.rs`), in derselben Warteschlange.
-- H5 `comfy/mock.rs` (Schein-ComfyUI) für Unit-Tests und Autotest `generate` (beide grün). Echter Lauf
-  (`generate::real`, `#[ignore]`) scheiterte bisher nur daran, dass Ollama (`gemma4-chatty`) die GPU belegt.
+- H5 `comfy/mock.rs` (Schein-ComfyUI, auch Schein-Ollama) für Unit-Tests und Autotest `generate` (beide grün).
+  Echter Lauf (`generate::real`, `#[ignore]`) am 2026-10-23 grün: Füllen 13–15 s, Erzeugen 9 s (Turbo, 1 MP);
+  Einfügen (Minzblatt) sehr gut, Entfernen ergänzt plausibel, harte Auswahlkanten bekommen deshalb eine leicht
+  weiche Kante (`generate::soften`).
+- Speicher knapp (User, 2026-10-23: „kurz entladen, wenn geladen“): zuerst `/free` an ComfyUI (Modelle anderer
+  Clients), dann Ollamas geladene Modelle mit `keep_alive: 0` entladen (Ollama lädt sie bei Bedarf neu); erst dann
+  die Meldung. Schalter in den Einstellungen, Standard an.
 
 ## Ein Erscheinungsbild für alle Apps (A4)
 

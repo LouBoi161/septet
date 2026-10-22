@@ -14,6 +14,7 @@ pub mod client;
 pub mod dialog;
 pub mod launch;
 pub mod mock;
+pub mod ollama;
 pub mod workflow;
 
 use std::collections::VecDeque;
@@ -46,6 +47,10 @@ pub struct Settings {
     /// End a ComfyUI Septet started after this many idle minutes.
     pub stop_after_min: u32,
     pub model: Model,
+    /// Before a job that doesn't fit, unload Ollama's models (it loads them again when asked).
+    pub unload_ollama: bool,
+    /// Where Ollama answers.
+    pub ollama_address: String,
 }
 
 impl Default for Settings {
@@ -58,6 +63,12 @@ impl Default for Settings {
             unload_after_min: 2,
             stop_after_min: 10,
             model: Model::default(),
+            unload_ollama: true,
+            ollama_address: std::env::var("OLLAMA_HOST")
+                .ok()
+                .filter(|h| !h.is_empty())
+                .map(|h| if h.contains("://") { h } else { format!("http://{h}") })
+                .unwrap_or_else(|| "http://127.0.0.1:11434".into()),
         }
     }
 }
@@ -417,7 +428,7 @@ impl Worker {
             }
         };
         self.check_graph(&graph)?;
-        self.check_memory()?;
+        self.check_memory(id)?;
         let mut progress = self.client.progress();
         let prompt = self.client.queue(&graph)?;
         self.stage(id, Stage::Busy("Loading the model".into()));
@@ -523,13 +534,41 @@ impl Worker {
 
     /// Enough free graphics memory (as ComfyUI sees its card) when it has nothing loaded; else
     /// who holds it.
-    fn check_memory(&self) -> Result<(), String> {
+    fn check_memory(&self, id: JobId) -> Result<(), String> {
         if self.loaded {
             return Ok(());
         }
-        let Some(free) = self.client.vram_free_mib() else { return Ok(()) };
+        let Some(mut free) = self.client.vram_free_mib() else { return Ok(()) };
         if free >= MIN_FREE_MIB {
             return Ok(());
+        }
+        // What ComfyUI itself still holds (from another client's job) it gives back first.
+        let wait_free = |seconds: u64| {
+            let since = Instant::now();
+            loop {
+                let free = self.client.vram_free_mib().unwrap_or(0);
+                if free >= MIN_FREE_MIB || since.elapsed() >= Duration::from_secs(seconds) {
+                    return free;
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        };
+        self.stage(id, Stage::Busy("Making room on the graphics card".into()));
+        let _ = self.client.free();
+        free = wait_free(5);
+        if free >= MIN_FREE_MIB {
+            return Ok(());
+        }
+        let models = if self.settings.unload_ollama { ollama::loaded(&self.settings.ollama_address) } else { Vec::new() };
+        if !models.is_empty() {
+            self.stage(id, Stage::Busy("Unloading Ollama's models".into()));
+            for m in &models {
+                ollama::unload(&self.settings.ollama_address, m);
+            }
+            free = wait_free(20);
+            if free >= MIN_FREE_MIB {
+                return Ok(());
+            }
         }
         let users = launch::gpu_memory().map(|(_, u)| u).unwrap_or_default();
         let others: Vec<String> = users
@@ -612,7 +651,7 @@ mod tests {
     fn jobs_run_against_a_stand_in_server() {
         let server = mock::Server::start().unwrap();
         let ctx = egui::Context::default();
-        let settings = Settings { address: server.address(), autostart: false, ..Default::default() };
+        let settings = Settings { address: server.address(), autostart: false, ollama_address: server.address(), ..Default::default() };
         let mut comfy = Comfy::with_settings(&ctx, settings);
         let id = comfy.submit(Job { task: Task::Generate { prompt: "a red square".into(), width: 512, height: 256 }, model: Model::Turbo, seed: 5 });
         let img = wait(&comfy, id).unwrap();
@@ -640,6 +679,11 @@ mod tests {
         server.set_vram_free_mib(1000);
         let id = comfy.submit(Job { task: Task::Generate { prompt: "x".into(), width: 512, height: 512 }, model: Model::Turbo, seed: 1 });
         assert!(wait(&comfy, id).unwrap_err().starts_with("Only 1.0 GB of graphics memory are free"));
+        // Ollama holds the memory: its model is unloaded, then the job runs.
+        server.set_ollama_model(Some("gemma"));
+        let id = comfy.submit(Job { task: Task::Generate { prompt: "x".into(), width: 512, height: 512 }, model: Model::Turbo, seed: 1 });
+        assert!(wait(&comfy, id).is_ok());
+        assert!(server.requests().iter().any(|r| r == "POST /api/generate keep_alive=0 gemma"));
         comfy.shutdown();
     }
 

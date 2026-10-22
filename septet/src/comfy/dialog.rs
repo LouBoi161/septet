@@ -74,6 +74,8 @@ pub fn settings(open: &mut bool, ctx: &Context, comfy: &mut Comfy) {
             });
             ui.label(RichText::new("Graphics memory ComfyUI leaves free when Septet starts it. Less for ComfyUI is slower, never a crash.").size(11.5).color(c.text_dim));
         });
+        ui.checkbox(&mut s.unload_ollama, "Unload Ollama's models when the graphics memory is short")
+            .on_hover_text("Ollama loads them again on its next request.");
         ui.add_space(10.0);
         ui.label(RichText::new("When idle").font(theme::semibold(13.0)));
         ui.horizontal(|ui| {

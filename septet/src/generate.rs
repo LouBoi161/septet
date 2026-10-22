@@ -232,6 +232,7 @@ fn start(shell: &mut Shell, ctx: &Context, p: &Prompt) -> Result<(), String> {
         Generate::Fill => {
             let mask = source.mask.ok_or("Make a selection first: Generative Fill fills it.")?;
             let img = fill_input(&source.image, &mask);
+            let mask = soften(mask, w as usize, h as usize);
             let resolution = workflow::snap((f64::from(w) * f64::from(h)).sqrt().clamp(1024.0, 1440.0) as u32);
             (Task::Edit { prompt: workflow::fill_prompt(&p.text), images: vec![img], resolution }, Some(mask))
         }
@@ -284,6 +285,34 @@ fn fill_input(image: &egui::ColorImage, mask: &[u8]) -> image::RgbaImage {
     } else {
         out
     }
+}
+
+/// A hard-edged selection gets a slightly soft edge for the layer mask, so the new pixels don't
+/// show a seam against the old ones (as Photoshop does). Soft selections stay as they are.
+fn soften(mask: Vec<u8>, w: usize, h: usize) -> Vec<u8> {
+    if mask.len() != w * h || mask.iter().any(|&m| m != 0 && m != 255) {
+        return mask;
+    }
+    let r = (w.min(h) / 100).max(2);
+    // Two box blurs are close to a Gaussian.
+    let mut m: Vec<u16> = mask.iter().map(|&v| u16::from(v)).collect();
+    for _ in 0..2 {
+        for (len, stride, count, step) in [(w, 1, h, w), (h, w, w, 1)] {
+            let mut line = vec![0u16; len];
+            for i in 0..count {
+                let base = i * step;
+                for (j, out) in line.iter_mut().enumerate() {
+                    let (a, b) = (j.saturating_sub(r), (j + r).min(len - 1));
+                    let sum: u32 = (a..=b).map(|k| u32::from(m[base + k * stride])).sum();
+                    *out = (sum / (b - a + 1) as u32) as u16;
+                }
+                for (j, v) in line.iter().enumerate() {
+                    m[base + j * stride] = *v;
+                }
+            }
+        }
+    }
+    m.into_iter().map(|v| v.min(255) as u8).collect()
 }
 
 /// The jobs started in this window: what they are doing, Cancel; failures until closed.
@@ -355,6 +384,17 @@ mod tests {
         assert_eq!(out.get_pixel(1, 0).0, [128, 128, 128, 255]);
         let big = egui::ColorImage::new([3000, 1000], vec![egui::Color32::BLACK; 3_000_000]);
         assert_eq!(fill_input(&big, &[]).dimensions(), (1536, 512));
+    }
+
+    #[test]
+    fn hard_selections_get_a_soft_edge_soft_ones_stay() {
+        let (w, h) = (40, 20);
+        let hard: Vec<u8> = (0..w * h).map(|i| if i % w < 20 { 255 } else { 0 }).collect();
+        let soft = soften(hard.clone(), w, h);
+        assert_eq!((soft[5 * w + 2], soft[5 * w + 37]), (255, 0), "far from the edge: unchanged");
+        assert!(soft[5 * w + 19] > 0 && soft[5 * w + 19] < 255 && soft[5 * w + 20] > 0, "a ramp across the edge");
+        let feathered: Vec<u8> = hard.iter().map(|&v| v / 2).collect();
+        assert_eq!(soften(feathered.clone(), w, h), feathered);
     }
 }
 

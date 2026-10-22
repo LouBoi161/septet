@@ -18,6 +18,8 @@ struct State {
     /// Prompt id → (finished at, the result's PNG); `None` result: still running or cancelled.
     jobs: HashMap<String, (Instant, Option<Vec<u8>>)>,
     hidden: Vec<String>,
+    /// A model "Ollama" holds; unloading it frees the graphics memory.
+    ollama: Option<String>,
 }
 
 pub struct Server {
@@ -62,6 +64,11 @@ impl Server {
     /// Leave a model file out of the loaders' lists.
     pub fn hide_model(&self, file: &str) {
         self.state.lock().unwrap_or_else(PoisonError::into_inner).hidden.push(file.to_owned());
+    }
+
+    /// Also play Ollama, holding `model` (`/api/ps`); unloading it frees the memory.
+    pub fn set_ollama_model(&self, model: Option<&str>) {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner).ollama = model.map(str::to_owned);
     }
 
     pub fn set_vram_free_mib(&self, mib: u64) {
@@ -160,6 +167,23 @@ fn serve(stream: TcpStream, state: &Mutex<State>, slow: &AtomicBool, vram: &Atom
             // The running job never finishes.
             for (_, png) in lock().jobs.values_mut() {
                 *png = None;
+            }
+            (200, "application/json", b"{}".to_vec())
+        }
+        ("GET", "/api/ps") => {
+            let models: Vec<Value> = lock().ollama.iter().map(|m| json!({"name": m})).collect();
+            (200, "application/json", json!({ "models": models }).to_string().into_bytes())
+        }
+        ("POST", "/api/generate") => {
+            let v: Value = serde_json::from_slice(&body).unwrap_or_default();
+            if v["keep_alive"] == 0 {
+                let model = v["model"].as_str().unwrap_or("").to_owned();
+                let mut st = lock();
+                st.requests.push(format!("POST /api/generate keep_alive=0 {model}"));
+                if st.ollama.as_deref() == Some(model.as_str()) {
+                    st.ollama = None;
+                    vram.store(10_000, Ordering::Relaxed);
+                }
             }
             (200, "application/json", b"{}".to_vec())
         }
