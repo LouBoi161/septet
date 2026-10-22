@@ -1036,7 +1036,7 @@ mod tests {
         let before = bounds(&app);
         let vi = app.view_info();
         for (kind, x, y) in [(PointerKind::Down, 100.0, 100.0), (PointerKind::Drag, 130.0, 100.0), (PointerKind::Drag, 400.0, 300.0)] {
-            app.session.pointer(&PointerEvent { kind, pos: on_canvas(&app, x, y), mods: Default::default() }, vi).unwrap();
+            app.session.pointer(&PointerEvent { kind, pos: on_canvas(&app, x, y), mods: Default::default(), clicks: 1 }, vi).unwrap();
         }
         assert_ne!(bounds(&app), before);
         let ctx = egui::Context::default();

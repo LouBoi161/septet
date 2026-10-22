@@ -412,6 +412,29 @@ fn smooth_tool_reduces_jagged_path() {
     assert_eq!(p.subpaths[0].anchors[0].p, Point::new(100.0, 200.0));
 }
 
+/// #1512: a short drag over a small bump smooths the stretch of path under it. The long straight
+/// sides next to the bump stay straight lines from their far ends, which keep their place.
+#[test]
+fn a_short_smooth_drag_leaves_the_rest_of_long_segments_alone() {
+    let mut s = session();
+    let anchors: Vec<_> =
+        [(50.0, 200.0), (190.0, 200.0), (200.0, 192.0), (210.0, 200.0), (350.0, 200.0)].map(|(x, y)| json!({"x": x, "y": y})).to_vec();
+    let r = s.execute("path.create", &json!({"anchors": anchors})).unwrap();
+    let id = NodeId(r["id"].as_u64().unwrap());
+    let before = path(&s, id);
+    drag(&mut s, "smooth", &[(195.0, 194.0), (205.0, 194.0)], Mods::default());
+    let p = path(&s, id);
+    assert_ne!(p, before, "the bump is smoothed");
+    let a = &p.subpaths[0].anchors;
+    let (first, second, last) = (a[0], a[1], a[a.len() - 1]);
+    assert!(first.p == Point::new(50.0, 200.0) && !first.has_out() && !second.has_in(), "the left side is a line still: {first:?} {second:?}");
+    assert!(last.p == Point::new(350.0, 200.0) && !last.has_in() && !a[a.len() - 2].has_out(), "and the right one: {last:?}");
+    // Every other anchor is within the tool's reach of the drag (12 px either way).
+    for x in &a[1..a.len() - 1] {
+        assert!((182.0..=218.0).contains(&x.p.x) && (190.0..=201.0).contains(&x.p.y), "{x:?}");
+    }
+}
+
 #[test]
 fn join_tool_joins_two_lines() {
     let mut s = session();
@@ -440,6 +463,132 @@ fn line_family_tools_draw_and_click_asks_dialog() {
     assert!((b.width() - 100.0).abs() < 1e-6 && (b.height() - 50.0).abs() < 1e-6, "{b:?}");
     let ui = click(&mut s, "polarGrid", 10.0, 10.0);
     assert_eq!(ui, vec![UiRequest::Dialog("polarGrid".into(), json!({"x": 10.0, "y": 10.0}))]);
+}
+
+/// The children of the grid a `shape.rectangularGrid` / `shape.polarGrid` call made, bottom first.
+fn grid(s: &mut Session, cmd: &str, p: serde_json::Value) -> Vec<std::sync::Arc<vectorcraft_doc::Node>> {
+    let id = NodeId(s.execute(cmd, &p).unwrap()["id"].as_u64().unwrap());
+    s.doc().unwrap().doc.node(id).unwrap().children().unwrap().to_vec()
+}
+
+/// `base` with the keys of `extra` added.
+fn with(base: &serde_json::Value, extra: serde_json::Value) -> serde_json::Value {
+    let mut p = base.clone();
+    p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+    p
+}
+
+fn is_filled(n: &vectorcraft_doc::Node) -> bool {
+    n.appearance.fill().is_some_and(|f| f.paint != vectorcraft_color::Paint::None)
+}
+
+/// #1377: the Rectangular Grid options. By default the frame is one rectangle under evenly spaced
+/// dividers and nothing is filled; `frame: false` draws its four sides instead, `fill` paints the
+/// current fill and the skews crowd the dividers to the top / right (positive) or bottom / left.
+#[test]
+fn rectangular_grid_options_frame_fill_and_skew() {
+    const CMD: &str = "shape.rectangularGrid";
+    let mut s = session();
+    s.execute("paint.setFill", &json!({"color": "#ff0000"})).unwrap();
+    let base = json!({"x": 0, "y": 0, "width": 100, "height": 100, "rows": 3, "columns": 3});
+    // The y of the three horizontal dividers and the x of the three vertical ones (the last six children).
+    let dividers = |g: &[std::sync::Arc<vectorcraft_doc::Node>]| {
+        let starts: Vec<Point> = g[g.len() - 6..].iter().map(|n| n.path_data().unwrap().subpaths[0].anchors[0].p).collect();
+        starts[..3].iter().map(|p| p.y).chain(starts[3..].iter().map(|p| p.x)).collect::<Vec<_>>()
+    };
+    let plain = grid(&mut s, CMD, base.clone());
+    assert_eq!(plain.len(), 7);
+    assert!(plain[0].path_data().unwrap().is_closed(), "the frame lies under the dividers");
+    assert!(plain.iter().all(|n| !is_filled(n) && n.appearance.stroke().is_some()));
+    assert_eq!(dividers(&plain), [25.0, 50.0, 75.0, 25.0, 50.0, 75.0]);
+    // No frame: its four sides are lines of their own.
+    let sides = grid(&mut s, CMD, with(&base, json!({"frame": false})));
+    assert_eq!(sides.len(), 10);
+    assert!(sides.iter().all(|n| !n.path_data().unwrap().is_closed() && n.path_data().unwrap().anchor_count() == 2));
+    assert_eq!(dividers(&sides), dividers(&plain));
+    let filled = grid(&mut s, CMD, with(&base, json!({"fill": true})));
+    assert!(filled.iter().all(|n| is_filled(n)), "Fill Grid paints the current fill");
+    assert_eq!(filled[0].appearance.fill().unwrap().paint, s.paint.fill);
+    // Skew: toward the top and the right when positive, the bottom and the left when negative;
+    // past ±500 % is ±500 %.
+    let top_right = dividers(&grid(&mut s, CMD, with(&base, json!({"rowSkew": 100, "columnSkew": 100}))));
+    for (got, want) in top_right.iter().zip([6.25, 25.0, 56.25, 43.75, 75.0, 93.75]) {
+        assert!((got - want).abs() < 1e-9, "{top_right:?}");
+    }
+    let bottom_left = dividers(&grid(&mut s, CMD, with(&base, json!({"rowSkew": -100, "columnSkew": -100}))));
+    assert!(bottom_left[1] > 50.0 && bottom_left[4] < 50.0, "{bottom_left:?}");
+    let most = dividers(&grid(&mut s, CMD, with(&base, json!({"rowSkew": 500, "columnSkew": -500}))));
+    let beyond = dividers(&grid(&mut s, CMD, with(&base, json!({"rowSkew": 1e300, "columnSkew": -1e300}))));
+    assert_eq!(most, beyond);
+    assert!(most.iter().all(|v| *v > 0.0 && *v < 100.0), "{most:?}");
+}
+
+/// #1377: the Polar Grid options. The ellipses lie under the radial dividers, largest first;
+/// `compound` pairs them into compound-path rings, `fill` paints the current fill and the skews
+/// crowd the ellipses outward and the radial dividers clockwise of the top one (positive).
+#[test]
+fn polar_grid_options_compound_fill_and_skew() {
+    const CMD: &str = "shape.polarGrid";
+    let mut s = session();
+    s.execute("paint.setFill", &json!({"color": "#00ff00"})).unwrap();
+    let base = json!({"x": 0, "y": 0, "width": 100, "height": 100, "concentric": 3, "radial": 4});
+    let width = |n: &vectorcraft_doc::Node| n.geometric_bounds().unwrap().width();
+    let tips =
+        |g: &[std::sync::Arc<vectorcraft_doc::Node>]| g[4..].iter().map(|n| n.path_data().unwrap().subpaths[0].anchors[1].p).collect::<Vec<_>>();
+    let plain = grid(&mut s, CMD, base.clone());
+    assert_eq!(plain.len(), 8);
+    assert_eq!(plain[..4].iter().map(|n| width(n).round()).collect::<Vec<_>>(), [100.0, 75.0, 50.0, 25.0], "largest at the bottom");
+    assert!(plain[..4].iter().all(|n| n.path_data().unwrap().is_closed()) && plain[4..].iter().all(|n| !n.path_data().unwrap().is_closed()));
+    assert!(plain.iter().all(|n| !is_filled(n)));
+    assert!(grid(&mut s, CMD, with(&base, json!({"fill": true}))).iter().all(|n| is_filled(n)));
+    // Compound: 4 ellipses make 2 rings, each a compound path of an outside and a hole running
+    // against it that carries the grid's paint itself; with 5, the innermost ellipse stays a path.
+    let rings = grid(&mut s, CMD, with(&base, json!({"compound": true, "fill": true})));
+    assert_eq!(rings.len(), 6);
+    for (ring, sizes) in rings[..2].iter().zip([[100.0, 75.0], [50.0, 25.0]]) {
+        let NodeKind::Compound { children, rule } = &ring.kind else { panic!("{:?}", ring.kind) };
+        assert_eq!(*rule, FillRule::NonZero);
+        assert_eq!(children.iter().map(|n| width(n).round()).collect::<Vec<_>>(), sizes);
+        let areas: Vec<f64> = children.iter().map(|n| n.path_data().unwrap().subpaths[0].signed_area()).collect();
+        assert!(areas[0] * areas[1] < 0.0, "the hole runs against the outside: {areas:?}");
+        assert!(is_filled(ring) && ring.appearance.stroke().is_some());
+    }
+    let five = grid(&mut s, CMD, with(&base, json!({"compound": true, "concentric": 4, "radial": 0})));
+    assert_eq!(five.iter().map(|n| matches!(n.kind, NodeKind::Compound { .. })).collect::<Vec<_>>(), [true, true, false]);
+    // Skew.
+    let out = grid(&mut s, CMD, with(&base, json!({"concentricSkew": 100, "radialSkew": 500})));
+    for (n, want) in out[..4].iter().zip([100.0, 93.75, 75.0, 43.75]) {
+        assert!((width(n) - want).abs() < 1e-6, "{}", width(n));
+    }
+    assert!(tips(&out)[0].distance(Point::new(50.0, 0.0)) < 1e-9, "the top divider stays");
+    assert!(tips(&out)[1..].iter().all(|t| t.x > 50.0), "clockwise of the top: {:?}", tips(&out));
+    let inward = grid(&mut s, CMD, with(&base, json!({"concentricSkew": -100, "radialSkew": -500})));
+    assert!((width(&inward[1]) - 56.25).abs() < 1e-6);
+    assert!(tips(&inward)[1..].iter().all(|t| t.x < 50.0), "counterclockwise of the top: {:?}", tips(&inward));
+}
+
+/// The grid options are checked: a skew is a number and a switch true or false, or the command
+/// fails without an undo step.
+#[test]
+fn grid_commands_reject_options_of_the_wrong_type() {
+    let mut s = session();
+    let size = json!({"x": 0, "y": 0, "width": 10, "height": 10});
+    for (cmd, key, value) in [
+        ("shape.rectangularGrid", "rowSkew", json!("50")),
+        ("shape.rectangularGrid", "columnSkew", json!(true)),
+        ("shape.rectangularGrid", "frame", json!(1)),
+        ("shape.rectangularGrid", "fill", json!("yes")),
+        ("shape.polarGrid", "concentricSkew", json!([1])),
+        ("shape.polarGrid", "radialSkew", json!({})),
+        ("shape.polarGrid", "compound", json!(0)),
+        ("shape.polarGrid", "fill", json!("true")),
+    ] {
+        let before = s.doc().unwrap().history.undo.len();
+        let p = with(&size, json!({key: value}));
+        assert!(s.execute(cmd, &p).is_err(), "{cmd} {p}");
+        assert_eq!(s.doc().unwrap().history.undo.len(), before, "{cmd} left an undo step");
+        assert!(s.execute(cmd, &with(&size, json!({key: null}))).is_ok(), "{cmd}: null is the default");
+    }
 }
 
 #[test]
@@ -1015,6 +1164,31 @@ fn the_pen_continues_any_open_path_and_joins_another() {
     assert_eq!(pts(&s, a), [(400.0, 200.0), (300.0, 200.0), (200.0, 100.0), (100.0, 100.0), (50.0, 50.0)]);
 }
 
+/// #1533: two corners of a rectangle brought together by Average become one anchor on Join, in
+/// one undo step; anchors that aren't on one another leave Join as it was.
+#[test]
+fn join_merges_the_selected_anchors_average_brought_together() {
+    let mut s = session();
+    let r = rect(&mut s, 100.0, 100.0, 100.0, 80.0);
+    let pts = |s: &Session| path(s, r).subpaths[0].anchors.iter().map(|x| (x.p.x, x.p.y)).collect::<Vec<_>>();
+    s.execute("select.anchors", &json!({"id": r.0, "anchors": [[0, 0], [0, 1]], "mode": "set"})).unwrap();
+    assert!(s.execute("path.join", &json!({})).is_err(), "apart: nothing to merge, and the path is closed");
+    s.execute("path.average", &json!({"axis": "both"})).unwrap();
+    s.execute("path.join", &json!({})).unwrap();
+    assert_eq!(pts(&s), [(150.0, 100.0), (200.0, 180.0), (100.0, 180.0)]);
+    assert!(path(&s, r).subpaths[0].closed);
+    let sel = &s.doc().unwrap().selection;
+    assert!(sel.objects == [r] && sel.anchors.is_empty());
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(pts(&s).len(), 4);
+    // The closing pair: the first and last anchors of a closed path.
+    s.execute("select.anchors", &json!({"id": r.0, "anchors": [[0, 0], [0, 3]], "mode": "set"})).unwrap();
+    s.execute("path.average", &json!({"axis": "both"})).unwrap();
+    let before = pts(&s);
+    s.execute("path.join", &json!({})).unwrap();
+    assert_eq!(pts(&s), before[..3]);
+}
+
 /// `path.join {ids, ends}` joins the ends asked for, not the nearest pair; bad requests are errors.
 #[test]
 fn join_takes_the_paths_and_the_ends_to_join() {
@@ -1060,4 +1234,22 @@ fn pen_with_alt_converts_the_anchors_of_a_path_in_a_selected_group() {
         assert_eq!((a.h_in, a.h_out), (Point::new(160.0, 90.0), Point::new(240.0, 110.0)), "{wrap}");
         assert_eq!(paths(&s).len(), 1, "{wrap}: no new path");
     }
+}
+
+/// #1679: a filled pencil path keeps a stroke of None; an unfilled one with no stroke gets black,
+/// or it would show nothing.
+#[test]
+fn a_filled_pencil_path_keeps_no_stroke() {
+    let mut s = Session::new();
+    s.execute("file.new", &json!({"width": 200, "height": 200})).unwrap();
+    s.execute("select.none", &json!({})).unwrap();
+    s.execute("paint.setFill", &json!({"color": "#ff0000"})).unwrap();
+    s.execute("paint.setStroke", &json!({"none": true})).unwrap();
+    let pts = json!([[10, 10], [60, 20], [90, 80], [20, 90]]);
+    let id = NodeId(s.execute("path.freehand", &json!({"points": pts, "fill": true})).unwrap()["id"].as_u64().unwrap());
+    let n = s.doc().unwrap().doc.node(id).unwrap().clone();
+    assert!(n.appearance.stroke_paint().is_none(), "{:?}", n.appearance);
+    assert!(!n.appearance.fill_paint().is_none());
+    let id = NodeId(s.execute("path.freehand", &json!({"points": pts})).unwrap()["id"].as_u64().unwrap());
+    assert!(!s.doc().unwrap().doc.node(id).unwrap().appearance.stroke_paint().is_none());
 }

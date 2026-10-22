@@ -3,8 +3,8 @@
 //! Guides, or with them off View › Snap to Point, snap it),
 //! bounding-box scale (Shift proportional, Alt from centre) and rotate (outside corners, Shift 45°),
 //! drag a live rectangle's or polygon's corner widget to round its corners (Alt-click cycles their kind,
-//! double-click opens the Corners dialog), double-click to enter isolation mode (Double Click To
-//! Isolate), Cmd/Ctrl-click to select the object behind (Command Click to Select Objects Behind),
+//! double-click opens the Corners dialog), double-click a group or an object to enter isolation
+//! mode (Double Click To Isolate), Cmd/Ctrl-click to select the object behind (Command Click to Select Objects Behind),
 //! click or drag a ruler guide ([`crate::rulerguide`]), drag the brackets of type on a path
 //! ([`crate::pathtype`]), double-click the type widget to convert point type to area type and back
 //! ([`crate::typewidget`]).
@@ -90,6 +90,9 @@ pub(crate) struct MoveSnap {
     /// original.
     copy_targets: Option<Targets>,
     copy_points: Option<Targets>,
+    /// With Smart Guides on, the ruler guides View › Snap to Point still pulls the grabbed point
+    /// onto (#1534); `points` holds them with Smart Guides off.
+    rulers: Option<Targets>,
 }
 
 impl MoveSnap {
@@ -102,6 +105,7 @@ impl MoveSnap {
             points: points(&cx.selection.objects),
             copy_targets: guides.then(|| Targets::for_move(cx, &[])),
             copy_points: points(&[]),
+            rulers: (guides && cx.snap_to_point).then(|| Targets::rulers(cx)),
         }
     }
 
@@ -130,6 +134,14 @@ impl MoveSnap {
             } else {
                 let (adj, ov) = t.snap_rect(b + d, cx.snap_tol());
                 d += adj;
+                guides = ov;
+            }
+        }
+        // A ruler guide within reach of the grabbed point wins over lining the bounds up.
+        if let Some(t) = &self.rulers {
+            let (q, ov) = t.snap_point(start + d, cx.tol(cx.snap_tolerance));
+            if q != start + d {
+                d = q - start;
                 guides = ov;
             }
         }
@@ -234,7 +246,11 @@ impl Tool for SelectionTool {
     }
 
     fn transforming(&self) -> bool {
-        matches!(self.state, State::Moving { began: true, .. } | State::Scaling { .. } | State::Rotating { .. })
+        match &self.state {
+            State::Moving { began: true, .. } | State::Scaling { .. } | State::Rotating { .. } => true,
+            State::Corner(c) => c.adjusting(),
+            _ => false,
+        }
     }
 
     fn pointer(&mut self, cx: &ToolContext, ev: &PointerEvent) -> Vec<Action> {
@@ -260,11 +276,18 @@ impl Tool for SelectionTool {
                 }
                 if let Some(h) = hit_test(cx.doc, p, cx.hit_options()) {
                     let top = h.top_object(cx.isolation);
-                    if cx.double_click_isolate && cx.doc.node(top).is_some_and(|n| matches!(n.kind, vectorcraft_doc::NodeKind::Group { .. })) {
-                        return vec![Action::Exec("object.isolate".into(), json!({ "id": top.0 }))];
-                    }
                     if cx.doc.node(top).is_some_and(|n| matches!(n.kind, vectorcraft_doc::NodeKind::Text(_))) {
                         return vec![Action::SwitchTool("type".into())];
+                    }
+                    // A group, a compound path or a single path, image, mesh or placed file, not
+                    // the one already isolated. Blends, envelopes, repeats and symbol instances
+                    // aren't: they have editing modes of their own.
+                    use vectorcraft_doc::NodeKind as K;
+                    let isolates = cx.doc.node(top).is_some_and(|n| {
+                        matches!(n.kind, K::Group { .. } | K::Compound { .. } | K::Path { .. } | K::Image(_) | K::Mesh(_) | K::PlacedDocument(_))
+                    });
+                    if cx.double_click_isolate && isolates && cx.isolation != Some(top) {
+                        return vec![Action::Exec("object.isolate".into(), json!({ "id": top.0 }))];
                     }
                 } else if cx.isolation.is_some() {
                     return vec![Action::Exec("object.exitIsolation".into(), json!({}))];
@@ -436,7 +459,8 @@ impl Tool for SelectionTool {
                     return if toggle { vec![] } else { vec![Action::Exec("select.none".into(), json!({}))] };
                 }
                 let ids: Vec<NodeId> = marquee(cx.doc, r, cx.isolation, false);
-                vec![Action::Exec(if toggle { "select.toggle" } else { "select.set" }.into(), json!({ "ids": json_ids(&ids) }))]
+                let art = Action::Exec(if toggle { "select.toggle" } else { "select.set" }.into(), json!({ "ids": json_ids(&ids) }));
+                std::iter::once(art).chain(crate::rulerguide::marquee_select(cx, r)).collect()
             }
             _ => vec![],
         }
@@ -592,6 +616,36 @@ mod tests {
         assert!((200.0 + x - 350.3).abs() < 1e-9 && (200.0 + y - 250.0).abs() < 1e-9, "the corner lands at ({}, {})", 200.0 + x, 200.0 + y);
     }
 
+    /// A corner-radius drag is a transform, so the sharp selection box hides while the radius changes.
+    #[test]
+    fn a_corner_drag_counts_as_transforming_once_it_moves() {
+        use vectorcraft_doc::{Appearance, LiveShape, Node, NodeKind};
+        let live = LiveShape::Rectangle {
+            w: 100.0,
+            h: 100.0,
+            radii: [0.0; 4],
+            kinds: Default::default(),
+            xf: vectorcraft_geom::Affine::translate((100.0, 100.0)),
+        };
+        let mut d = vectorcraft_doc::Document::new(500.0, 500.0);
+        let id = d.alloc_id();
+        let mut n = Node::path(id, live.to_path(), Appearance::default_art());
+        if let NodeKind::Path { live: slot, .. } = &mut n.kind {
+            *slot = Some(Box::new(live));
+        }
+        d.insert(Some(d.layers[0].id), 0, n).unwrap();
+        let mut s = Selection::default();
+        s.add(id);
+        let p = paint();
+        let cx = cx(&d, &s, &p);
+        let mut t = SelectionTool::default();
+        assert!(!t.transforming());
+        t.pointer(&cx, &ev(PointerKind::Down, 190.0, 191.0));
+        assert!(!t.transforming(), "a press is still a click");
+        t.pointer(&cx, &ev(PointerKind::Drag, 175.0, 176.0));
+        assert!(t.transforming());
+    }
+
     /// #812: with Smart Guides on, hovering near an object's centre or an anchor labels it, and a
     /// press there grabs the object by that point.
     #[test]
@@ -690,6 +744,29 @@ mod tests {
         assert!(matches!(&a[1], Action::Preview(c, v) if c == "object.transform" && v["matrix"][4] == 10.0));
         let a = t.pointer(&cx, &ev(PointerKind::Up, 160.0, 150.0));
         assert_eq!(a, vec![Action::Commit]);
+    }
+
+    /// #1534: with Smart Guides on (the default), the point a selection is dragged by still snaps
+    /// to a ruler guide within the Snap to Point distance; not with Snap to Point off.
+    #[test]
+    fn a_move_snaps_the_grabbed_point_to_a_ruler_guide_with_smart_guides_on() {
+        let (mut d, id) = doc_with_rect();
+        d.guides = vec![vectorcraft_doc::Guide::new(true, 173.4)];
+        let mut s = Selection::default();
+        s.add(id);
+        let p = paint();
+        let dx = |c: &ToolContext, to: f64| {
+            let mut t = SelectionTool::default();
+            t.pointer(c, &ev(PointerKind::Down, 150.0, 150.0));
+            let a = t.pointer(c, &ev(PointerKind::Drag, to, 150.0));
+            let Some(Action::Preview(_, v)) = a.last() else { panic!("{a:?}") };
+            v["matrix"][4].as_f64().unwrap()
+        };
+        let c = cx(&d, &s, &p);
+        assert!(c.smart_guides && c.snap_to_point);
+        assert!((dx(&c, 172.0) - 23.4).abs() < 1e-9, "onto the guide");
+        assert_eq!(dx(&c, 165.0), 15.0, "out of reach");
+        assert_eq!(dx(&ToolContext { snap_to_point: false, ..cx(&d, &s, &p) }, 172.0), 22.0);
     }
 
     /// Alt pressed during a move makes a copy, which snaps to the original it leaves behind (as
@@ -915,6 +992,58 @@ mod tests {
         assert_eq!(a, vec![Action::Exec("select.toggle".into(), json!({"ids": [id.0]}))]);
         t.pointer(&cx, &ev(PointerKind::Down, 50.0, 50.0).with_mods(shift));
         assert!(t.pointer(&cx, &ev(PointerKind::Up, 50.0, 50.0).with_mods(shift)).is_empty());
+    }
+
+    #[test]
+    fn marquee_selects_ruler_guides() {
+        let (mut d, id) = doc_with_rect();
+        d.guides.push(vectorcraft_doc::Guide::new(false, 80.0));
+        let s = Selection::default();
+        let p = paint();
+        let cx = cx(&d, &s, &p);
+        let mut t = SelectionTool::default();
+        t.pointer(&cx, &ev(PointerKind::Down, 50.0, 50.0));
+        t.pointer(&cx, &ev(PointerKind::Drag, 120.0, 120.0));
+        let a = t.pointer(&cx, &ev(PointerKind::Up, 120.0, 120.0));
+        assert_eq!(
+            a,
+            vec![
+                Action::Exec("select.set".into(), json!({"ids": [id.0]})),
+                Action::Exec("guide.select".into(), json!({"indexes": [0], "toggle": true})),
+            ]
+        );
+    }
+
+    #[test]
+    fn marquee_selects_only_guide() {
+        let (mut d, _) = doc_with_rect();
+        d.guides.push(vectorcraft_doc::Guide::new(true, 20.0));
+        let s = Selection::default();
+        let p = paint();
+        let cx = cx(&d, &s, &p);
+        let mut t = SelectionTool::default();
+        t.pointer(&cx, &ev(PointerKind::Down, 10.0, 10.0));
+        t.pointer(&cx, &ev(PointerKind::Drag, 30.0, 30.0));
+        let a = t.pointer(&cx, &ev(PointerKind::Up, 30.0, 30.0));
+        assert_eq!(
+            a,
+            vec![Action::Exec("select.set".into(), json!({"ids": []})), Action::Exec("guide.select".into(), json!({"indexes": [0], "toggle": true})),]
+        );
+    }
+
+    #[test]
+    fn marquee_ignores_locked_guides() {
+        let (mut d, id) = doc_with_rect();
+        d.guides.push(vectorcraft_doc::Guide::new(false, 80.0));
+        let s = Selection::default();
+        let p = paint();
+        let mut cx_locked = cx(&d, &s, &p);
+        cx_locked.guides = false;
+        let mut t = SelectionTool::default();
+        t.pointer(&cx_locked, &ev(PointerKind::Down, 50.0, 50.0));
+        t.pointer(&cx_locked, &ev(PointerKind::Drag, 120.0, 120.0));
+        let a = t.pointer(&cx_locked, &ev(PointerKind::Up, 120.0, 120.0));
+        assert_eq!(a, vec![Action::Exec("select.set".into(), json!({"ids": [id.0]}))]);
     }
 
     #[test]

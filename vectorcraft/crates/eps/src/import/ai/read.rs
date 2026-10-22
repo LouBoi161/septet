@@ -15,6 +15,12 @@
 //!   app wrote) the bounding box.
 //! - Images: `%AI5_BeginRaster`, the colour space `XN`, `[matrix] bounds w h bits type alpha …`
 //!   and the samples after `XI`.
+//! - Placed (linked) files, as written in files users sent: `%AI5_BeginPlace`, `[matrix] llx lly urx
+//!   ury … (path)` and the operator `` ` ``, the file's preview between `%AI26_BeginPlacedObjectPreview`
+//!   and its end (`w h rowBytes 32 n `, then rows of premultiplied ARGB, the top one first), `~`. The
+//!   box is as large as the file has pixels; the matrix takes them into art space from the canvas
+//!   (y down, its centre the template box's), where they start at the point of art space's origin,
+//!   the first row the top one. Each is a linked image showing the preview until its file is found.
 //! - Art with an appearance the format can't write as plain art (several fills or strokes,
 //!   effects, brushes) comes first as that look, drawn (a group), then the object itself on `%_`
 //!   lines and `1 (style) XW`: the drawn look is kept, named after the object.
@@ -25,8 +31,8 @@
 //!   taking the pattern's space to art space (the other operands are what it is made of).
 //!
 //! Sections the reader doesn't need (brushes, symbols, styles, swatches, filters) are skipped;
-//! type, symbols, fills with a pattern it can't read, placed files, legacy type and operators it
-//! doesn't know are errors.
+//! type, symbols, fills with a pattern it can't read, placed files without a preview, legacy type
+//! and operators it doesn't know are errors.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
@@ -38,10 +44,11 @@ use vectorcraft_color::swatch::Swatch;
 use vectorcraft_color::{BlendMode, Paint};
 use vectorcraft_doc::{
     Appearance, AppearanceItem, Artboard, ColorMode, Dash, Document, FillLayer, ImageBlob, ImageObject, Knockout, LayerColor, LineCap, LineJoin,
-    Node, NodeId, NodeKind, PatternDef, StrokeLayer,
+    LinkInfo, Node, NodeId, NodeKind, PatternDef, StrokeLayer,
 };
 use vectorcraft_geom::{FillRule, PathData};
 
+use super::super::ate::CANVAS_CENTRE;
 use super::lex::{Lexer, Tok};
 use super::obj::{self, Obj, V};
 use super::paint::{self, GradientDef, Instance, Named};
@@ -106,13 +113,60 @@ pub fn read(data: &[u8]) -> Result<Structure, String> {
     r.finish()
 }
 
-/// The artboards (art space) of the editing data `data` that [`read`] can't read as a whole, as far
-/// as it gets: where to put the pages of its PDF part instead (#1068).
-pub fn artboards(data: &[u8]) -> Vec<Rect> {
+/// The artboards (names, and rects in art space) of the editing data `data` that [`read`] can't
+/// read as a whole, as far as it gets: where to put the pages of its PDF part instead, and what to
+/// call them (#1068).
+pub fn artboards(data: &[u8]) -> Vec<(String, Rect)> {
+    let found = artboards_read(data);
+    if !found.is_empty() {
+        return found;
+    }
+    // Reading can stop before the artboards (art kept in the document's data comes first): read
+    // their array on its own.
+    artboard_array(data).map_or(found, |array| {
+        let mut alone = b"%_/Document :\n%_/Dictionary :\n".to_vec();
+        alone.extend_from_slice(array);
+        alone.extend_from_slice(b"\n%_; /NotRecorded ,\n%_;\n");
+        artboards_read(&alone)
+    })
+}
+
+/// The `ArtboardArray` entry of the editing data `data`, from its `/Array :` to its key: found
+/// from the key back, counting the dictionaries its artboards open and close.
+fn artboard_array(data: &[u8]) -> Option<&[u8]> {
+    const KEY: &[u8] = b"%_; (ArtboardArray) ,";
+    let end = data.windows(KEY.len()).rposition(|w| w == KEY)? + KEY.len();
+    let head = data.get(..end)?;
+    let mut depth = 0usize;
+    let mut line_end = head.len();
+    loop {
+        let line_start = head.get(..line_end)?.iter().rposition(|&b| b == b'\n' || b == b'\r').map_or(0, |at| at + 1);
+        if let Some(text) = head.get(line_start..line_end)?.strip_prefix(b"%_") {
+            if text.starts_with(b";") || text.starts_with(b"/Def ;") {
+                depth += 1;
+            } else if text.starts_with(b"/") && text.windows(2).any(|w| w == b" :") {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return head.get(line_start..);
+                }
+            }
+        }
+        line_end = line_start.checked_sub(1)?;
+    }
+}
+
+/// [`artboards`] as far as reading `data` from its start gets: those read before an error, and
+/// those of a `/Document` still open when it stopped (its art can be what stopped it).
+fn artboards_read(data: &[u8]) -> Vec<(String, Rect)> {
     let mut r = Reader::new(data);
-    // Artboards read before an error still say where they are.
     let _ = r.run();
-    r.artboards.into_iter().map(|(_, rect)| rect).collect()
+    let open: Vec<Obj> = r.frames.iter().filter_map(|f| if let Kind::Obj(o) = &f.kind { Some((**o).clone()) } else { None }).collect();
+    for o in &open {
+        if r.artboards.is_empty() {
+            r.document(o);
+        }
+    }
+    r.artboards
 }
 
 #[derive(Clone, Debug)]
@@ -181,6 +235,11 @@ const BLENDS: [BlendMode; 16] = [
     BlendMode::Luminosity,
 ];
 
+/// The name effects take for blend mode `n` of `Xy` (and of effects' `blnd`).
+pub(super) fn blend_name(n: usize) -> String {
+    format!("{:?}", BLENDS.get(n).copied().unwrap_or(BlendMode::Normal))
+}
+
 #[derive(Debug, Default)]
 struct LayerAttrs {
     name: String,
@@ -234,6 +293,22 @@ struct Raster {
     space: Option<String>,
 }
 
+/// A placed file's operands, from `` ` `` and its preview, until `~`.
+#[derive(Debug, Default)]
+struct Place {
+    /// The canvas, where the file's pixels are → art space.
+    matrix: Option<Affine>,
+    /// The file's box (`llx lly urx ury`): its size is the file's, in pixels.
+    bounds: Option<Rect>,
+    path: String,
+    /// The preview as a PNG, and its size in pixels.
+    preview: Option<(Vec<u8>, u32, u32)>,
+}
+
+/// What the open result says of placed files: they show the preview the file keeps of them.
+const LINKED_PREVIEWS: &str =
+    "linked pictures show the low-resolution preview saved in the file until their files are found: relink them in the Links panel";
+
 struct Reader<'a> {
     lex: Lexer<'a>,
     stack: Vec<V>,
@@ -256,6 +331,8 @@ struct Reader<'a> {
     pending_stroke: Option<Paint>,
     spots: Vec<Named>,
     raster: Option<Raster>,
+    /// The placed file being read (`%AI5_BeginPlace` … `~`).
+    place: Option<Place>,
     /// The last object read is the last child of the innermost frame, and nothing started since.
     after_object: bool,
     nodes: usize,
@@ -278,6 +355,16 @@ struct Reader<'a> {
     drawn_looks: usize,
     /// Nodes read from `%_` lines.
     hidden_ids: HashSet<NodeId>,
+    /// A group just ended, its state (`Xy`, `Xd`, `XW`) not yet read.
+    group_ended: bool,
+    /// Painted copies of clipping paths that have a fill (drawn under what they clip).
+    clip_fills: HashSet<NodeId>,
+    /// Groups closed as an object's drawn look (`9 () XW`).
+    looks: HashSet<NodeId>,
+    /// The gradient mesh being read (`/Mesh X!` … `/End X!`), and whether it started on a `%_` line.
+    mesh: Option<(super::mesh::MeshReader, bool)>,
+    /// The art styles (`%AI9_BeginArtStyles`), by name.
+    styles: HashMap<String, super::style::ArtStyle>,
     /// CMYK samples converted, by value.
     cmyk_cache: HashMap<[u8; 4], [u8; 3]>,
     /// A `/ForeignObject`'s `/Data`: its PDF as ASCII85 in comment lines, until the object closes.
@@ -313,7 +400,6 @@ const IGNORED: &[&str] = &[
     "X=",
     "X+",
     "Bc",
-    "Xm",
     "XP",
     "Np",
     // Flatness (`i`): how finely curves print.
@@ -322,6 +408,8 @@ const IGNORED: &[&str] = &[
     "TZ",
     "Xs",
     "Xt",
+    // A brushed path's width at each anchor (`(…) Xt n XD`), on its hidden source path.
+    "XD",
     "Xi",
     "XI",
     "`",
@@ -393,6 +481,7 @@ impl<'a> Reader<'a> {
             pending_stroke: None,
             spots: Vec::new(),
             raster: None,
+            place: None,
             foreign_data: None,
             after_object: false,
             nodes: 0,
@@ -408,6 +497,11 @@ impl<'a> Reader<'a> {
             warnings: Vec::new(),
             drawn_looks: 0,
             hidden_ids: HashSet::new(),
+            clip_fills: HashSet::new(),
+            looks: HashSet::new(),
+            group_ended: false,
+            styles: HashMap::new(),
+            mesh: None,
             cmyk_cache: HashMap::new(),
             done: false,
             obj_hidden: false,
@@ -436,6 +530,11 @@ impl<'a> Reader<'a> {
                 }
                 Tok::Comment(c) => self.comment(c)?,
                 Tok::Data(d) => self.image(d)?,
+                Tok::Preview(d) => {
+                    if let Some(p) = self.place.as_mut() {
+                        p.preview = preview_png(d);
+                    }
+                }
             }
         }
         if self.frames.iter().any(|f| matches!(f.kind, Kind::Layer(_))) {
@@ -474,6 +573,11 @@ impl<'a> Reader<'a> {
             self.define_pattern(section);
             return Ok(());
         }
+        if m == "BeginArtStyles" {
+            let section = self.section("EndArtStyles")?;
+            self.styles = super::style::art_styles(section);
+            return Ok(());
+        }
         if let Some((_, end)) = SKIPPED.iter().find(|(b, _)| *b == m) {
             return self.skip_to(end);
         }
@@ -495,7 +599,12 @@ impl<'a> Reader<'a> {
         } else if line.starts_with("AI5_EndRaster") {
             self.raster = None;
         } else if line.starts_with("AI5_BeginPlace") {
-            self.unreadable("placed files");
+            self.place = Some(Place::default());
+        } else if line.starts_with("AI5_EndPlace") {
+            // One that `~` didn't end isn't read.
+            if self.place.take().is_some() {
+                self.unreadable("placed files");
+            }
         } else if self.frames.is_empty()
             && let Some(v) = line.strip_prefix("%HiResBoundingBox:")
         {
@@ -541,7 +650,7 @@ impl<'a> Reader<'a> {
             if let Tok::Comment(c) = t.tok {
                 let line = String::from_utf8_lossy(c);
                 let m = marker(&line);
-                if m == begin {
+                if !begin.is_empty() && m == begin {
                     depth += 1;
                 } else if m == end {
                     if depth == 0 {
@@ -667,23 +776,23 @@ impl<'a> Reader<'a> {
             "*U" => self.close(what, |k| matches!(k, Kind::Compound))?,
             _ => self.close(what, |k| matches!(k, Kind::Clip))?,
         };
-        let Frame { kind, children: mut kids, gs, clips, hidden: opened_hidden, .. } = f;
+        let Frame { kind, children: kids, gs, clips, hidden: opened_hidden, .. } = f;
         // A compound path of clipping paths clips its clipping group.
         let clipping = matches!(kind, Kind::Compound) && !clips.is_empty();
+        self.group_ended = !matches!(kind, Kind::Compound);
+        let mut painted = None;
         let node = match kind {
+            // A compound path holding a group (its drawn look) is that look: its paths paint apart.
+            Kind::Compound if kids.iter().any(|k| self.looks.contains(&k.id)) => {
+                let (children, clip) = self.clip_first(kids, &clips);
+                self.new_node(NodeKind::Group { children, clip }, &gs)
+            }
             Kind::Compound => {
-                let Some(first) = kids.first() else { return Ok(()) };
-                let (appearance, opacity, blend, rule) = (first.appearance.clone(), first.opacity, first.blend, path_rule(first));
-                for k in &mut kids {
-                    k.opacity = 1.0;
-                    k.blend = BlendMode::Normal;
-                    k.visible = true;
-                    k.locked = false;
-                }
-                let mut n = self.new_node(NodeKind::Compound { children: kids.into_iter().map(Arc::new).collect(), rule }, &gs);
-                n.appearance = appearance;
-                n.opacity = opacity;
-                n.blend = blend;
+                // A group in a compound path (`*u u … U *U`) only holds its paths. Clipping subpaths'
+                // painted copies make a compound of their own, under what it clips.
+                let (fills, kids): (Vec<Node>, Vec<Node>) = ungrouped(kids).into_iter().partition(|n| self.clip_fills.contains(&n.id));
+                painted = self.compound(fills, &gs);
+                let Some(n) = self.compound(kids, &gs) else { return Ok(()) };
                 n
             }
             // A group with a clipping path (`q` … `Q`, or a `W` path in a group) is a clipping group.
@@ -695,7 +804,31 @@ impl<'a> Reader<'a> {
         if clipping && let Some(f) = self.frames.last_mut() {
             f.clips.push(f.children.len());
         }
-        self.add(node, opened_hidden || hidden)
+        self.add(node, opened_hidden || hidden)?;
+        if let Some(p) = painted {
+            self.clip_fills.insert(p.id);
+            self.add(p, opened_hidden || hidden)?;
+        }
+        Ok(())
+    }
+
+    /// The compound path of `kids`, painted and made transparent as its subpaths say.
+    fn compound(&mut self, mut kids: Vec<Node>, gs: &GState) -> Option<Node> {
+        // The compound path's paint is its last path's (a gradient's instance wraps only
+        // that one); the last painted one, should the last have none.
+        let shown = kids.iter().rev().find(|k| !k.appearance.items.is_empty()).or(kids.last())?;
+        let (appearance, opacity, blend, rule) = (shown.appearance.clone(), shown.opacity, shown.blend, path_rule(shown));
+        for k in &mut kids {
+            k.opacity = 1.0;
+            k.blend = BlendMode::Normal;
+            k.visible = true;
+            k.locked = false;
+        }
+        let mut n = self.new_node(NodeKind::Compound { children: kids.into_iter().map(Arc::new).collect(), rule }, gs);
+        n.appearance = appearance;
+        n.opacity = opacity;
+        n.blend = blend;
+        Some(n)
     }
 
     /// `kids` with the clipping paths among them (indexes `clips`) first, several as one compound
@@ -712,7 +845,9 @@ impl<'a> Reader<'a> {
             }
         };
         let clips = clip_node.is_some();
-        let children = clip_node.into_iter().chain(rest.into_iter().map(|(_, n)| n)).map(Arc::new).collect();
+        // A clipping path's own fill paints under the art it clips.
+        let (fills, rest): (Vec<Indexed>, Vec<Indexed>) = rest.into_iter().partition(|(_, n)| self.clip_fills.contains(&n.id));
+        let children = clip_node.into_iter().chain(fills.into_iter().chain(rest).map(|(_, n)| n)).map(Arc::new).collect();
         (children, clips)
     }
 
@@ -786,6 +921,7 @@ impl<'a> Reader<'a> {
         if !matches!(w, "Xy" | "Xd" | "XW" | "BB") {
             self.after_object = false;
         }
+        let group_ended = std::mem::take(&mut self.group_ended);
         let vals = self.operands();
         let vals = self.take_head(vals);
         if let Some(d) = self.gradient_def.as_mut() {
@@ -799,6 +935,26 @@ impl<'a> Reader<'a> {
                 _ => {}
             }
             return Ok(());
+        }
+        if w == "X!" || self.mesh.is_some() {
+            let name = vals.iter().rev().find_map(|v| if let V::Name(n) = v { Some(n.as_str()) } else { None });
+            match (w, name) {
+                ("X!", Some("Mesh")) => {
+                    self.end_path_quietly();
+                    self.mesh = Some((super::mesh::MeshReader::default(), hidden));
+                    return Ok(());
+                }
+                ("X!", Some("End")) if self.mesh.is_some() => return self.end_mesh(),
+                ("X#", _) => {
+                    let to_doc = self.space();
+                    if let Some((m, _)) = self.mesh.as_mut() {
+                        m.entry(&vals, to_doc);
+                    }
+                    return Ok(());
+                }
+                _ if self.mesh.is_some() => return Ok(()),
+                _ => {}
+            }
         }
         match w {
             // Containers.
@@ -868,6 +1024,14 @@ impl<'a> Reader<'a> {
             "d" => self.dash(&vals),
             // Transparency and state.
             "Xy" => self.transparency(&vals),
+            // A group's own state (`Xd`, `6 () XW`) without an `Xy` keeps the current transparency, as
+            // the file's PDF part draws it. A look's group (`9 () XW`) has no state of its own.
+            "Xd" if group_ended => {
+                let gs = self.gs.clone();
+                if let Some(n) = self.last_object().filter(|n| matches!(n.kind, NodeKind::Group { .. })) {
+                    (n.opacity, n.blend, n.isolate, n.knockout) = (gs.opacity, gs.blend, gs.isolate, gs.knockout);
+                }
+            }
             "Xw" => self.gs.hidden = Self::nums(&vals).last() == Some(&1.0),
             "A" => self.gs.locked = Self::nums(&vals).last() == Some(&1.0),
             "XW" => self.style_marker(&vals, hidden),
@@ -885,13 +1049,22 @@ impl<'a> Reader<'a> {
                     i.bm(&vals);
                 }
             }
+            "Xm" => {
+                if let Some(i) = self.instance.as_mut() {
+                    i.xm(&vals);
+                }
+            }
             "Bh" => {
                 if let Some(i) = self.instance.as_mut() {
                     i.bh(&vals);
                 }
             }
             "BB" => {
-                if let Some(i) = self.instance.take() {
+                // An instance that closes with no path to paint is an object's own note of its
+                // gradient, written after it: it paints nothing (not the next path either).
+                if let Some(i) = self.instance.take()
+                    && !self.path.elements().is_empty()
+                {
                     self.set_instance(&i);
                 }
             }
@@ -901,6 +1074,18 @@ impl<'a> Reader<'a> {
                     r.space = vals.iter().rev().find_map(V::text);
                 }
             }
+            // Placed files.
+            "`" if self.place.is_some() => {
+                let matrix = vals.iter().find_map(|v| if let V::Arr(a) = v { Some(Self::nums(a)) } else { None });
+                let path = vals.iter().rev().find_map(V::text).unwrap_or_default();
+                if let Some(p) = self.place.as_mut() {
+                    p.matrix = matrix.and_then(|m| <[f64; 6]>::try_from(m).ok()).map(Affine::new);
+                    p.bounds =
+                        Self::nums(&vals).get(..4).and_then(|b| <[f64; 4]>::try_from(b).ok()).map(|[x0, y0, x1, y1]| Rect::new(x0, y0, x1, y1));
+                    p.path = path;
+                }
+            }
+            "~" if self.place.is_some() => self.end_place(hidden)?,
             // Type in the legacy format.
             "To" | "TO" | "Tp" | "TP" | "Tx" | "TX" | "Tj" | "Tk" => self.unreadable("type in the legacy format"),
             _ if IGNORED.contains(&w) => {}
@@ -966,6 +1151,12 @@ impl<'a> Reader<'a> {
     fn text_slot(&mut self, o: &Obj) -> Result<(), String> {
         if self.pattern.is_some() {
             self.unreadable("type in a pattern");
+        }
+        // `1 /FreeUndo`: the type in the drawn look of a text object that has an appearance. Its
+        // story is one of another text document (`/AI11UndoFreeTextDocument`), which counts its
+        // stories on its own; the object itself follows the look, on `%_` lines, and is the type.
+        if o.nums("FreeUndo").first() == Some(&1.0) {
+            return Ok(());
         }
         let index = |key: &str| o.nums(key).first().copied().filter(|v| (0.0..f64::from(u32::MAX)).contains(v)).map(|v| v as u32);
         let (story, frame) = (index("StoryIndex"), index("FrameIndex").unwrap_or(0));
@@ -1172,10 +1363,14 @@ impl<'a> Reader<'a> {
         if let Some(n) = named {
             self.spots.push(n);
         }
+        // A colour set after a gradient instance that painted nothing (`Bb` … `0 BB` with no
+        // path) is the next object's paint, not the gradient.
         if w.ends_with(|c: char| c.is_ascii_lowercase()) {
             self.gs.fill = p;
+            self.pending_fill = None;
         } else {
             self.gs.stroke = p;
+            self.pending_stroke = None;
         }
     }
 
@@ -1216,12 +1411,18 @@ impl<'a> Reader<'a> {
     }
 
     /// `n (style) XW` after an object: `1 (style)` after the object written on `%_` lines, its
-    /// drawn look before it. Other markers end what follows an object.
+    /// drawn look before it (all on `%_` lines inside another such object). Other markers end what
+    /// follows an object.
     fn style_marker(&mut self, vals: &[V], hidden: bool) {
         let code = Self::nums(vals).last().copied().unwrap_or(0.0);
         let style = vals.iter().rev().find_map(V::text).unwrap_or_default();
         let after = std::mem::take(&mut self.after_object);
-        if hidden || code != 1.0 || style.is_empty() || !after {
+        if code == 9.0
+            && let Some(look) = self.frames.last().and_then(|f| f.children.last()).filter(|n| matches!(n.kind, NodeKind::Group { .. }))
+        {
+            self.looks.insert(look.id);
+        }
+        if code != 1.0 || style.is_empty() || !after {
             return;
         }
         let Some(f) = self.frames.last_mut() else { return };
@@ -1229,16 +1430,45 @@ impl<'a> Reader<'a> {
         let (Some(object), Some(look)) = (n.checked_sub(1).and_then(|i| f.children.get(i)), n.checked_sub(2).and_then(|i| f.children.get(i))) else {
             return;
         };
-        if !self.hidden_ids.contains(&object.id) || self.hidden_ids.contains(&look.id) || !matches!(look.kind, NodeKind::Group { clip: false, .. }) {
+        if !self.hidden_ids.contains(&object.id)
+            || self.hidden_ids.contains(&look.id) != hidden
+            || !matches!(look.kind, NodeKind::Group { clip: false, .. })
+        {
             return;
         }
+        // A style read here: the object, painted as it says.
+        if let Some(appearance) = self.styles.get(&style).and_then(|st| styled(object, st)) {
+            let Some(mut object) = f.children.pop() else { return };
+            f.children.pop();
+            object.appearance = appearance.into();
+            // Now the object itself, not a copy an enclosing look's `strip` would remove.
+            self.hidden_ids.remove(&object.id);
+            f.children.push(object);
+            return;
+        }
+        let is_text = slot_of(object.name.as_deref()).is_some();
         let Some(object) = f.children.pop() else { return };
         let Some(look) = f.children.last_mut() else { return };
-        strip(look, &self.hidden_ids);
+        // Inside a copy on `%_` lines everything is, so nothing tells the look's own copies apart.
+        if !hidden {
+            strip(look, &self.hidden_ids);
+        }
+        if is_text {
+            // A text object stays the type it is: over what else its look draws, or in place of a
+            // look that was only its type.
+            if look.children().is_some_and(|c| c.is_empty()) {
+                *look = object;
+            } else {
+                f.children.push(object);
+            }
+            return;
+        }
         look.name = object.name.clone().or(look.name.take());
         look.visible = object.visible;
         look.locked = object.locked;
-        self.drawn_looks += 1;
+        if !hidden {
+            self.drawn_looks += 1;
+        }
     }
 
     // ---- paths -----------------------------------------------------------------------------
@@ -1317,7 +1547,10 @@ impl<'a> Reader<'a> {
         };
         let mut items = Vec::new();
         if fill && !clip {
-            items.push(AppearanceItem::Fill(FillLayer { overprint: gs.overprint_fill, ..FillLayer::new(fill_paint.unwrap_or(gs.fill.clone())) }));
+            items.push(AppearanceItem::Fill(FillLayer {
+                overprint: gs.overprint_fill,
+                ..FillLayer::new(fill_paint.clone().unwrap_or(gs.fill.clone()))
+            }));
         }
         if stroke && !clip {
             let mut st = StrokeLayer::new(stroke_paint.unwrap_or(gs.stroke.clone()), gs.width);
@@ -1337,6 +1570,45 @@ impl<'a> Reader<'a> {
         if clip && let Some(f) = self.frames.last_mut() {
             f.clips.push(f.children.len());
         }
+        // A clipping path's fill is painted too, under the art it clips, as the file's PDF part draws it.
+        let painted = clip && fill && !matches!(gs.fill, Paint::None);
+        let copy = painted.then(|| {
+            let mut copy = node.clone();
+            copy.id = self.doc.alloc_id();
+            if let NodeKind::Path { clipping, .. } = &mut copy.kind {
+                *clipping = false;
+            }
+            let paint = fill_paint.clone().unwrap_or_else(|| gs.fill.clone());
+            copy.appearance = Appearance {
+                items: vec![AppearanceItem::Fill(FillLayer { overprint: gs.overprint_fill, ..FillLayer::new(paint) })],
+                ..Appearance::default()
+            }
+            .into();
+            copy
+        });
+        self.add(node, hidden)?;
+        if let Some(copy) = copy {
+            self.clip_fills.insert(copy.id);
+            self.add(copy, hidden)?;
+        }
+        Ok(())
+    }
+
+    /// `/End X!`: the gradient mesh read, as one object.
+    fn end_mesh(&mut self) -> Result<(), String> {
+        let Some((m, hidden)) = self.mesh.take() else { return Ok(()) };
+        if m.unread || m.patches.is_empty() {
+            self.unreadable("gradient meshes it can't read");
+            return Ok(());
+        }
+        let gs = self.gs.clone();
+        let mut patches: Vec<Node> = m.patches.into_iter().map(|p| self.new_node(NodeKind::Mesh(p), &gs)).collect();
+        let mut node = match patches.len() {
+            1 => patches.pop().unwrap_or_else(|| self.new_node(NodeKind::Group { children: vec![], clip: false }, &gs)),
+            _ => self.new_node(NodeKind::Group { children: patches.into_iter().map(Arc::new).collect(), clip: false }, &gs),
+        };
+        node.opacity = gs.opacity;
+        node.blend = gs.blend;
         self.add(node, hidden)
     }
 
@@ -1435,12 +1707,44 @@ impl<'a> Reader<'a> {
         let blob = ImageBlob::new("image/png", png);
         let key = blob.content_key();
         self.doc.images.entry(key.clone()).or_insert(blob);
+        self.add_image(ImageObject { key, width: w as u32, height: h as u32, xf, link: None, placement: Default::default() }, false)
+    }
+
+    /// Add an image object with the state's transparency.
+    fn add_image(&mut self, im: ImageObject, hidden: bool) -> Result<(), String> {
         let gs = self.gs.clone();
-        let im = ImageObject { key, width: w as u32, height: h as u32, xf, link: None, placement: Default::default() };
         let mut node = self.new_node(NodeKind::Image(Box::new(im)), &gs);
         node.opacity = gs.opacity;
         node.blend = gs.blend;
-        self.add(node, false)
+        self.add(node, hidden)
+    }
+
+    /// `~`: the placed file read since `%AI5_BeginPlace` becomes a linked image in its place that
+    /// shows the preview the data keeps of it, as a linked image whose file is missing does. One
+    /// without a preview, a path or a matrix isn't read.
+    fn end_place(&mut self, hidden: bool) -> Result<(), String> {
+        let Some(Place { matrix: Some(m), bounds: Some(b), path, preview: Some((png, w, h)) }) = self.place.take().filter(|p| !p.path.is_empty())
+        else {
+            self.unreadable("placed files");
+            return Ok(());
+        };
+        // The file's pixels (y down) start at the canvas point of art space's origin (the box's own
+        // corner when the file doesn't say where the canvas is); the preview's are spread over them.
+        let centre = self.template.map(|t| ((t[0] + t[2]) / 2.0, (t[1] + t[3]) / 2.0));
+        let origin = centre.map_or(b.origin(), |(x, y)| Point::new(CANVAS_CENTRE - x, CANVAS_CENTRE + y));
+        let over_file = Affine::translate(origin.to_vec2()) * Affine::scale_non_uniform(b.width() / f64::from(w), b.height() / f64::from(h));
+        let xf = self.space() * m * over_file;
+        if !xf.as_coeffs().iter().all(|v| v.is_finite()) || xf.determinant().abs() < 1e-12 {
+            self.unreadable("placed files");
+            return Ok(());
+        }
+        // The preview is all the document has of the file: what a missing link shows.
+        let bytes = Arc::new(png);
+        let blob = ImageBlob { mime: "image/png".into(), bytes: bytes.clone(), proxy: Some(bytes) };
+        let key = blob.content_key();
+        self.doc.images.entry(key.clone()).or_insert(blob);
+        self.warn(LINKED_PREVIEWS);
+        self.add_image(ImageObject { key, width: w, height: h, xf, link: Some(LinkInfo::new(path)), placement: Default::default() }, hidden)
     }
 
     // ---- the document ----------------------------------------------------------------------
@@ -1611,11 +1915,45 @@ fn close(bp: &mut BezPath) {
 }
 
 /// The fill rule of a path or compound node.
+/// `kids` with the members of each plain group among them in the group's place, at any depth.
+fn ungrouped(kids: Vec<Node>) -> Vec<Node> {
+    let mut out = Vec::with_capacity(kids.len());
+    for k in kids {
+        match k.kind {
+            NodeKind::Group { children, clip: false } => out.extend(ungrouped(children.into_iter().map(Arc::unwrap_or_clone).collect())),
+            _ => out.push(k),
+        }
+    }
+    out
+}
+
 fn path_rule(n: &Node) -> FillRule {
     match &n.kind {
         NodeKind::Path { rule, .. } | NodeKind::Compound { rule, .. } => *rule,
         _ => FillRule::NonZero,
     }
+}
+
+/// `object`'s appearance with style `st`: `None` when the style isn't one this reads, or asks a
+/// group for fills or strokes.
+fn styled(object: &Node, st: &super::style::ArtStyle) -> Option<Appearance> {
+    use super::style::StyleItem;
+    if !st.plain || (object.is_container() && !matches!(object.kind, NodeKind::Compound { .. }) && !st.items.is_empty()) {
+        return None;
+    }
+    let mut items = vec![];
+    for item in &st.items {
+        items.push(match item {
+            StyleItem::Fill(paint) => AppearanceItem::Fill(FillLayer::new(paint.clone())),
+            StyleItem::ObjectFill => AppearanceItem::Fill(object.appearance.fill().filter(|f| matches!(f.paint, Paint::Gradient(_)))?.clone()),
+            StyleItem::Stroke { paint, width, cap, join, miter, dash, profile } => {
+                let mut layer = StrokeLayer::new(paint.clone(), *width);
+                (layer.cap, layer.join, layer.miter_limit, layer.dash, layer.profile) = (*cap, *join, *miter, dash.clone(), profile.clone());
+                AppearanceItem::Stroke(layer)
+            }
+        });
+    }
+    Some(Appearance { items, effects: st.effects.clone(), ..(*object.appearance).clone() })
 }
 
 /// Remove from `n` the children read from `%_` lines (`hidden`: the object itself, not its look).
@@ -1634,6 +1972,38 @@ fn find_entry<'o>(o: &'o Obj, key: &str, depth: usize) -> Option<&'o Obj> {
         return None;
     }
     o.obj(key).or_else(|| o.entries.iter().flat_map(|(_, v)| v.iter()).filter_map(V::obj).find_map(|c| find_entry(c, key, depth + 1)))
+}
+
+/// A placed file's preview as a PNG, with its size: `w h rowBytes 32 n ` (each number followed by
+/// a space), then `h` rows of `rowBytes` bytes, premultiplied ARGB. `None` when it isn't that, is
+/// larger than [`MAX_PIXELS`] or is cut short.
+fn preview_png(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+    let mut rest = data.trim_ascii_start();
+    let mut head = [0usize; 5];
+    for v in &mut head {
+        let n = rest.iter().position(|b| *b == b' ')?;
+        *v = std::str::from_utf8(rest.get(..n)?).ok()?.parse().ok()?;
+        rest = rest.get(n + 1..)?;
+    }
+    let [w, h, row, bits, _] = head;
+    let (width, height) = (u32::try_from(w).ok()?, u32::try_from(h).ok()?);
+    if w == 0 || h == 0 || u64::from(width) * u64::from(height) > MAX_PIXELS || bits != 32 || row < w * 4 {
+        return None;
+    }
+    // Every row is there before anything is allocated for them.
+    if rest.len() < (h - 1).checked_mul(row)?.checked_add(w * 4)? {
+        return None;
+    }
+    let mut rgba = Vec::with_capacity(w * h * 4);
+    for line in rest.chunks(row).take(h) {
+        for &[a, r, g, b] in line.get(..w * 4)?.as_chunks::<4>().0 {
+            let straight = |c: u8| if a == 0 { 0 } else { (u32::from(c) * 255 / u32::from(a)).min(255) as u8 };
+            rgba.extend_from_slice(&[straight(r), straight(g), straight(b), a]);
+        }
+    }
+    let mut png = vec![];
+    image::RgbaImage::from_raw(width, height, rgba)?.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok()?;
+    Some((png, width, height))
 }
 
 fn sane(r: Rect) -> bool {

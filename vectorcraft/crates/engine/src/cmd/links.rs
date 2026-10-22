@@ -75,7 +75,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Links",
             [],
             None,
-            "{show?: all (default)|missing|modified|embedded, sort?: name|kind (file format)|status (missing, modified, ok, embedded); default: stacking order, top first} every image object and placed document in the layers, as the Links panel lists them → {links: [{id, name, linked, status: ok|modified|missing|embedded, format, pixelWidth, pixelHeight, path?, found?: path (found away from its path), page?, preview?: true (showing the saved preview), document?: true (a placed document: pageWidth and pageHeight in pt instead of pixels)}], missing, modified, embedded}",
+            "{show?: all (default)|missing|modified|embedded, sort?: name|kind (file format)|status (missing, modified, ok, embedded); default: stacking order; top first} every image object and placed document in the layers, as the Links panel lists them → {links: [{id, name, linked, status: ok|modified|missing|embedded, format, pixelWidth, pixelHeight, path?, found?: path (found away from its path), page?, preview?: true (showing the saved preview), note?: said of an image too large to draw, document?: true (a placed document: pageWidth and pageHeight in pt instead of pixels)}], missing, modified, embedded}",
             has_doc,
             list
         ),
@@ -529,15 +529,19 @@ impl Resolved {
 
 /// The linked files of document `d`, just read from `doc_path`: those found unchanged are read
 /// again (their images had the preview), modified ones are read again when `update`, links found
-/// away from their path take the new path. Nothing here is an undo step.
+/// away from their path take the new path. A link nothing is known of whose image shows a preview
+/// (a file another app wrote kept only that) was never read: its file is read now, into the
+/// image's bounds, which isn't a change to report. Nothing here is an undo step.
 pub fn resolve(d: &mut Document, doc_path: Option<&str>, update: bool) -> Resolved {
     let mut out = Resolved::default();
     for g in groups(d, None) {
         let row = rows(std::iter::once(&g));
+        let unread = g.document.is_none() && g.link.hash.is_none() && g.link.size.is_none() && previewing(d, &g.key);
         match probe(&g, folder(doc_path)) {
             (Status::Missing, _) => out.missing.extend(row),
-            (Status::Modified, Some(mut f)) if update => {
-                match read_for(&mut f, &g, "document.open").and_then(|read| install_read(d, &g.ids, read, false)) {
+            (Status::Modified, Some(mut f)) if update || unread => {
+                match read_for(&mut f, &g, "document.open").and_then(|read| install_read(d, &g.ids, read, unread)) {
+                    Ok(()) if unread => {}
                     Ok(()) => out.updated.extend(row),
                     Err(_) => out.missing.extend(row),
                 }
@@ -1007,7 +1011,14 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let (link, mut row) = match &n.kind {
             NodeKind::Image(im) => {
-                (im.link.as_ref(), json!({ "format": format_label(&st.doc, im), "pixelWidth": im.width, "pixelHeight": im.height }))
+                let mut row = json!({ "format": format_label(&st.doc, im), "pixelWidth": im.width, "pixelHeight": im.height });
+                // Only an image that could be past the decode allowance (at 16 bytes a pixel, the
+                // most a decoder gives) has its header read for this.
+                let large = im.width as u64 * im.height as u64 > fileio::MAX_RASTER_ALLOC / 16;
+                if let Some(note) = st.doc.images.get(&im.key).filter(|_| large).and_then(|b| fileio::too_large_note(&b.bytes)) {
+                    row["note"] = json!(note);
+                }
+                (im.link.as_ref(), row)
             }
             NodeKind::PlacedDocument(p) => (Some(&p.link), document_row(p)),
             _ => continue,

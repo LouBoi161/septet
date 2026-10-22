@@ -1,5 +1,5 @@
-//! Desktop platform services: native file dialogs (rfd) with a file-type filter per purpose, and
-//! file reads and writes through `std::fs`.
+//! Desktop platform services: native file dialogs (rfd) with a file-type filter per purpose, file
+//! reads through `std::fs`, atomic writes, and the clipboard's text.
 
 use designcraft_ui_egui::Services;
 
@@ -69,7 +69,7 @@ pub fn open_filters(purpose: &str) -> &'static [OpenFilter] {
     }
 }
 
-/// The desktop services: rfd open/save dialogs and `std::fs` reads and writes.
+/// The desktop services: rfd open/save dialogs, `std::fs` reads, atomic writes, the clipboard's text.
 pub fn services() -> Services {
     Services {
         pick_open: Some(Box::new(|purpose: &str| {
@@ -81,7 +81,8 @@ pub fn services() -> Services {
         })),
         pick_save: Some(Box::new(|name: &str| rfd::FileDialog::new().set_file_name(name).save_file().map(|p| p.to_string_lossy().to_string()))),
         read: Some(Box::new(|p: &str| std::fs::read(p).map_err(|e| e.to_string()))),
-        write: Some(Box::new(|p: &str, b: &[u8]| std::fs::write(p, b).map_err(|e| e.to_string()))),
+        write: Some(Box::new(|p: &str, b: &[u8]| designcraft_engine::atomic::write_atomic(std::path::Path::new(p), b).map_err(|e| e.to_string()))),
+        clipboard_text: Some(Box::new(|| arboard::Clipboard::new().and_then(|mut c| c.get_text()).ok())),
         ..Default::default()
     }
 }

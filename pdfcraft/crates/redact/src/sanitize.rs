@@ -143,6 +143,8 @@ fn content_pass(doc: &mut Document, text: bool, off: &[ObjRef], write: bool) -> 
         return Ok(0);
     }
     let mut total = 0;
+    // The original image and form XObjects the rewrite drops or replaces, on any page.
+    let mut doomed = Vec::new();
     let n = pdfcraft_model::pages(doc).len();
     for pi in 0..n {
         let page = pdfcraft_model::pages(doc).swap_remove(pi);
@@ -167,6 +169,7 @@ fn content_pass(doc: &mut Document, text: bool, off: &[ObjRef], write: bool) -> 
         if !write {
             continue;
         }
+        doomed.extend_from_slice(&out.doomed);
         let mut new_list = list.clone();
         let mut changed = false;
         for (i, new) in out.streams.into_iter().enumerate() {
@@ -204,6 +207,9 @@ fn content_pass(doc: &mut Document, text: bool, off: &[ObjRef], write: bool) -> 
             })?;
         }
     }
+    // What a page no longer draws must not stay reachable through an inherited or shared
+    // /Resources either.
+    crate::interp::unlink_doomed(doc, &doomed)?;
     Ok(total)
 }
 
