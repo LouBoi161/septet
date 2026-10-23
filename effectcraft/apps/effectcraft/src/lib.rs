@@ -5,8 +5,8 @@
 pub mod audio_out;
 pub mod desktop;
 mod embed;
-// Built everywhere so it stays checked; only macOS uses it.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+// Built everywhere so it stays checked; the macOS and Linux apps use it.
+#[cfg_attr(not(any(target_os = "macos", target_os = "linux")), allow(dead_code))]
 mod sheet_dialogs;
 
 pub use embed::Embedded;
