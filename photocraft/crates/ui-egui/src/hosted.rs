@@ -191,6 +191,15 @@ pub fn is_hosted() -> bool {
     HOSTED.load(Ordering::Relaxed)
 }
 
+/// A health flag for `device`. Standalone it watches the device (its device-lost callback and
+/// uncaptured-error handler mark the flag). A host app shares the device between its apps and keeps
+/// one set of handlers on it, passing faults on through the flag's `mark`
+/// (`Embedded::gpu_failed`): replacing them, as Retry GPU's new canvas would (#6577), silences the
+/// other apps, so a hosted flag watches nothing itself.
+pub fn device_health(device: &eframe::wgpu::Device) -> photocraft_gpu::DeviceHealth {
+    if is_hosted() { photocraft_gpu::DeviceHealth::new() } else { photocraft_gpu::DeviceHealth::watch(device) }
+}
+
 /// Keep the preferences, brush presets, crash recovery and every other per-user file under
 /// `root` instead of the per-user OS folder (`None`: the usual folder). Set it before the app
 /// is built: the desktop app resolves its settings folder once.

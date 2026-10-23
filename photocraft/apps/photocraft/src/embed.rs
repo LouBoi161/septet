@@ -108,7 +108,16 @@ impl Embedded {
             static PROBE: std::sync::Once = std::sync::Once::new();
             PROBE.call_once(crate::file_dialog_probe::start);
         }
-        let mut app = PhotocraftApp::new(Session::new(), services);
+        #[cfg(target_os = "linux")]
+        let session = {
+            let mut session = Session::new();
+            // File › Print through the XDG Print portal, as the desktop app does.
+            session.print_spooler = crate::print_portal::spooler();
+            session
+        };
+        #[cfg(not(target_os = "linux"))]
+        let session = Session::new();
+        let mut app = PhotocraftApp::new(session, services);
         // The host draws the window chrome: no integrated title strip, caption buttons or edge
         // resizing.
         app.integrated_titlebar = false;

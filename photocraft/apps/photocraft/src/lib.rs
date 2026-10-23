@@ -20,9 +20,29 @@ mod icon_theme;
 pub mod linux_libs;
 pub mod monitor_profile;
 mod photoshop_settings;
+// Save As through the desktop portal, which reports the file type picked (#6121); services.rs
+// uses it.
+#[cfg(target_os = "linux")]
+mod portal_save;
+// The print portal (File › Print on Linux); main.rs and `Embedded` hand its spooler to the
+// session. It needs the session bus (zbus, Linux only); its pure helpers are tested everywhere.
+#[cfg(any(target_os = "linux", test))]
+pub mod print_portal;
 pub mod services;
-// Windows gets pen pressure from winit (WM_POINTER); the web runner has its own listener.
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
+// Tablet support (macOS AppKit monitor, Linux X11/Wayland, Windows barrel button).
 pub mod tablet;
 
 pub use embed::{Embedded, Generate, GenerativeSource};
+
+/// Tests that spawn child processes hold this for reading, tests that check who holds a file lock
+/// for writing ([`no_child_spawns`]): until its `exec`, a child holds a copy of every open file,
+/// `flock`s included, so a spawn in another test could keep a lock this process just dropped held
+/// for a moment. (main.rs has its own for the binary's tests.)
+#[cfg(test)]
+pub(crate) static CHILD_SPAWNS: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+/// Held by a test that checks who holds a file lock: no other test spawns a child meanwhile.
+#[cfg(test)]
+pub(crate) fn no_child_spawns() -> std::sync::RwLockWriteGuard<'static, ()> {
+    CHILD_SPAWNS.write().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
