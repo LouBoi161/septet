@@ -35,6 +35,8 @@ pub fn set_user_folders(app: &mut VectorcraftApp) {
     // User Defined swatch and graphic style libraries live next to the preferences.
     app.session.swatch_libraries.set_user_dir(folder("Swatches"));
     app.session.style_libraries.set_user_dir(folder("Graphic Styles"));
+    // With the User Defined libraries listed, the persistent library panels reopen.
+    vectorcraft_ui_egui::panels::library_panel::restore(app);
     // So do the Libraries panel's libraries; runs without preferences (agents' test runs) keep
     // theirs for the session only, never touching the user's.
     if prefs::prefs_enabled() {
@@ -54,7 +56,7 @@ pub type Parent = Option<std::sync::Arc<winit::window::Window>>;
 trait DialogSettings: Sized {
     fn parent(self, window: &winit::window::Window) -> Self;
     fn title(self, title: &str) -> Self;
-    fn filter(self, name: &str, exts: &[&str]) -> Self;
+    fn filter(self, name: &str, exts: &[impl ToString]) -> Self;
     fn folder(self, folder: &str) -> Self;
     fn file_name(self, name: &str) -> Self;
 }
@@ -68,7 +70,7 @@ macro_rules! dialog_settings {
             fn title(self, title: &str) -> Self {
                 self.set_title(title)
             }
-            fn filter(self, name: &str, exts: &[&str]) -> Self {
+            fn filter(self, name: &str, exts: &[impl ToString]) -> Self {
                 self.add_filter(name, exts)
             }
             fn folder(self, folder: &str) -> Self {
@@ -94,10 +96,9 @@ fn dialog_for<D: DialogSettings>(d: D, request: &PickRequest) -> D {
         }
         PickRequest::Folder => return d,
     };
-    let d = pick
-        .filters
-        .iter()
-        .fold(d, |d, (name, exts)| d.filter(vectorcraft_ui_egui::i18n::tr_ctx(vectorcraft_ui_egui::i18n::current(), "file-filter", name), exts));
+    let d = pick.filters.iter().fold(d, |d, (name, exts)| {
+        d.filter(vectorcraft_ui_egui::i18n::tr_ctx(vectorcraft_ui_egui::i18n::current(), "file-filter", name.as_str()), exts)
+    });
     let d = match &pick.folder {
         Some(folder) => d.folder(folder),
         None => d,
@@ -122,9 +123,19 @@ fn make_folder(request: &PickRequest) {
     }
 }
 
-/// Show `dialog` for `request` (on the calling thread, until it closes) → the paths picked.
-fn show_dialog(dialog: rfd::FileDialog, request: &PickRequest) -> Vec<String> {
+/// Show `dialog` for `request` (on the calling thread, until it closes) → the paths picked. On
+/// Linux and the BSDs a save dialog with two or more file types is the desktop portal's, over
+/// `parent`, and its answer also names the file type picked ([`portal_save`]); `dialog` shows when
+/// the portal can't.
+#[cfg_attr(any(windows, target_os = "macos"), allow(unused_variables))]
+fn show_dialog(dialog: rfd::FileDialog, request: &PickRequest, parent: &Parent) -> Vec<String> {
     make_folder(request);
+    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "dragonfly", target_os = "netbsd", target_os = "openbsd"))]
+    if let PickRequest::Save(pick) = request
+        && let Some(answer) = crate::portal_save::pick(pick, parent.as_deref())
+    {
+        return answer;
+    }
     let paths = match request {
         PickRequest::Open(_) => dialog.pick_file().into_iter().collect(),
         PickRequest::OpenMany => dialog.pick_files().unwrap_or_default(),
@@ -137,7 +148,7 @@ fn show_dialog(dialog: rfd::FileDialog, request: &PickRequest) -> Vec<String> {
 /// Show the dialog for `request` over `parent` now → the paths picked.
 #[cfg(not(target_os = "macos"))]
 fn pick_now(request: PickRequest, parent: &Parent) -> Vec<String> {
-    show_dialog(file_dialog(&request, parent), &request)
+    show_dialog(file_dialog(&request, parent), &request, parent)
 }
 
 /// macOS shows no dialog in line on the app's own window: its modal loop would run inside winit's
@@ -148,7 +159,7 @@ fn pick_now(request: PickRequest, parent: &Parent) -> Vec<String> {
 #[cfg(target_os = "macos")]
 fn pick_now(request: PickRequest, parent: &Parent) -> Vec<String> {
     if parent.is_none() {
-        return show_dialog(file_dialog(&request, parent), &request);
+        return show_dialog(file_dialog(&request, parent), &request, parent);
     }
     log::error!("no file dialog shown for {request:?}: macOS shows them as sheets, from commands, dialogs' OK and buttons only");
     Vec::new()
@@ -156,6 +167,7 @@ fn pick_now(request: PickRequest, parent: &Parent) -> Vec<String> {
 
 /// File → Show in Folder: select `path` in Finder / Explorer, or open its folder elsewhere.
 fn reveal(path: &str) -> Result<(), String> {
+    explorer_safe(path)?;
     reveal_command(path).spawn().map(|_| ()).map_err(|e| format!("can't show {path}: {e}"))
 }
 
@@ -197,11 +209,12 @@ fn start_pick(request: PickRequest, parent: &Parent, ui: &egui::Context) -> Opti
     let dialog = file_dialog(&request, parent);
     let (tx, rx) = std::sync::mpsc::channel();
     let ui = ui.clone();
+    let parent = parent.clone();
     std::thread::Builder::new()
         .name("file-dialog".into())
         .spawn(move || {
             // The app gone meanwhile has no use for the answer.
-            let _ = tx.send(show_dialog(dialog, &request));
+            let _ = tx.send(show_dialog(dialog, &request, &parent));
             ui.request_repaint();
         })
         .ok()?;
@@ -243,7 +256,7 @@ fn start_pick(request: PickRequest, parent: &Parent, ui: &egui::Context) -> Opti
         })
         .ok()?;
     make_folder(&request);
-    // rfd builds the panel and begins the sheet here, on the main thread (as it must).
+    // The panel is built and the sheet is begun below, on the main thread (as it must).
     let dialog = dialog_for(rfd::AsyncFileDialog::new().parent(window), &request);
     let path = |f: &rfd::FileHandle| f.path().to_string_lossy().to_string();
     let answer: SheetAnswer = match request {
@@ -255,12 +268,18 @@ fn start_pick(request: PickRequest, parent: &Parent, ui: &egui::Context) -> Opti
             let picked = dialog.pick_files();
             Box::pin(async move { picked.await.unwrap_or_default().iter().map(path).collect() })
         }
-        PickRequest::Save(_) => {
-            // Nothing is added to the sheet once rfd has begun it: an accessory view set then made
-            // recent macOS versions dismiss the sheet at once, so nothing could be saved (#1800).
-            let picked = dialog.save_file();
-            Box::pin(async move { picked.await.iter().map(path).collect() })
-        }
+        // A save panel with two or more named file types is built by `mac_save_format`, which sets
+        // up its Format menu before the sheet begins (#866); rfd shows the others.
+        PickRequest::Save(pick) => match crate::mac_save_format::begin(window, &pick) {
+            // The dialog thread blocks here until the sheet answers.
+            Some(picked) => Box::pin(async move { picked.recv().unwrap_or_default() }),
+            None => {
+                // Nothing is added to the sheet once rfd has begun it: an accessory view set then
+                // made recent macOS versions dismiss the sheet at once (#1800).
+                let picked = dialog.save_file();
+                Box::pin(async move { picked.await.iter().map(path).collect() })
+            }
+        },
         PickRequest::Folder => {
             let picked = dialog.pick_folder();
             Box::pin(async move { picked.await.iter().map(path).collect() })
@@ -279,6 +298,8 @@ pub fn services(parent: Parent, ui: egui::Context) -> Services {
     use winit::raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
     let wayland = parent.as_ref().and_then(|w| w.window_handle().ok()).is_some_and(|h| matches!(h.as_raw(), RawWindowHandle::Wayland(_)));
     let (p1, p2, p3, p4, p5) = (parent.clone(), parent.clone(), parent.clone(), parent.clone(), parent);
+    #[cfg(target_os = "macos")]
+    let sampled_ui = ui.clone();
     Services {
         pick_open: Some(Box::new(move |pick: &FilePick| pick_now(PickRequest::Open(pick.clone()), &p1).into_iter().next())),
         pick_open_multi: Some(Box::new(move || pick_now(PickRequest::OpenMany, &p2))),
@@ -289,8 +310,10 @@ pub fn services(parent: Parent, ui: egui::Context) -> Services {
             .then(|| Box::new(move |request: PickRequest| start_pick(request, &p5, &ui)) as vectorcraft_ui_egui::picks::StartPick),
         dialogs_are_sheets: sheets,
         wayland,
+        no_cursor_theme: wayland && crate::cursor_theme::theme_missing(),
         read: Some(Box::new(|p: &str| std::fs::read(p).map_err(|e| e.to_string()))),
         write: Some(Box::new(write_file)),
+        exists: Some(Box::new(|p: &str| std::path::Path::new(p).exists())),
         // Background Save and Export write from a worker thread.
         write_shared: Some(std::sync::Arc::new(write_file)),
         // Native saves stream into the file as they are encoded.
@@ -309,6 +332,9 @@ pub fn services(parent: Parent, ui: egui::Context) -> Services {
         // Links panel: Edit Original; Package: Show Package. Relink to Folder and Package pick folders.
         open_file: Some(Box::new(open_file)),
         pick_folder: Some(Box::new(move || pick_now(PickRequest::Folder, &p4).into_iter().next())),
+        // Sample Color from Screen: the system's color sampler.
+        #[cfg(target_os = "macos")]
+        screen_color: Some(crate::mac_screen_color::sampler(sampled_ui)),
         // File → Print: the system's printers and print queue.
         print: Some(Box::new(printing::SystemPrint)),
         ..Default::default()
@@ -320,8 +346,15 @@ pub fn open_url(url: &str) {
     let _ = webbrowser::open(url);
 }
 
+/// Windows passes `path` to Explorer inside quotes it adds itself, so a path holding a quote (which
+/// no Windows file name has) is refused rather than split into other arguments.
+fn explorer_safe(path: &str) -> Result<(), String> {
+    if cfg!(windows) && path.contains('"') { Err(format!("can't open {path}: the path contains a quotation mark")) } else { Ok(()) }
+}
+
 /// Edit Original, Show Package: open `path` (a file or a folder) in the system's default app for it.
 pub fn open_file(path: &str) -> Result<(), String> {
+    explorer_safe(path)?;
     #[cfg(windows)]
     let mut c = {
         use std::os::windows::process::CommandExt as _;

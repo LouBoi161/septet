@@ -127,7 +127,7 @@ impl GradientDef {
         let name = vals.iter().find_map(|v| if let V::Str(_) = v { v.text() } else { None })?;
         let nums: Vec<f64> = vals.iter().filter_map(V::num).collect();
         let kind = if nums.first().copied() == Some(1.0) { GradientKind::Radial } else { GradientKind::Linear };
-        Some(Self { name, gradient: Gradient { kind, stops: vec![] } })
+        Some(Self { name, gradient: Gradient::new(kind, vec![]) })
     }
 
     /// A stop (`Bs`).
@@ -236,6 +236,11 @@ impl Instance {
         if let [x, y, ..] = n.as_slice() {
             self.hilight = Vec2::new(*x, *y);
         }
+    }
+
+    /// Does it carry a matrix of its own (`Xm` or `Bm`) rather than only `Bg`'s numbers?
+    pub fn has_matrix(&self) -> bool {
+        self.xm.is_some() || self.bm.is_some()
     }
 
     /// The paint, through `to_doc` (art space → the document), when the gradient is defined.

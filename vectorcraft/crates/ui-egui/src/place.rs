@@ -139,7 +139,9 @@ fn pick(app: &mut VectorcraftApp) -> Result<(), String> {
     let paths = if app.services.pick_open_multi.is_some() {
         crate::picks::open_many(app)
     } else {
-        crate::picks::open(app, &crate::FilePick { filters: fileio::place_filters().collect(), ..Default::default() }).into_iter().collect()
+        crate::picks::open(app, &crate::FilePick { filters: crate::FilePick::filters(fileio::place_filters()), ..Default::default() })
+            .into_iter()
+            .collect()
     };
     if paths.is_empty() {
         return Err("cancelled".into());
@@ -153,6 +155,7 @@ fn open_dialog(app: &mut VectorcraftApp, files: Vec<Value>) {
     let units = app.session.active().map(|d| d.doc.units).unwrap_or_default();
     let info: Vec<String> = files.iter().map(|f| summary(app, f, units)).collect();
     let one_object = app.session.active().is_some_and(|d| d.selection.objects.len() == 1);
+    let linked: Vec<bool> = files.iter().map(|f| is_vectorcraft_file(app, f)).collect();
     app.ui.dialog = Some(crate::state::Dialog::new(
         crate::dialogs::place::KIND,
         json!({
@@ -161,18 +164,24 @@ fn open_dialog(app: &mut VectorcraftApp, files: Vec<Value>) {
             "template": false,
             "replace": false,
             "__replace": files.len() == 1 && one_object,
-            "__documents": files.iter().any(is_vectorcraft_file),
-            "__others": !files.iter().all(is_vectorcraft_file),
+            "__documents": linked.contains(&true),
+            "__others": linked.contains(&false),
             "__info": info,
         }),
     ));
 }
 
 /// Is dialog file entry `file` a VectorCraft document on disk (what Link places as one locked
-/// object)?
-fn is_vectorcraft_file(file: &Value) -> bool {
+/// object), or a PDF or `.ai` file on disk? A `.ai` saved without PDF compatibility is PostScript,
+/// which `file.place` embeds whether Link is on or not.
+fn is_vectorcraft_file(app: &VectorcraftApp, file: &Value) -> bool {
+    let Some(path) = file.get("path").and_then(Value::as_str) else { return false };
     let native = ["vectorcraft", vectorcraft_format::LEGACY_EXTENSION, "vctemplate"];
-    file.get("path").and_then(Value::as_str).is_some_and(|p| native.contains(&fileio::extension(p).as_str()))
+    match fileio::extension(path).as_str() {
+        e if native.contains(&e) => true,
+        "pdf" | "ai" | "ait" => app.services.read.as_ref().and_then(|r| r(path).ok()).is_none_or(|b| !vectorcraft_pdf::is_postscript(&b)),
+        _ => false,
+    }
 }
 
 /// The engine params naming `file` (a dialog file entry).
@@ -442,7 +451,12 @@ pub fn control_bar_details(app: &mut VectorcraftApp, ui: &mut egui::Ui) -> bool 
     let (name, details) = image_summary(i);
     let (Some(id), linked) = (i["id"].as_u64(), i["linked"] == true) else { return false };
     let t = Tokens::get(ui.ctx());
-    ui.label(egui::RichText::new(&name).size(12.0).color(t.text_strong));
+    // The file name is a link: its menu relinks (replaces) the image and reaches the Links
+    // panel's other actions for it.
+    let resp = ui
+        .add(egui::Label::new(egui::RichText::new(&name).size(12.0).color(t.accent).underline()).sense(egui::Sense::click()))
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    egui::Popup::menu(&resp).show(|ui| link_menu(app, ui, id, linked));
     ui.separator();
     ui.label(egui::RichText::new(details).size(12.0).color(t.text_dim));
     ui.separator();
@@ -455,6 +469,32 @@ pub fn control_bar_details(app: &mut VectorcraftApp, ui: &mut egui::Ui) -> bool 
     }
     ui.separator();
     true
+}
+
+/// The menu of the Control bar's file name for image `id`: Replace… (another file takes the
+/// image's place with its own aspect ratio; an embedded image becomes linked), Go To Link, Edit
+/// Original, Update Link and Placement Options….
+fn link_menu(app: &mut VectorcraftApp, ui: &mut egui::Ui, id: u64, linked: bool) {
+    ui.set_min_width(200.0);
+    if widgets::menu_item(ui, tl!("Replace…"), app.services.pick_open.is_some(), false) {
+        crate::panels::links::replace(app, vec![id]);
+    }
+    if widgets::menu_item(ui, tl!("Go To Link"), true, false) {
+        crate::panels::links::go_to(app, id);
+    }
+    if widgets::menu_item(ui, tl!("Edit Original"), linked, false) {
+        crate::menus::invoke(app, "links.editOriginal", json!({ "id": id }));
+    }
+    if widgets::menu_item(ui, tl!("Update Link"), linked, false) {
+        let msg = match app.run("links.update", json!({ "ids": [id] })) {
+            Ok(v) => format!("Updated {} image(s)", v["updated"].as_array().map_or(0, Vec::len)),
+            Err(e) => e,
+        };
+        app.status(msg);
+    }
+    if widgets::menu_item(ui, tl!("Placement Options…"), true, false) {
+        crate::menus::invoke(app, "ui.placementOptionsDialog", json!({ "ids": [id] }));
+    }
 }
 
 /// Embed (and Edit Original) for linked image `id`, Unembed… for an embedded one named `name`
