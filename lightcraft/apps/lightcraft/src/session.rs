@@ -3,10 +3,12 @@
 use lightcraft_engine::Session;
 use lightcraft_ui_egui::panels::library_problem::LibraryProblem;
 
-/// The library session with the folder face models are kept in (`<config>/models`).
+/// The library session with the folders face models (`<config>/models`) and slideshow templates
+/// (`<config>/slideshow-templates`) are kept in (under the host's data root when one is set).
 pub fn open_session(in_memory: bool, dir: Option<std::path::PathBuf>, seed_demo: bool) -> (Session, Option<LibraryProblem>) {
     let (mut s, problem) = open_library_session(in_memory, dir, seed_demo);
     s.face_models_dir = lightcraft_engine::config::default_face_models_dir();
+    s.slide_templates_dir = lightcraft_engine::config::config_dir().map(|d| d.join(lightcraft_engine::slide_template::DIR_NAME));
     // Control requests are answered on the UI thread: Add to Apple Photos must not wait there
     s.apple_photos_background = true;
     (s, problem)

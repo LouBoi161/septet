@@ -2,10 +2,10 @@
 
 use lightcraft_catalog::{Op, PhotoId, Version};
 use lightcraft_develop::{DevelopSettings, Preset, ProcessVersion, Section, SettingsGroup, Treatment, Upright, WbMode, controls};
-use lightcraft_geom::{CropGeometry, CropHandle, Point, Rect, crop_fit_angle, drag_crop};
+use lightcraft_geom::{CropGeometry, CropHandle, MIN_CROP_FRACTION, Point, Rect, crop_fit_angle, drag_crop};
 use serde_json::{Value, json};
 
-use super::{CommandSpec, always, bad, bool_or, cmd, f64_or, f64_req, has_active, has_clipboard, has_selection, ok, str_param};
+use super::{CommandSpec, always, bad, bool_or, cmd, f64_or, f64_req, has_active, has_clipboard, has_selection, index_req, ok, str_param};
 use crate::{Result, Session, media::SourceLevel};
 
 fn active(s: &Session, c: &str) -> Result<PhotoId> {
@@ -77,13 +77,22 @@ fn aspect_tuple(c: &str, x: f64, y: f64) -> Result<(u32, u32)> {
     Ok((a as u32, b as u32))
 }
 
-fn set_aspect(d: &mut DevelopSettings, w: f64, h: f64, aspect: Option<(u32, u32)>) {
+/// How a new aspect ratio is turned (issue #2253).
+#[derive(Clone, Copy, PartialEq)]
+enum Turn {
+    /// As the crop is now: a named ratio ("2x3", "original"…) lands landscape on a landscape crop
+    /// and portrait on a portrait one (after X), as in Lightroom. A square crop follows the image.
+    LikeCrop,
+    /// As given: a custom `[w, h]` taller than wide is a portrait crop.
+    AsGiven,
+}
+
+fn set_aspect(d: &mut DevelopSettings, w: f64, h: f64, aspect: Option<(u32, u32)>, turn: Turn) {
+    let r = d.crop.geometry.rect_px(w, h);
+    let landscape = if (r.width() - r.height()).abs() > 1e-6 * r.width().max(r.height()) { r.width() > r.height() } else { w >= h };
+    let aspect = aspect.map(|(aw, ah)| if turn == Turn::LikeCrop && (aw >= ah) != landscape { (ah, aw) } else { (aw, ah) });
     d.crop.aspect = aspect;
-    let a = aspect.map(|(aw, ah)| {
-        // orientation of the crop follows the image (landscape image → landscape crop)
-        let (aw, ah) = (aw as f64, ah as f64);
-        if (w >= h) == (aw >= ah) { aw / ah } else { ah / aw }
-    });
+    let a = aspect.map(|(aw, ah)| aw as f64 / ah as f64);
     let angle = d.crop.geometry.angle;
     d.crop.geometry = crop_fit_angle(w, h, angle, a);
 }
@@ -144,7 +153,7 @@ fn user_preset<'a>(s: &'a mut Session, p: &Value, c: &str) -> Result<&'a mut Pre
 /// Change version `p.index` of the active photo (`f` gets it and the current settings).
 fn edit_version(s: &mut Session, p: &Value, c: &str, label: &str, f: impl FnOnce(&mut Version, std::sync::Arc<DevelopSettings>)) -> Result<Value> {
     let id = active(s, c)?;
-    let i = f64_req(p, "index", c)? as usize;
+    let i = index_req(p, "index", c)?;
     let ph = s.catalog.photo(id).ok_or_else(|| bad(c, "no photo"))?;
     let mut versions = ph.versions.clone();
     let v = versions.get_mut(i).ok_or_else(|| bad(c, "no such version"))?;
@@ -199,8 +208,7 @@ pub fn specs() -> Vec<CommandSpec> {
                     }
                     refit_crop_angle(angle, before, d, dims);
                 };
-                if let Some(ids) = p.get("ids").and_then(Value::as_array) {
-                    let ids: Vec<PhotoId> = ids.iter().filter_map(Value::as_u64).map(PhotoId).collect();
+                if let Some(ids) = super::photo_ids(p, "develop.set")? {
                     let ops = ids
                         .iter()
                         .filter_map(|id| s.develop_of(*id).map(|d| (*id, d)))
@@ -254,7 +262,7 @@ pub fn specs() -> Vec<CommandSpec> {
             })
         }),
         cmd!("develop.reset", "Reset Edits", ["Photo"], Some("Cmd+Shift+R"), "{ids?}", has_selection, |s, p| {
-            let ids = s.targets(p);
+            let ids = s.targets(p)?;
             let ops = ids
                 .iter()
                 .filter_map(|id| s.develop_of(*id).map(|d| (*id, d)))
@@ -304,7 +312,7 @@ pub fn specs() -> Vec<CommandSpec> {
                     let targets = match named_photos(s, p, C)? {
                         Some(ids) if !ids.iter().any(|id| outdated(s, *id)) => return Err(crate::EngineError::Disabled(C.into(), already_current())),
                         Some(ids) => ids,
-                        None => s.targets(p),
+                        None => s.targets(p)?,
                     };
                     let ops: Vec<Op> = targets
                         .into_iter()
@@ -524,13 +532,24 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("crop.set", "Set Crop", [], None, "{rect?: [x0,y0,x1,y1] normalized in the straightened frame, angle?: degrees}", has_active, |s, p| {
             let id = active(s, "crop.set")?;
             let (w, h) = crop_dims(s, id);
+            // the smallest crop a drag of the crop tool can make: below it an export comes out 1×1 (#1952)
+            let min_side = MIN_CROP_FRACTION * w.min(h) * (1.0 - 1e-9);
+            let too_small = |r: Rect| {
+                (r.width() * w < min_side || r.height() * h < min_side)
+                    .then(|| bad("crop.set", format!("rect is smaller than the smallest crop ({} % of the shorter side)", MIN_CROP_FRACTION * 100.0)))
+            };
             edit(s, "crop.set", "Crop", |d| {
-                if let Some(a) = p.get("rect").and_then(Value::as_array) {
+                let explicit = p.get("rect").and_then(Value::as_array);
+                if let Some(a) = explicit {
                     let v: Vec<f64> = a.iter().filter_map(Value::as_f64).collect();
                     if v.len() != 4 {
                         return Err(bad("crop.set", "rect needs 4 numbers"));
                     }
-                    d.crop.geometry.rect = Rect::new(v[0].min(v[2]), v[1].min(v[3]), v[0].max(v[2]), v[1].max(v[3]));
+                    let r = Rect::new(v[0].min(v[2]), v[1].min(v[3]), v[0].max(v[2]), v[1].max(v[3]));
+                    if let Some(e) = too_small(r) {
+                        return Err(e);
+                    }
+                    d.crop.geometry.rect = r;
                 }
                 let angle = p.get("angle").and_then(Value::as_f64).map(|a| a.clamp(-45.0, 45.0));
                 d.crop.geometry = match (p.get("rect"), angle) {
@@ -538,6 +557,12 @@ pub fn specs() -> Vec<CommandSpec> {
                     (None, Some(a)) => d.crop.geometry.with_angle(a, w, h),
                     (_, a) => CropGeometry { angle: a.unwrap_or(d.crop.geometry.angle), ..d.crop.geometry }.constrained(w, h),
                 };
+                // a rect far larger than the photo is shrunk to fit it, and can come out a sliver
+                if explicit.is_some()
+                    && let Some(e) = too_small(d.crop.geometry.rect)
+                {
+                    return Err(e);
+                }
                 Ok(())
             })
         }),
@@ -588,14 +613,14 @@ pub fn specs() -> Vec<CommandSpec> {
             "Straighten",
             [],
             None,
-            "{angle: degrees -45..45} — keeps the largest crop of the current aspect",
+            "{angle: degrees -45..45} — keeps the crop if it still fits, else shrinks it about its centre (the largest crop of its aspect stays the largest)",
             has_active,
             |s, p| {
                 let id = active(s, "crop.straighten")?;
                 let (w, h) = crop_dims(s, id);
                 let angle = f64_req(p, "angle", "crop.straighten")?.clamp(-45.0, 45.0);
                 edit(s, "crop.straighten", "Straighten", |d| {
-                    // keep the current crop if it still fits, else the largest of its aspect that does
+                    // keep the current crop if it still fits, else shrink it about its centre until it does
                     d.crop.geometry = d.crop.geometry.with_angle(angle, w, h);
                     Ok(())
                 })
@@ -628,11 +653,19 @@ pub fn specs() -> Vec<CommandSpec> {
             "Crop Aspect",
             [],
             None,
-            "{aspect: \"original\"|\"free\"|\"current\" (lock the crop's present shape)|\"toggle\" (lock ↔ free)|\"1x1\"|\"4x5\"|\"8.5x11\"|\"5x7\"|\"2x3\"|\"4x3\"|\"16x9\"|\"16x10\"|[w,h]}",
+            "{aspect: \"original\"|\"free\"|\"current\" (lock the crop's present shape)|\"toggle\" (lock ↔ free)|\"1x1\"|\"4x5\"|\"8.5x11\"|\"5x7\"|\"2x3\"|\"4x3\"|\"16x9\"|\"16x10\"|[w,h], orientation?: \"crop\"|\"given\"} — a named ratio takes the crop's present orientation (landscape, or portrait after X); [w,h] is used as given (taller than wide → portrait); `orientation` overrides either",
             has_active,
             |s, p| {
                 let id = active(s, "crop.aspect")?;
                 let (w, h) = crop_dims(s, id);
+                // checked first, whatever the aspect: a bad value is an error on every path
+                let turn = match p.get("orientation") {
+                    Some(Value::String(o)) if o == "crop" => Turn::LikeCrop,
+                    Some(Value::String(o)) if o == "given" => Turn::AsGiven,
+                    Some(_) => return Err(bad("crop.aspect", "orientation is \"crop\" or \"given\"")),
+                    None if matches!(p.get("aspect"), Some(Value::Array(_))) => Turn::AsGiven,
+                    None => Turn::LikeCrop,
+                };
                 let locked = s.develop_of(id).is_some_and(|d| d.crop.aspect.is_some());
                 let lock_current = match p.get("aspect").and_then(Value::as_str) {
                     Some("current") => true,
@@ -667,7 +700,7 @@ pub fn specs() -> Vec<CommandSpec> {
                     if aspect.is_none() {
                         d.crop.aspect = None;
                     } else {
-                        set_aspect(d, w, h, aspect);
+                        set_aspect(d, w, h, aspect, turn);
                     }
                     Ok(())
                 })
@@ -678,10 +711,11 @@ pub fn specs() -> Vec<CommandSpec> {
             let (w, h) = crop_dims(s, id);
             edit(s, "crop.rotateAspect", "Rotate Crop", |d| {
                 let r = d.crop.geometry.rect_px(w, h);
-                let a = r.height() / r.width();
+                // a degenerate crop has no aspect to rotate: fall back to the image's own
+                let a = Some(r.height() / r.width()).filter(|a| a.is_finite() && *a > 0.0);
                 d.crop.aspect = d.crop.aspect.map(|(x, y)| (y, x));
                 let angle = d.crop.geometry.angle;
-                d.crop.geometry = crop_fit_angle(w, h, angle, Some(a));
+                d.crop.geometry = crop_fit_angle(w, h, angle, a);
                 Ok(())
             })
         }),
@@ -810,7 +844,7 @@ pub fn specs() -> Vec<CommandSpec> {
                     s.previous_active.filter(|id| s.catalog.photo(*id).is_some_and(|ph| !ph.deleted)).ok_or_else(|| bad(c, "no previous photo"))?;
                 let groups = groups_param(p, c)?.unwrap_or_else(|| s.copy_groups.clone());
                 let partial = lightcraft_develop::extract_groups(&s.develop_of(prev).unwrap_or_default(), &groups);
-                let ids: Vec<PhotoId> = s.targets(p).into_iter().filter(|id| *id != prev).collect();
+                let ids: Vec<PhotoId> = s.targets(p)?.into_iter().filter(|id| *id != prev).collect();
                 let ops = ids
                     .iter()
                     .filter_map(|id| s.develop_of(*id).map(|d| (*id, d)))
@@ -837,7 +871,7 @@ pub fn specs() -> Vec<CommandSpec> {
                     let full = lightcraft_develop::apply_partial(&DevelopSettings::default(), &clip, 1.0);
                     clip = lightcraft_develop::extract_groups(&full, &only);
                 }
-                let ids = s.targets(p);
+                let ids = s.targets(p)?;
                 let ops = ids
                     .iter()
                     .filter_map(|id| s.develop_of(*id).map(|d| (*id, d)))
@@ -889,7 +923,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 let delta = f64_req(p, "delta", c)?;
                 let label = format!("Quick Develop: {}", spec.label);
                 let ops: Vec<Op> = s
-                    .targets(p)
+                    .targets(p)?
                     .into_iter()
                     .filter_map(|id| s.develop_of(id).map(|d| (id, d)))
                     .filter_map(|(id, d)| {
@@ -942,7 +976,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 };
                 let r_ev = gathered(s, reference).ok_or_else(|| bad(c, "the active photo has no shutter / aperture / ISO"))?;
                 let r_slider = s.develop_of(reference).map(|d| d.light.exposure).unwrap_or(0.0);
-                let ids: Vec<PhotoId> = s.targets(p).into_iter().filter(|x| *x != reference).collect();
+                let ids: Vec<PhotoId> = s.targets(p)?.into_iter().filter(|x| *x != reference).collect();
                 let (mut ops, mut skipped) = (Vec::new(), Vec::new());
                 for id in ids {
                     let (Some(ev), Some(d)) = (gathered(s, id), s.develop_of(id)) else {
@@ -977,7 +1011,8 @@ pub fn specs() -> Vec<CommandSpec> {
             let pid = str_param(p, "id").ok_or_else(|| bad("preset.apply", "missing id"))?;
             let preset = s.presets.iter().find(|x| x.id == pid).cloned().ok_or_else(|| bad("preset.apply", format!("unknown preset `{pid}`")))?;
             let amount = f64_or(p, "amount", 100.0).clamp(0.0, 200.0) / 100.0;
-            let ids = s.targets(p);
+            // `id` names the preset here: the photos are `ids`, else the selection
+            let ids = s.targets(&json!({"ids": p.get("ids")}))?;
             let ops = ids
                 .iter()
                 .filter_map(|id| s.develop_of(*id).map(|d| (*id, d)))
@@ -1060,14 +1095,14 @@ pub fn specs() -> Vec<CommandSpec> {
         }),
         cmd!("version.restore", "Restore Version", [], None, "{index}", has_active, |s, p| {
             let id = active(s, "version.restore")?;
-            let i = f64_req(p, "index", "version.restore")? as usize;
+            let i = index_req(p, "index", "version.restore")?;
             let v = s.catalog.photo(id).and_then(|ph| ph.versions.get(i).cloned()).ok_or_else(|| bad("version.restore", "no such version"))?;
             s.set_develop(id, (*v.settings).clone(), &format!("Restore {}", v.name))?;
             ok()
         }),
         cmd!("version.delete", "Delete Version", [], None, "{index}", has_active, |s, p| {
             let id = active(s, "version.delete")?;
-            let i = f64_req(p, "index", "version.delete")? as usize;
+            let i = index_req(p, "index", "version.delete")?;
             let mut versions = s.catalog.photo(id).map(|ph| ph.versions.clone()).unwrap_or_default();
             if i >= versions.len() {
                 return Err(bad("version.delete", "no such version"));
@@ -1101,11 +1136,8 @@ pub fn specs() -> Vec<CommandSpec> {
             |s, p| {
                 let c = "history.restore";
                 let id = active(s, c)?;
-                let i = f64_req(p, "index", c)?;
-                if !(i.is_finite() && i >= 0.0) {
-                    return Err(bad(c, "no such step"));
-                }
-                go_to_history_step(s, c, id, i as usize)
+                let i = index_req(p, "index", c)?;
+                go_to_history_step(s, c, id, i)
             }
         ),
         cmd!("history.previous", "Previous History Step", [], None, "{} — steps the History cursor back one step", has_history_before, |s, _| {
