@@ -1283,6 +1283,10 @@ fn draw_headers(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, rows:
         }
         let p = ui.painter().with_clip_rect(visible);
         p.rect_filled(hrect, 0.0, t.tl_header_bg);
+        let label = format!("{}{}", if r.kind == TrackKind::Video { "V" } else { "A" }, r.index + 1);
+        // Right-click on the header (outside its buttons and colour strip, which sit on top): the track's menu.
+        let whole = ui.interact(visible, egui::Id::new(("hdr-menu", r.track.0)), Sense::click());
+        track_menu(&whole, r, &label, &mut actions);
         // 0. colour label (#1186): a tint over the header, and the strip at its left edge, which
         // opens the colour menu
         let strip = Rect::from_min_max(hrect.min, pos2(hrect.min.x + 9.0, hrect.max.y));
@@ -1317,10 +1321,6 @@ fn draw_headers(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, rows:
         if r.kind == TrackKind::Video && r.index + 1 == seq.video_tracks.len() {
             p.line_segment([pos2(hrect.min.x, hrect.min.y + 0.5), pos2(hrect.max.x, hrect.min.y + 0.5)], Stroke::new(1.0, t.separator));
         }
-        let label = format!("{}{}", if r.kind == TrackKind::Video { "V" } else { "A" }, r.index + 1);
-        // Right-click on the header (outside its buttons, which sit on top): the track's menu.
-        let whole = ui.interact(visible, egui::Id::new(("hdr-menu", r.track.0)), Sense::click());
-        track_menu(&whole, r, &label, &mut actions);
         let btn_rect = |x0: f32| Rect::from_min_max(pos2(hrect.min.x + x0, hrect.min.y + 1.0), pos2(hrect.min.x + x0 + 24.0, hrect.max.y - 2.0));
         // 1. source patch (absent when unpatched)
         let patched = if r.kind == TrackKind::Video { tg.video_dest == Some(r.track) } else { tg.audio_dest == Some(r.track) };
