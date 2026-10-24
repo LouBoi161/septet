@@ -53,3 +53,9 @@ designcraft a_running_apps_recovery_data_is_left_alone
 # its clip. Upstream v0.12.0 fails the same way with CRAFT_FONTS_DIR at a71c20e and passes without it
 # (checked 2026-10-24). In Septet's Arabic interface the field really clips: fix the field height.
 designcraft dialogs::tests::arabic_new_document_fields_remain_reachable_and_editable
+
+# Upstream v0.15.1 fails the same way here (checked 2026-10-24 on the release tag itself, twice): the
+# GPU timing tests compare timestamp queries with the wall clock, which the other GPU jobs on this
+# machine's card (RTX 4070 Ti, 30-46 % busy) stretch. Our crates/gpu is upstream's.
+photocraft timing::a_refresh_that_submits_several_times_is_one_measurement
+photocraft timing::gpu_time_tracks_execution_not_submission
