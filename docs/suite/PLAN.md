@@ -144,8 +144,9 @@ Gefunden und behoben: Designcrafts neuer Dateisystem-Wächter kennt unser `user_
 Rechtsklick-Fläche im Filmcraft-Spurkopf lag über Upstreams neuem Farbstreifen; Lightcrafts Einstellungsschreiber las
 das prozessweite „gehostet“-Flag, das die Embed-Tests setzen; Pdfcrafts Ebenen-Snapshot ohne unseren Namensknopf.
 Neu übersprungen: Designcrafts arabischer Dialogtest (OPEN: mit unseren craft-fonts, Noto Sans Arabic, wird ein
-Feld abgeschnitten, auch auf Upstream v0.12.0 selbst). **Offen:** GPU-Tests von Pdfcraft (`--test it`) und
-Photocraft (`photocraft-gpu --test it`, Zeitmessung) scheiterten an voller GPU; bei freier GPU wiederholen.
+Feld abgeschnitten, auch auf Upstream v0.12.0 selbst). GPU-Tests bei
+freier GPU nachgeholt: Pdfcraft grün; Photocrafts zwei Zeitmessungstests übersprungen (scheitern auf Upstream
+v0.15.1 selbst, die GPU ist hier von anderen Programmen belegt).
 
 ### Phase A: Fundament (vor den neuen Apps)
 
