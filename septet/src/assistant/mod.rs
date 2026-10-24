@@ -9,6 +9,7 @@ pub mod cli;
 pub mod conversation;
 pub mod extensions;
 pub mod history;
+pub mod images;
 pub mod markdown;
 pub mod mcp;
 pub mod panel;

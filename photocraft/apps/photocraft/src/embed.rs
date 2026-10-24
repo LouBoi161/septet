@@ -34,6 +34,27 @@ type OpenApp = Rc<RefCell<Option<Box<dyn FnMut(&str)>>>>;
 /// A picture for the host's agent, made on a worker thread ([`Embedded::agent_render`]).
 pub type AgentRender = Box<dyn FnOnce() -> Result<egui::ColorImage, String> + Send>;
 
+/// What the host asks its image generator for (Edit › Generative Fill… or Generate Image…).
+pub use photocraft_ui_egui::hosted::Generate;
+
+/// What the host sends to its image generator ([`Embedded::generative_source`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct GenerativeSource {
+    /// The document's id, for placing the result back into it ([`Embedded::place_generated`]).
+    pub document: u64,
+    /// The document's size in pixels.
+    pub size: [u32; 2],
+    /// x, y, width, height: the selection's bounds grown by the margin on each side, within the
+    /// canvas; the whole canvas without a selection.
+    pub rect: [u32; 4],
+    /// The visible composite (every visible layer, as the document shows it) over `rect`, 8-bit
+    /// sRGB.
+    pub image: egui::ColorImage,
+    /// The pixel selection over `rect`, one byte per pixel (0–255, soft edges kept), row-major;
+    /// `None` without a selection.
+    pub mask: Option<Vec<u8>>,
+}
+
 /// What the agent hears when there is nothing to work on.
 const NO_DOCUMENT: &str = "No document is open in Photocraft: open one with septet_open, or make one with app_execute `file.new` {width, height}.";
 
@@ -284,6 +305,35 @@ impl Embedded {
         photocraft_ui_egui::hosted::set_open_appearance(handler);
     }
 
+    /// The host's image generator: while it is set, Edit › Generative Fill… (with a pixel
+    /// selection), Edit › Generate Image… and the selection tools' Generative Fill… row call
+    /// `handler`. Standalone PhotoCraft has none of them.
+    pub fn set_generate(&mut self, handler: Box<dyn FnMut(Generate)>) {
+        photocraft_ui_egui::hosted::set_generate(handler);
+    }
+
+    /// What to send to the image generator: the active document's selection bounds grown by
+    /// `margin` pixels on each side (within the canvas; the whole canvas without a selection),
+    /// the visible composite there as 8-bit sRGB whatever the document's mode and depth, and the
+    /// selection's coverage.
+    pub fn generative_source(&self, margin: u32) -> Result<GenerativeSource, String> {
+        crate::crash_guard::guard("Reading the image for Generative Fill", || generative_source(&self.app.session, margin))
+    }
+
+    /// Place a generated image in the document it was made for (`document`, from
+    /// [`Self::generative_source`]; it need not be the active one): one new pixel layer named
+    /// `name` above that document's active layer, holding `image` scaled to `rect` (x, y, width,
+    /// height) at its position, masked by `mask` (one byte per pixel of `rect`) inside `rect` and
+    /// hidden outside it; no layer mask without `mask`. One undo step (Generative Fill, or Generate
+    /// Image without a mask), in the document's colour mode and depth; the new layer becomes
+    /// active. An error if the document was closed.
+    pub fn place_generated(&mut self, document: u64, rect: [u32; 4], image: &egui::ColorImage, mask: Option<&[u8]>, name: &str) -> Result<(), String> {
+        let session = &mut self.app.session;
+        crate::crash_guard::guard("Placing the generated image", || place_generated(session, document, rect, image, mask, name))?;
+        self.ctx.request_repaint();
+        Ok(())
+    }
+
     /// Links to a sibling ArtCraft app's page (`getartcraft.com/apps/<name>`) call `handler(name)`
     /// instead of opening the page. PhotoCraft shows none today (only its own page, the ArtCraft
     /// site, Discord and GitHub, which stay web links), so this is kept for when it does.
@@ -493,6 +543,28 @@ impl Embedded {
             self.outgoing = None;
         }
     }
+}
+
+/// [`Embedded::generative_source`] on `session`.
+fn generative_source(session: &Session, margin: u32) -> Result<GenerativeSource, String> {
+    let src = photocraft_engine::generative::source(session, margin).map_err(|e| e.to_string())?;
+    let [_, _, w, h] = src.rect;
+    let image = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &src.rgba);
+    Ok(GenerativeSource { document: src.document, size: src.size, rect: src.rect, image, mask: src.mask })
+}
+
+/// [`Embedded::place_generated`] on `session`: the new layer.
+fn place_generated(session: &mut Session, document: u64, rect: [u32; 4], image: &egui::ColorImage, mask: Option<&[u8]>, name: &str) -> Result<LayerId, String> {
+    let [w, h] = image.size;
+    if image.pixels.len() != w.saturating_mul(h) {
+        return Err(format!("The generated image has {} pixels, not {w} × {h}.", image.pixels.len()));
+    }
+    let (Ok(width), Ok(height)) = (u32::try_from(w), u32::try_from(h)) else {
+        return Err(format!("The generated image is too large ({w} × {h} pixels)."));
+    };
+    let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+    photocraft_engine::generative::place(session, document, rect, photocraft_engine::generative::Image { width, height, rgba: &rgba }, mask, name)
+        .map_err(|e| e.to_string())
 }
 
 /// The layer `p.id` names, else the active one.
@@ -718,6 +790,66 @@ mod tests {
         open("https://example.com").unwrap();
         assert_eq!(*taken.borrow(), [PathBuf::from("/tmp/a.psd"), PathBuf::from("/tmp/b.txt")]);
         assert_eq!(*seen.borrow(), ["/tmp/b.txt", "https://example.com"]);
+    }
+
+    /// A 16-bit document, red on its left half, with a selection.
+    fn generative_session() -> Session {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 40, "height": 30, "depth": 16, "background": "white"})).unwrap();
+        s.execute("select.rect", json!({"x": 0, "y": 0, "width": 20, "height": 30})).unwrap();
+        s.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        s.execute("select.rect", json!({"x": 10, "y": 10, "width": 12, "height": 6})).unwrap();
+        s
+    }
+
+    #[test]
+    fn the_generative_source_is_the_selection_with_a_margin_and_the_composite() {
+        let mut s = generative_session();
+        let src = generative_source(&s, 3).unwrap();
+        assert_eq!(src.document, s.active().unwrap().doc.id.0);
+        assert_eq!((src.size, src.rect), ([40, 30], [7, 7, 18, 12]));
+        assert_eq!(src.image.size, [18, 12]);
+        assert_eq!(src.image.pixels[0].to_srgba_unmultiplied(), [255, 0, 0, 255]);
+        assert_eq!(src.image.pixels[18 * 12 - 1].to_srgba_unmultiplied(), [255, 255, 255, 255]);
+        let mask = src.mask.unwrap();
+        assert_eq!(mask.len(), 18 * 12);
+        assert_eq!((mask[0], mask[3 * 18 + 3], mask[8 * 18 + 14], mask[9 * 18 + 15]), (0, 255, 255, 0));
+        s.execute("select.deselect", json!({})).unwrap();
+        let whole = generative_source(&s, 3).unwrap();
+        assert_eq!((whole.rect, whole.image.size, whole.mask), ([0, 0, 40, 30], [40, 30], None));
+        assert!(generative_source(&Session::new(), 0).is_err());
+    }
+
+    #[test]
+    fn a_generated_image_is_placed_as_one_masked_layer_and_undone_in_one_step() {
+        let mut s = generative_session();
+        let src = generative_source(&s, 0).unwrap();
+        let below = s.active().unwrap().active_layer;
+        let layers = s.active().unwrap().doc.layers.len();
+        // A smaller image than the area: scaled up to it.
+        let image = egui::ColorImage::new([6, 3], vec![egui::Color32::from_rgb(0, 0, 255); 18]);
+        let id = place_generated(&mut s, src.document, src.rect, &image, src.mask.as_deref(), "Generative Fill").unwrap();
+        let st = s.active().unwrap();
+        assert_eq!(st.doc.layers.len(), layers + 1);
+        let at = st.doc.layers.iter().position(|l| l.id == id).unwrap();
+        assert_eq!(st.doc.layers.get(at - 1).map(|l| l.id), below, "above the active layer");
+        assert_eq!(st.active_layer, Some(id));
+        assert_eq!(st.history.undo_label(), Some("Generative Fill"));
+        let l = st.doc.layer(id).unwrap();
+        assert_eq!(l.name, "Generative Fill");
+        let surf = l.surface().unwrap();
+        assert_eq!(surf.content_bounds(), photocraft_geom::Rect::from_xywh(10, 10, 12, 6));
+        let p = surf.rgba(15, 12);
+        assert!(p[2] > 0.99 && p[0] < 0.01, "{p:?}");
+        let mask = l.mask.as_ref().unwrap();
+        assert_eq!((mask.value(10, 10), mask.value(21, 15), mask.value(9, 10), mask.value(0, 0)), (1.0, 1.0, 0.0, 0.0));
+        s.execute("edit.undo", json!({})).unwrap();
+        assert!(s.active().unwrap().doc.layer(id).is_none());
+        // Closed: an error.
+        s.close(0);
+        assert!(place_generated(&mut s, src.document, src.rect, &image, None, "x").unwrap_err().contains("closed"));
+        let broken = egui::ColorImage { size: [4, 4], ..image };
+        assert!(place_generated(&mut s, src.document, src.rect, &broken, None, "x").is_err());
     }
 
     #[test]

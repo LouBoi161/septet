@@ -71,6 +71,11 @@ enum Step {
     Accent(Option<&'static str>),
     /// Appearance › More contrast.
     Contrast(bool),
+    /// Generative Fill or Generate Image in Photocraft with this prompt, against a stand-in ComfyUI
+    /// (`comfy::mock`).
+    Generate(crate::hosted::Generate, &'static str),
+    /// Wait until the generation jobs are done (at most this many seconds); log failures.
+    GenerateWait(f64),
     Exit,
 }
 
@@ -103,6 +108,8 @@ pub struct Autotest {
     tools: Vec<(String, std::sync::mpsc::Receiver<crate::assistant::mcp::ToolReply>)>,
     tool_answers: usize,
     last_id: Option<serde_json::Value>,
+    /// The stand-in ComfyUI of `Step::Generate`.
+    comfy: Option<crate::comfy::mock::Server>,
 }
 
 impl Autotest {
@@ -304,6 +311,41 @@ impl Autotest {
                 steps.extend([Step::Report, Step::Exit]);
                 steps
             }
+            // Generative Fill and Generate Image in Photocraft against a stand-in ComfyUI: each makes a
+            // new layer (the stand-in fills the selection blue, makes a red image).
+            Ok("generate") => {
+                use crate::hosted::Generate;
+                let run = |command: &str, params: serde_json::Value| {
+                    Step::Tool("app_execute", serde_json::json!({"app": "photocraft", "command": command, "params": params}))
+                };
+                vec![
+                    Step::Wait(2.0),
+                    Step::Open(AppKind::Photocraft),
+                    Step::Wait(6.0),
+                    run("file.new", serde_json::json!({"width": 800, "height": 500})),
+                    Step::ToolWait(20.0),
+                    run("select.rect", serde_json::json!({"x": 300, "y": 150, "width": 200, "height": 160})),
+                    Step::ToolWait(10.0),
+                    Step::Wait(1.0),
+                    Step::Shot("g01-selection"),
+                    Step::Generate(Generate::Fill, "a blue square"),
+                    Step::Wait(0.5),
+                    Step::Shot("g02-progress"),
+                    Step::GenerateWait(20.0),
+                    Step::Wait(1.0),
+                    Step::Shot("g03-filled"),
+                    run("select.deselect", serde_json::json!({})),
+                    Step::ToolWait(10.0),
+                    Step::Generate(Generate::Image, "a red picture"),
+                    Step::GenerateWait(20.0),
+                    Step::Wait(1.0),
+                    Step::Shot("g04-image"),
+                    Step::Tool("app_inspect", serde_json::json!({"app": "photocraft", "what": "document", "depth": 1})),
+                    Step::ToolWait(10.0),
+                    Step::Report,
+                    Step::Exit,
+                ]
+            }
             Ok("gpu-lost") => {
                 let run = |command: &str, params: serde_json::Value| Step::Tool("app_execute", serde_json::json!({"app": "vectorcraft", "command": command, "params": params}));
                 vec![
@@ -344,6 +386,7 @@ impl Autotest {
             tools: Vec::new(),
             tool_answers: 0,
             last_id: None,
+            comfy: None,
         })
     }
 
@@ -1088,6 +1131,35 @@ impl Autotest {
                 Step::Accent(name) => {
                     at.note(format!("accent {name:?}"));
                     shell.appearance.accent = name.and_then(|n| crate::appearance::ACCENTS.iter().find(|(a, _)| *a == n)).map(|(_, rgb)| *rgb);
+                }
+                Step::Generate(kind, prompt) => {
+                    if at.comfy.is_none() {
+                        at.comfy = crate::comfy::mock::Server::start().ok();
+                        if let Some(server) = &at.comfy {
+                            let s = &mut shell.generation.comfy.settings;
+                            (s.address, s.autostart) = (server.address(), false);
+                            shell.generation.comfy.apply_settings();
+                        }
+                    }
+                    at.claude_since = now;
+                    match crate::generate::start_now(shell, ctx, AppKind::Photocraft, kind, prompt) {
+                        Ok(()) => at.note(format!("{kind:?} “{prompt}” started")),
+                        Err(e) => at.note(format!("FAILED: {kind:?} did not start: {e}")),
+                    }
+                }
+                Step::GenerateWait(limit) => {
+                    if shell.generation.busy() && now - at.claude_since < limit {
+                        at.steps.push(Step::GenerateWait(limit));
+                        at.next_at = now + 0.1;
+                        break;
+                    }
+                    let errors = shell.generation.errors();
+                    if errors.is_empty() {
+                        at.note(format!("generation done; requests to ComfyUI: {}", at.comfy.as_ref().map(|c| c.requests().join(", ")).unwrap_or_default()));
+                    }
+                    for e in errors {
+                        at.note(format!("FAILED: generation: {e}"));
+                    }
                 }
                 Step::Contrast(more) => {
                     at.note(format!("more contrast {more}"));

@@ -9,7 +9,8 @@
 //!
 //! A host can also keep everything PhotoCraft stores per user under one folder of its own
 //! ([`set_data_root`]), as PhotoCraft's portable mode does, and set the interface brightness for
-//! all the apps it shows ([`set_theme`]).
+//! all the apps it shows ([`set_theme`]). A host with an image generator adds Generative Fill and
+//! Generate Image to the Edit menu ([`set_generate`]).
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -47,6 +48,63 @@ pub fn set_open_appearance(open: Box<dyn FnMut()>) {
 /// Open the host's appearance settings ([`set_open_appearance`]) → whether there are any.
 pub fn open_appearance() -> bool {
     OPEN_APPEARANCE.with_borrow_mut(|open| open.as_mut().map(|open| open()).is_some())
+}
+
+/// What the host's image generator is asked for ([`set_generate`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Generate {
+    /// Edit › Generative Fill…: fill the pixel selection.
+    Fill,
+    /// Edit › Generate Image…: a new image as a new layer.
+    Image,
+}
+
+/// Edit › Generative Fill… and the selection tools' context menu row, while a host generates.
+pub const GENERATIVE_FILL: &str = "edit.generativeFill";
+/// Edit › Generate Image…, while a host generates.
+pub const GENERATE_IMAGE: &str = "edit.generateImage";
+
+/// The generation commands: id, label, kind. Photoshop lists them right after Content-Aware Fill.
+pub(crate) const GENERATE_COMMANDS: [(&str, &str, Generate); 2] =
+    [(GENERATIVE_FILL, "Generative Fill…", Generate::Fill), (GENERATE_IMAGE, "Generate Image…", Generate::Image)];
+
+/// The host's image generator ([`set_generate`]).
+type GenerateHandler = Box<dyn FnMut(Generate)>;
+
+thread_local! {
+    static GENERATE: RefCell<Option<GenerateHandler>> = const { RefCell::new(None) };
+}
+
+/// The host's image generator: while it is set, Edit › Generative Fill… (with a pixel
+/// selection), Edit › Generate Image… (with a document) and the selection tools' Generative Fill…
+/// row are shown and call `handler`. Without it (standalone) none of them exist.
+pub fn set_generate(handler: Box<dyn FnMut(Generate)>) {
+    GENERATE.with(|g| match g.try_borrow_mut() {
+        Ok(mut slot) => *slot = Some(handler),
+        // Called from inside the running handler.
+        Err(_) => log::warn!("the image generator is in use; keeping the previous one"),
+    });
+}
+
+/// Ask the host's image generator ([`set_generate`]) for `kind` → whether there is one.
+pub fn generate(kind: Generate) -> bool {
+    // A handler that asks again from inside itself is already running: nothing more to do.
+    GENERATE.with(|g| g.try_borrow_mut().ok().and_then(|mut g| g.as_mut().map(|handler| handler(kind))).is_some())
+}
+
+/// Whether a host generates images ([`set_generate`]), so the generation commands exist.
+pub fn generates() -> bool {
+    GENERATE.with(|g| g.try_borrow().map_or(true, |g| g.is_some()))
+}
+
+/// The generation command `id` names, while a host generates ([`generates`]).
+pub fn generate_command(id: &str) -> Option<Generate> {
+    GENERATE_COMMANDS.iter().find(|(c, ..)| *c == id).map(|&(.., kind)| kind).filter(|_| generates())
+}
+
+#[cfg(test)]
+pub(crate) fn clear_generate() {
+    GENERATE.set(None);
 }
 
 thread_local! {
