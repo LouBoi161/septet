@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: storytold/craft-fonts
-          ref: 8dcdacd5153e64560d109541a47d806f26f048c0 # bump deliberately
+          ref: a71c20e30af613287c504f7e685ca8fad77752bc # bump deliberately (the apps' own pin; adds Noto Sans Thai and Georgian)
           path: craft-fonts
 
       - name: Version

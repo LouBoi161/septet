@@ -56,8 +56,8 @@ pdfcraft-ui-egui = { path = "crates/ui-egui", version = "0.13.0" }
 pdfcraft-automation = { path = "crates/automation", version = "0.13.0", default-features = false }
 
 # pdf
-hayro = "0.7.1"
-hayro-syntax = "0.7.2"
+hayro = { version = "0.7.1", path = "vendor/hayro" }
+hayro-syntax = { version = "0.7.2", path = "vendor/hayro-syntax" }
 lopdf = "0.45"
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 weezl = "0.2"

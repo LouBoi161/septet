@@ -14,12 +14,19 @@ edition = "2024"
 license = "PolyForm-Noncommercial-1.0.0"
 rust-version = "1.95"
 
-# pdfcraft carries fixes to these crates (pdfcraft/vendor); designcraft's hayro 0.7 picks them up too.
 [patch.crates-io]
-hayro-interpret = { path = "pdfcraft/vendor/hayro-interpret" }
-hayro = { path = "pdfcraft/vendor/hayro" }
-hayro-syntax = { path = "pdfcraft/vendor/hayro-syntax" }
-hayro-jbig2 = { path = "pdfcraft/vendor/hayro-jbig2" }
+# Two patched hayro 0.7 forks: Pdfcraft depends on its own vendor/ copies by path; crates.io's
+# hayro (craft-pdf in Designcraft, Effectcraft, Vectorcraft) is the craft-libs snapshot those apps
+# patch in themselves, as is krilla. Bump the rev with theirs.
+hayro = { git = "https://github.com/storytold/craft-libs", rev = "ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d" }
+hayro-interpret = { git = "https://github.com/storytold/craft-libs", rev = "ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d" }
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d" }
+krilla = { git = "https://github.com/storytold/craft-libs", rev = "ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d" }
+# Fixes from pdfcraft/vendor that the other apps pick up too: malformed CMap parts are skipped,
+# a faster clip intersection (vello_cpu 0.0.x under every hayro), lopdf.
+hayro-cmap = { path = "pdfcraft/vendor/hayro-cmap" }
+vello_common = { path = "pdfcraft/vendor/vello_common" }
 lopdf = { path = "pdfcraft/vendor/lopdf" }
 
 [profile.dev.package."*"]
