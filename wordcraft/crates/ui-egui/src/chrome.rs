@@ -273,10 +273,11 @@ pub fn title_bar(app: &mut WordApp, ui: &mut Ui) {
             let full = ui.max_rect();
             // Drag the window by the title bar (integrated title bar on macOS).
             let drag = ui.interact(full, ui.id().with("title_drag"), Sense::click_and_drag());
-            if drag.drag_started() {
+            // Hosted, the host's window chrome moves and maximizes the window (`hosted`).
+            if drag.drag_started() && !crate::hosted::is_hosted() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
             }
-            if drag.double_clicked() {
+            if drag.double_clicked() && !crate::hosted::is_hosted() {
                 let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
             }
@@ -337,7 +338,7 @@ pub fn title_bar(app: &mut WordApp, ui: &mut Ui) {
                         let _ = app.run("ui.backstage", json!({"value": true, "page": "options", "pane": "general"}));
                     }
                     ui.add_space(8.0);
-                    if app.ui.show_discord {
+                    if app.ui.show_discord && !crate::hosted::is_hosted() {
                         let (r, resp) = ui.allocate_exact_size(vec2(84.0, 22.0), Sense::click());
                         ui.painter().rect_filled(r, 11.0, if resp.hovered() { t.accent_text } else { t.accent });
                         icons::paint(

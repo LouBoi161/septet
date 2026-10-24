@@ -3658,6 +3658,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "shared-craft-fonts"
+version = "0.1.0"
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5168,6 +5172,7 @@ dependencies = [
  "wordcraft-engine",
  "wordcraft-fonts",
  "wordcraft-proof",
+ "wordcraft-render",
  "wordcraft-ui-egui",
  "zbus",
 ]
@@ -5280,6 +5285,7 @@ dependencies = [
  "harfrust 0.13.3",
  "kurbo",
  "log",
+ "shared-craft-fonts",
  "skrifa 0.47.0",
  "unicode-bidi",
  "unicode-script",

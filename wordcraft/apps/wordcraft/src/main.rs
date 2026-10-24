@@ -9,20 +9,17 @@
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-mod animations;
 #[cfg(target_os = "macos")]
 mod apple_events;
-mod clipboard;
 mod control_server;
-mod default_apps;
-mod file_dialogs;
 #[cfg(any(target_os = "windows", target_os = "macos", test))]
 mod graphics;
 mod logging;
-mod print;
-mod region;
 #[cfg(target_os = "macos")]
 mod traffic_lights;
+
+// The platform services, shared with an embedding host (`lib.rs`).
+use wordcraft_embed::{animations, clipboard, default_apps, file_dialogs, print, region};
 
 use wordcraft_engine::Session;
 use wordcraft_ui_egui::{

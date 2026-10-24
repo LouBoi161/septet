@@ -7,6 +7,12 @@ publish = false
 default-run = "wordcraft"
 description = "WordCraft desktop app"
 
+# The desktop app as a library too (`src/lib.rs`): the platform services `main.rs` uses, and
+# `Embedded`, WordCraft in a tab of a host window (Septet).
+[lib]
+name = "wordcraft_embed"
+path = "src/lib.rs"
+
 [lints]
 workspace = true
 
@@ -17,6 +23,8 @@ wordcraft-proof = { workspace = true }
 # Fonts the user added (#582) load from the settings folder at start-up.
 wordcraft-fonts = { workspace = true }
 wordcraft-ui-egui = { workspace = true }
+# Pages drawn off the window for a host's agent (`embed`).
+wordcraft-render = { workspace = true }
 # The control key file's location (shared with the MCP bridge).
 wordcraft-control-key = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }

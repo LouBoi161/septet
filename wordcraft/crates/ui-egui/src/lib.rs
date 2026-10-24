@@ -57,6 +57,7 @@ pub mod file_dialogs;
 pub mod format_shape;
 pub mod frame;
 pub mod guides;
+pub mod hosted;
 pub mod i18n;
 pub mod ibeam;
 pub mod icons;
@@ -1444,14 +1445,22 @@ impl WordApp {
             self.nav_search_focus = true;
             self.ui.nav_tab = "results".into();
         }
-        // #1861: the registered Interface Theme command drives the same setting as Options.
+        // #1861: the registered Interface Theme command drives the same setting as Options. While a
+        // host sets the theme, it opens the host's appearance settings instead (`hosted`).
+        let theme_change = req.get("interfaceTheme").is_some() || req.get("toggle").and_then(Value::as_str) == Some("interfaceTheme");
+        let host_theme = theme_change && hosted::open_appearance();
         if let Some(name) = req.get("interfaceTheme").and_then(Value::as_str)
             && let Some(a) = theme::Appearance::from_code(name)
+            && !host_theme
         {
             self.ui.theme = a;
         }
-        if req.get("toggle").and_then(Value::as_str) == Some("interfaceTheme") {
+        if req.get("toggle").and_then(Value::as_str) == Some("interfaceTheme") && !host_theme {
             self.ui.theme = if self.ui_is_dark() { theme::Appearance::Light } else { theme::Appearance::Dark };
+        }
+        // A host's agent never leaves a dialog open (`hosted::agent_call`).
+        if req.get("open").is_some() && hosted::refuse_dialog() {
+            return;
         }
         if let Some(what) = req.get("open").and_then(Value::as_str) {
             match what {
@@ -1494,6 +1503,9 @@ impl WordApp {
 
     /// Whether the interface theme setting currently resolves to dark (`System` asks the OS).
     pub fn ui_is_dark(&self) -> bool {
+        if let Some(dark) = hosted::dark() {
+            return dark;
+        }
         self.ui.theme.is_dark(self.ctx.as_ref().and_then(|ctx| system_theme(ctx, self.desktop_dark)))
     }
 
@@ -1617,6 +1629,9 @@ impl WordApp {
                 json!({"enabled": self.ui.keytips_enabled})
             }
             "ui.dark" => {
+                if hosted::open_appearance() {
+                    return Some(Ok(json!({"dark": self.ui_is_dark(), "theme": "host"})));
+                }
                 // A manual Light/Dark switch (toggles what is shown when no value is given).
                 let dark = p.get("value").and_then(Value::as_bool).unwrap_or(!self.ui_is_dark());
                 self.ui.theme = if dark { theme::Appearance::Dark } else { theme::Appearance::Light };
@@ -1624,6 +1639,10 @@ impl WordApp {
             }
             "ui.theme" => {
                 // `light`, `dark` or `system` (follow the OS appearance); no value reads it.
+                // While a host sets the theme, a change opens its appearance settings instead.
+                if s("value").is_some() && hosted::open_appearance() {
+                    return Some(Ok(json!({"theme": "host", "dark": self.ui_is_dark()})));
+                }
                 if let Some(v) = s("value") {
                     match theme::Appearance::from_code(v) {
                         Some(a) => self.ui.theme = a,
@@ -2130,6 +2149,14 @@ impl WordApp {
         // desktop portal's answer fills in instead. The interface follows the Interface theme
         // setting alone; Dark page only changes how pages are drawn (#312).
         let effective = match self.ui.theme {
+            // A host (Septet) sets light or dark for all its apps (`hosted::set_dark`).
+            _ if hosted::dark().is_some() => {
+                if hosted::dark() == Some(true) {
+                    theme::Appearance::Dark
+                } else {
+                    theme::Appearance::Light
+                }
+            }
             theme::Appearance::System if ctx.system_theme().is_none() => match self.desktop_dark {
                 Some(true) => theme::Appearance::Dark,
                 Some(false) => theme::Appearance::Light,
@@ -2137,6 +2164,9 @@ impl WordApp {
             },
             other => other,
         };
+        if hosted::take_restyle() {
+            self.applied_theme = None;
+        }
         if self.applied_theme != Some(effective) {
             theme::apply(ctx, effective);
             self.applied_theme = Some(effective);
@@ -2154,7 +2184,8 @@ impl WordApp {
             self.ui.interface_size = theme::migrate_legacy_interface_size(old, native);
         }
         let zoom = self.ui.interface_size.zoom_factor(self.native_scale);
-        if ctx.zoom_factor() != zoom {
+        // Hosted, the host owns the zoom (`hosted`).
+        if ctx.zoom_factor() != zoom && !hosted::is_hosted() {
             ctx.set_zoom_factor(zoom);
         }
         // Animation effects: the host is asked every frame what the system says (it answers from
@@ -2243,7 +2274,10 @@ impl WordApp {
         let system_cjk = self.fonts_system_cjk || self.want_system_cjk || lang.uses_cjk();
         if !self.styled || lang.prefers_hans() != self.fonts_hans || lang.prefers_korean() != self.fonts_korean || system_cjk != self.fonts_system_cjk
         {
-            theme::install_fonts_language_extra(ctx, lang.prefers_hans(), lang.prefers_korean(), system_cjk, &self.canvas.ime_faces);
+            // Hosted, the host installed these fonts among its own and owns egui's options (`hosted`).
+            if !hosted::is_hosted() {
+                theme::install_fonts_language_extra(ctx, lang.prefers_hans(), lang.prefers_korean(), system_cjk, &self.canvas.ime_faces);
+            }
             self.fonts_hans = lang.prefers_hans();
             self.fonts_korean = lang.prefers_korean();
             self.fonts_system_cjk = system_cjk;
@@ -2251,10 +2285,12 @@ impl WordApp {
             // egui's keyboard zoom would also scale the whole window on them. Zoom is View › Zoom.
             // egui quits on Command-Q, which is Ctrl+Q off the Mac: Word's Reset Paragraph
             // Formatting there (#1218). Keep ⌘Q, which only the Mac sends.
-            ctx.options_mut(|o| {
-                o.zoom_with_keyboard = false;
-                o.quit_shortcuts = vec![egui::KeyboardShortcut::new(egui::Modifiers::MAC_CMD, egui::Key::Q)];
-            });
+            if !hosted::is_hosted() {
+                ctx.options_mut(|o| {
+                    o.zoom_with_keyboard = false;
+                    o.quit_shortcuts = vec![egui::KeyboardShortcut::new(egui::Modifiers::MAC_CMD, egui::Key::Q)];
+                });
+            }
             self.styled = true;
         }
     }
@@ -2834,7 +2870,7 @@ fn flushes_comment_drafts(id: &str, params: &Value) -> bool {
 /// file picker; the open that follows is checked). Envelopes, Labels and Finish & Merge make a
 /// new document in its place; a merge written to a file (`path`) and an envelope added to this
 /// document (`add`) leave it alone.
-pub(crate) fn discards_document(id: &str, params: &Value) -> bool {
+pub fn discards_document(id: &str, params: &Value) -> bool {
     match id {
         "file.new" | "file.newFromTemplate" | "file.close" | "mailings.labels" => true,
         "mailings.envelopes" => params.get("add").and_then(Value::as_bool) != Some(true),
