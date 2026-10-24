@@ -3,7 +3,7 @@
 # app's folder on a branch `upstream/<date>`, then build, run the tests and the autotests.
 #
 # Usage: scripts/sync-upstream.sh [options] <app>|all [tag]
-#   <app>        photocraft, vectorcraft, lightcraft, designcraft, pdfcraft, filmcraft or effectcraft
+#   <app>        photocraft, vectorcraft, lightcraft, designcraft, pdfcraft, filmcraft, effectcraft or wordcraft
 #   all          every app with a newer release (designcraft … photocraft, smallest change first); stops at the first
 #                conflict or failure
 #   tag          a release tag (one app only); default: the app's latest GitHub release
@@ -38,7 +38,7 @@ ionice -c 3 -p $$ 2>/dev/null || true
 export CARGO_PROFILE_DEV_DEBUG=${CARGO_PROFILE_DEV_DEBUG:-0}
 app_target=${SYNC_TARGET:-$HOME/.cache/septet-sync/target}
 
-apps=(designcraft effectcraft pdfcraft filmcraft vectorcraft lightcraft photocraft)
+apps=(designcraft effectcraft pdfcraft filmcraft vectorcraft lightcraft photocraft wordcraft)
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 today=$(date +%F)

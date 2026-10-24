@@ -20,6 +20,7 @@ pub enum AppKind {
     Pdfcraft,
     Filmcraft,
     Effectcraft,
+    Wordcraft,
     #[serde(other)]
     Unknown,
 }
@@ -234,6 +235,27 @@ pub static APPS: &[AppSpec] = &[
         limits: "Effectcraft imports Lottie only with app_execute `file.importLottie`, not through septet_open",
         entry: crate::hosted::entry_points!(effectcraft_embed::Embedded),
     },
+    #[cfg(feature = "wordcraft")]
+    AppSpec {
+        kind: AppKind::Wordcraft,
+        name: "Wordcraft",
+        badge: "Wc",
+        tagline: "Word processing and documents",
+        role: "word processing",
+        color: Color32::from_rgb(0x3b, 0x5b, 0xdb),
+        icon: egui::include_image!("../../wordcraft/assets/app-icon/wordcraft.svg"),
+        extensions: &["docx", "docm", "dotx", "dotm", "doc", "dot", "rtf", "odt", "md", "markdown", "txt", "html", "htm", "tex", "latex", "ltx"],
+        also_opens: &[],
+        accepts: &["docx", "rtf", "odt", "html", "md", "txt", "png", "jpg", "jpeg", "gif", "webp"],
+        paste: Paste::Itself,
+        own_close_prompt: true,
+        drops_at_pointer: false,
+        inspect: "document (paragraphs and tables with styles, runs and text; `text: false` leaves it out), text (`story`), paragraph (`path`), selection, pages, history",
+        render: "page (`page`, 1-based)",
+        limits: "Wordcraft shows one document at a time: septet_open replaces it (asking to save first); make a new one with \
+                 app_execute `file.new`. Commands act at the caret or selection: select text first (`select.text`, `caret.*`)",
+        entry: crate::hosted::entry_points!(wordcraft_embed::Embedded),
+    },
 ];
 
 impl AppKind {
@@ -317,7 +339,7 @@ mod tests {
 
     #[test]
     fn unknown_apps_read_as_unknown() {
-        let tabs: Vec<AppKind> = ron::from_str("[Pdfcraft, Wordcraft]").unwrap();
+        let tabs: Vec<AppKind> = ron::from_str("[Pdfcraft, Gridcraft]").unwrap();
         assert_eq!(tabs, [AppKind::Pdfcraft, AppKind::Unknown]);
         assert!(!AppKind::Unknown.installed());
     }

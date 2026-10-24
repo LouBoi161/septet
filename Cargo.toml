@@ -6,7 +6,7 @@
 [workspace]
 resolver = "3"
 members = ["septet", "shared/craft-fonts"]
-exclude = ["designcraft", "effectcraft", "filmcraft", "lightcraft", "pdfcraft", "photocraft", "vectorcraft"]
+exclude = ["designcraft", "effectcraft", "filmcraft", "lightcraft", "pdfcraft", "photocraft", "vectorcraft", "wordcraft"]
 
 [workspace.package]
 version = "0.2.0"
