@@ -2,4 +2,5 @@ Label = "Layers"
 Label = "1"
 Button "Close" [off]
 Button "Layer options" [off]
+Button "Draft notes" [off]
 CheckBox "Draft notes" [on]
