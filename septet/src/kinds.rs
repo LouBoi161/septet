@@ -3,14 +3,16 @@
 //! here; the shell, the clipboard and content bridges and the assistant all read from the table.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use egui::{Color32, Context, FontDefinitions};
 
 use crate::hosted::HostedApp;
 
 /// An app of the suite. Saved sessions and recent files name apps by these variants, so a kind
-/// stays even when its app isn't built in (`AppKind::installed`); one this build has never heard of
-/// (a newer build's) reads as [`AppKind::Unknown`]. Both are skipped where sessions are restored.
+/// stays even when its app isn't built in or the user uninstalled it (`AppKind::installed`); one
+/// this build has never heard of (a newer build's) reads as [`AppKind::Unknown`]. All of them are
+/// skipped where sessions are restored.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum AppKind {
     Photocraft,
@@ -258,23 +260,74 @@ pub static APPS: &[AppSpec] = &[
     },
 ];
 
+/// The apps the user uninstalled (Home › Apps), one bit per [`AppKind`]. Every app stays built in:
+/// uninstalling takes it out of Home, the + menu, "Open in…", file types and Claude's tools, and
+/// installing it again brings it back with its settings (`manage.rs`).
+#[cfg(not(test))]
+static UNINSTALLED: AtomicU32 = AtomicU32::new(0);
+// Per test thread, so tests that uninstall an app don't change the lists under the others.
+#[cfg(test)]
+thread_local! {
+    static UNINSTALLED: AtomicU32 = const { AtomicU32::new(0) };
+}
+
+fn uninstalled_mask() -> u32 {
+    #[cfg(not(test))]
+    return UNINSTALLED.load(Ordering::Relaxed);
+    #[cfg(test)]
+    UNINSTALLED.with(|m| m.load(Ordering::Relaxed))
+}
+
+/// Set the uninstalled apps (from the saved settings, or the Apps page).
+pub fn set_uninstalled(kinds: &[AppKind]) {
+    let mask = kinds.iter().fold(0, |m, k| m | k.bit());
+    #[cfg(not(test))]
+    UNINSTALLED.store(mask, Ordering::Relaxed);
+    #[cfg(test)]
+    UNINSTALLED.with(|m| m.store(mask, Ordering::Relaxed));
+}
+
+/// The apps built in but uninstalled, for saving.
+pub fn uninstalled() -> Vec<AppKind> {
+    AppKind::built().filter(|k| !k.installed()).collect()
+}
+
+/// The entries of the installed apps, in Home's order.
+pub fn installed_specs() -> impl Iterator<Item = &'static AppSpec> {
+    APPS.iter().filter(|a| a.kind.installed())
+}
+
 impl AppKind {
-    /// The apps built in, in Home's order.
+    fn bit(self) -> u32 {
+        1 << (self as u32)
+    }
+
+    /// The installed apps, in Home's order.
     pub fn all() -> impl Iterator<Item = AppKind> {
+        installed_specs().map(|a| a.kind)
+    }
+
+    /// Every app built into this Septet, installed or not.
+    pub fn built() -> impl Iterator<Item = AppKind> {
         APPS.iter().map(|a| a.kind)
     }
 
     /// Whether this build has the app (sessions and recent files may name one it hasn't).
-    pub fn installed(self) -> bool {
+    pub fn is_built(self) -> bool {
         APPS.iter().any(|a| a.kind == self)
     }
 
-    /// The app called `name` (any case), if it is built in.
-    pub fn by_name(name: &str) -> Option<AppKind> {
-        APPS.iter().find(|a| a.name.eq_ignore_ascii_case(name)).map(|a| a.kind)
+    /// Whether the app is built in and not uninstalled.
+    pub fn installed(self) -> bool {
+        self.is_built() && uninstalled_mask() & self.bit() == 0
     }
 
-    /// The app's entry in [`APPS`]. Only for installed apps: the places that read kinds from disk
+    /// The app called `name` (any case), if it is installed.
+    pub fn by_name(name: &str) -> Option<AppKind> {
+        installed_specs().find(|a| a.name.eq_ignore_ascii_case(name)).map(|a| a.kind)
+    }
+
+    /// The app's entry in [`APPS`]. Only for apps built in: the places that read kinds from disk
     /// (session, recent files) drop the others.
     pub fn spec(self) -> &'static AppSpec {
         APPS.iter().find(|a| a.kind == self).unwrap_or_else(|| panic!("{self:?} is not built into this Septet"))
@@ -304,10 +357,10 @@ impl AppKind {
         self.spec().extensions
     }
 
-    /// The app that opens `path` by default, by its extension.
+    /// The installed app that opens `path` by default, by its extension.
     pub fn for_path(path: &Path) -> Option<AppKind> {
         let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-        APPS.iter().find(|a| a.extensions.contains(&ext.as_str())).map(|a| a.kind)
+        installed_specs().find(|a| a.extensions.contains(&ext.as_str())).map(|a| a.kind)
     }
 
     /// Every app that can open `path` (the default first), for "Open in…" menus.
@@ -316,8 +369,8 @@ impl AppKind {
             return Vec::new();
         };
         let ext = ext.as_str();
-        let own = APPS.iter().filter(|a| a.extensions.contains(&ext));
-        let also = APPS.iter().filter(|a| !a.extensions.contains(&ext) && a.also_opens.iter().any(|list| list.contains(&ext)));
+        let own = installed_specs().filter(|a| a.extensions.contains(&ext));
+        let also = installed_specs().filter(|a| !a.extensions.contains(&ext) && a.also_opens.iter().any(|list| list.contains(&ext)));
         own.chain(also).map(|a| a.kind).collect()
     }
 }
@@ -335,6 +388,20 @@ mod tests {
         assert_eq!(AppKind::all_for_path(Path::new("a.pdf"))[0], AppKind::Pdfcraft);
         assert_eq!(AppKind::for_path(Path::new("cut.otio")), Some(AppKind::Filmcraft));
         assert!(AppKind::all_for_path(Path::new("noext")).is_empty());
+    }
+
+    #[test]
+    #[cfg(feature = "default")]
+    fn uninstalled_apps_leave_the_lists() {
+        set_uninstalled(&[AppKind::Photocraft]);
+        assert!(!AppKind::Photocraft.installed() && AppKind::Photocraft.is_built());
+        assert!(!AppKind::all().any(|k| k == AppKind::Photocraft));
+        assert_eq!(AppKind::by_name("photocraft"), None);
+        assert_eq!(AppKind::for_path(Path::new("a.psd")), None);
+        assert_eq!(AppKind::all_for_path(Path::new("a.png"))[0], AppKind::Vectorcraft);
+        assert_eq!(uninstalled(), [AppKind::Photocraft]);
+        set_uninstalled(&[]);
+        assert_eq!(AppKind::for_path(Path::new("a.psd")), Some(AppKind::Photocraft));
     }
 
     #[test]

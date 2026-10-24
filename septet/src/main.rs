@@ -26,12 +26,14 @@ mod hosted;
 mod icon;
 mod instance;
 mod kinds;
+mod manage;
 mod pointer;
 mod recent;
 mod router;
 mod shell;
 mod tabstrip;
 mod theme;
+mod update;
 
 use std::path::PathBuf;
 
@@ -159,7 +161,10 @@ fn main() -> eframe::Result {
             ctx.add_plugin(router.clone());
             let session = cc.storage.and_then(|s| eframe::get_value::<recent::Session>(s, "septet/session"));
             let appearance = cc.storage.and_then(|s| eframe::get_value(s, appearance::STORAGE_KEY)).unwrap_or_default();
-            let mut shell = shell::Shell::new(ctx, router, files, session, appearance);
+            let apps: manage::Saved = cc.storage.and_then(|s| eframe::get_value(s, manage::STORAGE_KEY)).unwrap_or_default();
+            kinds::set_uninstalled(&apps.uninstalled);
+            let updates = cc.storage.and_then(|s| eframe::get_value(s, update::STORAGE_KEY)).unwrap_or_default();
+            let mut shell = shell::Shell::new(ctx, router, files, session, appearance, updates);
             shell.instance = primary.map(|p| p.serve(ctx.clone()));
             Ok(Box::new(Septet { shell }))
         }),

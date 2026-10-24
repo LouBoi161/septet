@@ -24,6 +24,11 @@ base64 = "0.22"
 # septet_fetch: icons and fonts for Claude, over rustls with the OS's trusted roots (as Pdfcraft does).
 ureq = { version = "3.4", default-features = false, features = ["rustls-no-provider", "_ring"] }
 rustls-native-certs = "0.8"
+# Updates (update.rs): the release's checksums, and the Linux tar.gz and Windows zip downloads.
+sha2 = "0.10"
+flate2 = "1"
+tar = "0.4"
+zip = { version = "3", default-features = false, features = ["deflate"] }
 # The desktop's dark/light preference (XDG Settings portal) for Appearance › Same as the desktop.
 pdfcraft-platform = { path = "../pdfcraft/crates/platform" }
 photocraft-ui-egui = { path = "../photocraft/crates/ui-egui", optional = true }

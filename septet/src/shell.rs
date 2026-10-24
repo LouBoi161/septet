@@ -164,6 +164,10 @@ pub struct Shell {
     gpu_watched: bool,
     /// Autotest: destroy the device on the next frame.
     pub lose_gpu: bool,
+    /// Updates for Septet itself (Home › Apps).
+    pub updater: crate::update::Updater,
+    /// An app being closed so it can be uninstalled (Home › Apps).
+    pub pending_uninstall: Option<AppKind>,
 }
 
 #[derive(Clone, Debug)]
@@ -177,7 +181,14 @@ pub struct OpenRequest {
 }
 
 impl Shell {
-    pub fn new(ctx: &Context, router: Router, files: Vec<PathBuf>, restore: Option<crate::recent::Session>, appearance: crate::appearance::Appearance) -> Self {
+    pub fn new(
+        ctx: &Context,
+        router: Router,
+        files: Vec<PathBuf>,
+        restore: Option<crate::recent::Session>,
+        appearance: crate::appearance::Appearance,
+        updates: crate::update::Settings,
+    ) -> Self {
         router.lock().windows.insert(ViewportId::ROOT);
         let mut shell = Shell {
             router,
@@ -215,6 +226,8 @@ impl Shell {
             gpu: Default::default(),
             gpu_watched: false,
             lose_gpu: false,
+            updater: crate::update::Updater::new(updates),
+            pending_uninstall: None,
         };
         let root = shell.new_window(ViewportId::ROOT, ViewportBuilder::default());
         shell.windows.push(root);
@@ -406,6 +419,18 @@ impl Shell {
             self.appearance_dialog = Some(self.focused_window(ctx));
         }
         crate::generate::logic(self, ctx);
+        self.updater.logic(ctx);
+        // The app being uninstalled has closed.
+        if let Some(kind) = self.pending_uninstall
+            && !self.apps.contains_key(&kind)
+            && self.find_app_tab(kind).is_none()
+        {
+            self.pending_uninstall = None;
+            let mut list = crate::kinds::uninstalled();
+            list.push(kind);
+            crate::kinds::set_uninstalled(&list);
+            self.bridge.notify(format!("{} is uninstalled", kind.name()));
+        }
         let wanted: Vec<AppKind> = self.open_app.borrow_mut().drain(..).collect();
         for kind in wanted {
             let window = self.focused_window(ctx);
@@ -587,6 +612,9 @@ impl Shell {
         }
         if self.assistant.dialog == Some(viewport) {
             crate::assistant::settings::dialog(&mut self.assistant, &ctx);
+        }
+        if self.home.uninstall.is_some_and(|(_, v)| v == viewport) {
+            crate::manage::uninstall_dialog(self, &ctx);
         }
         crate::generate::window_ui(self, &ctx, viewport);
         self.bridge.window_ui(&ctx, viewport);
@@ -871,6 +899,15 @@ impl Shell {
             s.close = CloseState::Delivered;
             drop(s);
             self.pending_finish.push(kind);
+        }
+    }
+
+    /// Uninstall `kind` (Home › Apps): close it first if it is open, asking about unsaved work;
+    /// [`Shell::logic`] finishes once it is closed.
+    pub fn uninstall_app(&mut self, kind: AppKind) {
+        self.pending_uninstall = Some(kind);
+        if self.apps.contains_key(&kind) || self.find_app_tab(kind).is_some() {
+            self.begin_close_app(kind);
         }
     }
 
@@ -1247,6 +1284,8 @@ impl Shell {
         let session = self.quit_session.clone().unwrap_or_else(|| self.session());
         eframe::set_value(storage, "septet/session", &session);
         eframe::set_value(storage, crate::appearance::STORAGE_KEY, &self.appearance);
+        eframe::set_value(storage, crate::manage::STORAGE_KEY, &crate::manage::Saved { uninstalled: crate::kinds::uninstalled() });
+        eframe::set_value(storage, crate::update::STORAGE_KEY, &self.updater.settings);
         for (kind, slot) in &self.apps {
             if let Ok(mut s) = slot.try_borrow_mut() {
                 s.app.app().save(storage);
@@ -1268,6 +1307,7 @@ impl Shell {
                 s.app.app().on_exit();
             }
         }
+        self.updater.finish();
     }
 }
 

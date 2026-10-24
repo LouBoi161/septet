@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use super::mcp::{ToolCall, ToolReply};
 use super::{Approval, approval_key};
-use crate::kinds::{APPS, AppKind};
+use crate::kinds::{AppKind, installed_specs};
 use crate::shell::{OpenRequest, Shell, TabKind};
 
 fn app_names() -> Vec<String> {
@@ -85,13 +85,13 @@ pub fn definitions() -> Vec<Value> {
 
 /// Added to Claude Code's system prompt for every conversation.
 pub fn system_prompt(workspace: &Path) -> String {
-    let apps: Vec<String> = APPS.iter().map(|a| format!("{} ({})", a.name, a.role)).collect();
+    let apps: Vec<String> = installed_specs().map(|a| format!("{} ({})", a.name, a.role)).collect();
     let apps = match apps.split_last() {
         Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
         _ => apps.join(""),
     };
-    let skills = APPS.iter().map(|a| format!("septet:{}", a.name.to_ascii_lowercase())).collect::<Vec<_>>().join(", ");
-    let limits = APPS.iter().map(|a| a.limits).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("; ");
+    let skills = installed_specs().map(|a| format!("septet:{}", a.name.to_ascii_lowercase())).collect::<Vec<_>>().join(", ");
+    let limits = installed_specs().map(|a| a.limits).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("; ");
     format!(
         "You are working inside Septet, a desktop suite of creative apps shown as tabs: {apps}. The user sees Septet next to \
          this chat.\n\n\

@@ -76,6 +76,17 @@ enum Step {
     Generate(crate::hosted::Generate, &'static str),
     /// Wait until the generation jobs are done (at most this many seconds); log failures.
     GenerateWait(f64),
+    /// Show this page of Home in the first window.
+    Page(crate::home::Page),
+    /// Uninstall or install an app (Home › Apps), and log the installed apps.
+    Uninstall(AppKind),
+    Install(AppKind),
+    /// Updates (`update.rs`, against `SEPTET_UPDATE_URL`): check, download and install, restart.
+    UpdateCheck,
+    UpdateDownload,
+    UpdateRestart,
+    /// Wait while the updater checks or downloads (at most this many seconds); log where it got.
+    UpdateWait(f64),
     Exit,
 }
 
@@ -352,6 +363,47 @@ impl Autotest {
                     Step::Report,
                     Step::Exit,
                 ]
+            }
+            // Home › Apps: uninstall an open app, install it again; with `SEPTET_UPDATE_URL` (a stand-in
+            // releases API) also update and restart. Needs a copy of the program outside `target`.
+            Ok("manage") => {
+                let mut steps = vec![
+                    Step::Wait(2.0),
+                    Step::Page(crate::home::Page::Apps),
+                    Step::Wait(1.0),
+                    Step::Shot("m01-apps"),
+                    Step::Open(AppKind::Photocraft),
+                    Step::Wait(5.0),
+                    Step::Home,
+                    Step::Page(crate::home::Page::Apps),
+                    Step::Uninstall(AppKind::Photocraft),
+                    Step::Wait(3.0),
+                    Step::Report,
+                    Step::Shot("m02-uninstalled"),
+                    Step::Page(crate::home::Page::Home),
+                    Step::Wait(1.0),
+                    Step::Shot("m03-home"),
+                    Step::Install(AppKind::Photocraft),
+                    Step::Page(crate::home::Page::Apps),
+                    Step::Wait(1.0),
+                    Step::Shot("m04-installed"),
+                ];
+                if std::env::var_os("SEPTET_UPDATE_URL").is_some() {
+                    steps.extend([
+                        Step::UpdateCheck,
+                        Step::UpdateWait(20.0),
+                        Step::Wait(1.0),
+                        Step::Shot("m05-available"),
+                        Step::UpdateDownload,
+                        Step::UpdateWait(60.0),
+                        Step::Wait(1.0),
+                        Step::Shot("m06-ready"),
+                        Step::UpdateRestart,
+                        Step::Wait(10.0),
+                    ]);
+                }
+                steps.push(Step::Exit);
+                steps
             }
             Ok("gpu-lost") => {
                 let run = |command: &str, params: serde_json::Value| Step::Tool("app_execute", serde_json::json!({"app": "vectorcraft", "command": command, "params": params}));
@@ -1191,7 +1243,45 @@ impl Autotest {
                     at.note("losing the GPU device".into());
                     shell.lose_gpu = true;
                 }
+                Step::Page(page) => shell.home.page = page,
+                Step::Uninstall(kind) => {
+                    shell.uninstall_app(kind);
+                    at.note(format!("uninstall {}", kind.name()));
+                }
+                Step::Install(kind) => {
+                    crate::manage::install(shell, kind);
+                    at.note(format!("installed: {:?}", AppKind::all().map(|k| k.name()).collect::<Vec<_>>()));
+                }
+                Step::UpdateCheck => {
+                    at.note(format!("update: install {:?}", shell.updater.install));
+                    at.claude_since = now;
+                    shell.updater.check(ctx);
+                }
+                Step::UpdateDownload => match shell.updater.phase() {
+                    crate::update::Phase::Available(release) => {
+                        at.claude_since = now;
+                        shell.updater.download(ctx, release);
+                    }
+                    other => at.note(format!("FAILED: update: nothing to download ({other:?})")),
+                },
+                Step::UpdateRestart => {
+                    at.note("update: restart".into());
+                    shell.updater.restart = true;
+                    shell.actions.push(Action::Quit);
+                }
+                Step::UpdateWait(limit) => {
+                    use crate::update::Phase;
+                    let phase = shell.updater.phase();
+                    if matches!(phase, Phase::Checking | Phase::Downloading { .. }) && now - at.claude_since < limit {
+                        at.steps.push(Step::UpdateWait(limit));
+                        at.next_at = now + 0.1;
+                        break;
+                    }
+                    let failed = if matches!(phase, Phase::Failed { .. } | Phase::Checking | Phase::Downloading { .. }) { "FAILED: " } else { "" };
+                    at.note(format!("{failed}update: {}", format!("{phase:?}").chars().take(300).collect::<String>()));
+                }
                 Step::Exit => {
+                    at.note(format!("installed: {:?}", AppKind::all().map(|k| k.name()).collect::<Vec<_>>()));
                     at.note("exit".into());
                     std::process::exit(0);
                 }

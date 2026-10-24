@@ -7,7 +7,7 @@ use crate::recent;
 use crate::shell::{Action, OpenRequest, Shell, TabKind};
 use crate::theme::{self, ShellColors};
 
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     #[default]
     Home,
@@ -19,6 +19,18 @@ pub enum Page {
 pub struct HomeState {
     pub page: Page,
     pub filter: String,
+    /// "Uninstall <app>?" is open in this window (`manage.rs`).
+    pub uninstall: Option<(AppKind, ViewportId)>,
+}
+
+/// Which cards [`app_grid`] draws.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Cards {
+    Home,
+    /// Home › Apps: with an Uninstall link.
+    Installed,
+    /// Home › Apps: uninstalled apps, which a click installs.
+    Available,
 }
 
 pub fn show(shell: &mut Shell, wi: usize, ui: &mut Ui) {
@@ -45,7 +57,7 @@ pub fn show(shell: &mut Shell, wi: usize, ui: &mut Ui) {
                 ui.set_width(width);
                 match shell.home.page {
                     Page::Home => home_page(shell, viewport, ui, &c),
-                    Page::Apps => apps_page(shell, viewport, ui, &c),
+                    Page::Apps => crate::manage::page(shell, viewport, ui, &c),
                     Page::Files => files_page(shell, viewport, ui, &c, usize::MAX),
                 }
                 ui.add_space(40.0);
@@ -112,8 +124,24 @@ fn sidebar_ui(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellCol
             shell.actions.push(Action::NewTab { window: viewport, kind: TabKind::App(kind) });
         }
     }
-    // Claude, Appearance, About and Open file, pinned to the bottom.
+    // A new version, Claude, Appearance, About and Open file, pinned to the bottom.
     let bottom = ui.max_rect().bottom();
+    if let Some((version, ready)) = shell.updater.available() {
+        let r = egui::Rect::from_min_max(pos2(ui.max_rect().left(), bottom - 158.0), pos2(ui.max_rect().right(), bottom - 132.0));
+        let resp = ui.interact(r, Id::new(("septet-home-update", viewport)), Sense::click());
+        ui.painter().rect_filled(r, 7.0, if resp.hovered() { c.card_hover } else { c.card });
+        ui.painter().circle_filled(r.left_center() + vec2(12.0, 0.0), 4.0, c.accent);
+        ui.painter().text(
+            r.left_center() + vec2(24.0, 0.0),
+            Align2::LEFT_CENTER,
+            if ready { format!("Restart for Septet {version}") } else { format!("Septet {version} is available") },
+            theme::medium(12.5),
+            c.text,
+        );
+        if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
+            shell.home.page = Page::Apps;
+        }
+    }
     let claude = egui::Rect::from_min_max(pos2(ui.max_rect().left(), bottom - 122.0), pos2(ui.max_rect().right(), bottom - 100.0));
     let resp = ui.interact(claude, Id::new(("septet-home-claude", viewport)), Sense::click());
     ui.painter().text(
@@ -168,42 +196,41 @@ fn home_page(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellColo
     ui.label(egui::RichText::new("Welcome to Septet").font(theme::semibold(28.0)).color(c.text));
     ui.add_space(4.0);
     ui.label(
-        egui::RichText::new("Seven creative apps in one place. Drag tabs into their own windows, copy and drop between apps.")
+        egui::RichText::new("Creative apps in one place. Drag tabs into their own windows, copy and drop between apps.")
             .font(FontId::proportional(14.0))
             .color(c.text_dim),
     );
     ui.add_space(28.0);
     heading(ui, "Your apps", c);
-    app_grid(shell, viewport, ui, c, false);
+    let apps: Vec<AppKind> = AppKind::all().collect();
+    if apps.is_empty() {
+        ui.label(egui::RichText::new("No apps installed: install them under Apps.").color(c.text_dim));
+    }
+    app_grid(shell, viewport, ui, c, &apps, Cards::Home);
     ui.add_space(30.0);
     heading(ui, "Recent", c);
-    if shell.recent.files.is_empty() {
+    if !shell.recent.files.iter().any(|f| f.app.installed()) {
         drop_hint(ui, c);
     } else {
         files_page(shell, viewport, ui, c, 8);
     }
 }
 
-fn apps_page(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellColors) {
-    ui.label(egui::RichText::new("Apps").font(theme::semibold(28.0)).color(c.text));
-    ui.add_space(20.0);
-    app_grid(shell, viewport, ui, c, true);
-}
-
-fn app_grid(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellColors, detailed: bool) {
+pub fn app_grid(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellColors, apps: &[AppKind], cards: Cards) {
+    let detailed = cards != Cards::Home;
+    let available = cards == Cards::Available;
     let gap = 14.0;
     let card_w = if detailed { 340.0 } else { 252.0 };
     let card_h = if detailed { 150.0 } else { 128.0 };
     let width = ui.available_width();
     let cols = (((width + gap) / (card_w + gap)).floor() as usize).max(1);
     let card_w = (width - gap * (cols as f32 - 1.0)) / cols as f32;
-    let apps: Vec<AppKind> = AppKind::all().collect();
     for row in apps.chunks(cols) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             for &kind in row {
                 let (r, resp) = ui.allocate_exact_size(vec2(card_w, card_h), Sense::click());
-                let hover = ui.ctx().animate_bool(Id::new(("septet-card", kind, detailed)), resp.hovered());
+                let hover = ui.ctx().animate_bool(Id::new(("septet-card", kind, cards as u8)), resp.hovered());
                 let lift = hover * 2.0;
                 let r = r.translate(vec2(0.0, -lift));
                 let p = ui.painter();
@@ -215,7 +242,8 @@ fn app_grid(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellColor
                 p.rect_filled(r, 12.0, theme::mix(c.card, c.card_hover, hover));
                 p.rect_stroke(r, 12.0, Stroke::new(1.0, theme::mix(c.card_border, kind.color(), hover * 0.8)), StrokeKind::Inside);
                 let icon = Rect::from_min_size(r.min + vec2(18.0, 18.0), vec2(40.0, 40.0));
-                egui::Image::new(kind.icon()).fit_to_exact_size(icon.size()).paint_at(ui, icon);
+                let tint = if available { Color32::from_white_alpha(150) } else { Color32::WHITE };
+                egui::Image::new(kind.icon()).tint(tint).fit_to_exact_size(icon.size()).paint_at(ui, icon);
                 let p = ui.painter();
                 p.text(pos2(icon.right() + 14.0, icon.center().y - 8.0), Align2::LEFT_CENTER, kind.name(), theme::semibold(16.0), c.text);
                 p.text(pos2(icon.right() + 14.0, icon.center().y + 11.0), Align2::LEFT_CENTER, kind.badge(), theme::medium(11.0), kind.color());
@@ -223,20 +251,29 @@ fn app_grid(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellColor
                 p.galley(pos2(r.left() + 18.0, icon.bottom() + 14.0), galley, c.text_dim);
                 if detailed {
                     let exts = kind.extensions().iter().take(10).map(|e| format!(".{e}")).collect::<Vec<_>>().join("  ");
-                    let galley = p.layout(exts, FontId::monospace(10.5), theme::mix(c.text_dim, c.home_bg, 0.3), r.width() - 36.0);
+                    let galley = p.layout(exts, FontId::monospace(10.5), theme::mix(c.text_dim, c.home_bg, 0.3), r.width() - 150.0);
                     p.galley(pos2(r.left() + 18.0, r.bottom() - 18.0 - galley.size().y), galley, c.text_dim);
                 }
                 let running = shell.apps.contains_key(&kind);
                 let pill = Rect::from_min_size(pos2(r.right() - 74.0, r.top() + 22.0), vec2(56.0, 24.0));
-                let (fill, text, label) = if running {
+                let (fill, text, label) = if available {
+                    (theme::mix(c.card_hover, c.accent, 0.35 + hover * 0.65), if hover > 0.5 { c.on_accent } else { c.text }, "Install")
+                } else if running {
                     (Color32::TRANSPARENT, kind.color(), "● Open")
                 } else {
                     (theme::mix(c.card_hover, kind.color(), hover * 0.9), if hover > 0.5 { Color32::WHITE } else { c.text }, "Open")
                 };
                 p.rect_filled(pill, CornerRadius::same(12), fill);
                 p.text(pill.center(), Align2::CENTER_CENTER, label, theme::semibold(11.5), text);
+                if cards == Cards::Installed {
+                    crate::manage::card_footer(shell, viewport, ui, kind, r, c);
+                }
                 if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
-                    shell.actions.push(Action::NewTab { window: viewport, kind: TabKind::App(kind) });
+                    if available {
+                        crate::manage::install(shell, kind);
+                    } else {
+                        shell.actions.push(Action::NewTab { window: viewport, kind: TabKind::App(kind) });
+                    }
                 }
             }
         });
@@ -250,7 +287,7 @@ fn files_page(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellCol
         ui.add_space(14.0);
         ui.add(egui::TextEdit::singleline(&mut shell.home.filter).hint_text("Filter recent files…").desired_width(320.0));
         ui.add_space(14.0);
-        if shell.recent.files.is_empty() {
+        if !shell.recent.files.iter().any(|f| f.app.installed()) {
             drop_hint(ui, c);
             return;
         }
@@ -260,6 +297,7 @@ fn files_page(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, c: &ShellCol
         .recent
         .files
         .iter()
+        .filter(|f| f.app.installed())
         .filter(|f| limit != usize::MAX || filter.is_empty() || f.path.to_string_lossy().to_lowercase().contains(&filter))
         .take(limit)
         .cloned()
@@ -402,6 +440,8 @@ pub fn confirm_close_dialog(shell: &mut Shell, ctx: &egui::Context) {
         shell.force_close_app(kind);
     } else if cancel || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         shell.confirm = None;
+        shell.pending_uninstall = None;
+        shell.updater.restart = false;
         for w in &mut shell.windows {
             w.closing = false;
         }

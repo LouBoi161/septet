@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use super::mcp::{ToolCall, ToolReply};
 use super::{Approval, approval_key};
 use crate::hosted::AgentRender;
-use crate::kinds::{APPS, AppKind, AppSpec};
+use crate::kinds::{AppKind, AppSpec};
 use crate::shell::{Action, Shell, TabKind};
 
 /// Longest side of an image for Claude (larger ones are scaled down by the API anyway).
@@ -83,9 +83,9 @@ pub fn is_app_tool(name: &str) -> bool {
     name.starts_with("app_")
 }
 
-/// "Photocraft …; Vectorcraft …" for the apps built in.
+/// "Photocraft …; Vectorcraft …" for the installed apps.
 fn per_app(part: fn(&AppSpec) -> &'static str) -> String {
-    APPS.iter().map(|a| format!("{} {}", a.name, part(a))).collect::<Vec<_>>().join("; ")
+    crate::kinds::installed_specs().map(|a| format!("{} {}", a.name, part(a))).collect::<Vec<_>>().join("; ")
 }
 
 pub fn definitions(apps: &[String]) -> Vec<Value> {
