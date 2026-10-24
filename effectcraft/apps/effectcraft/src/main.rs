@@ -253,10 +253,11 @@ fn main() -> eframe::Result {
                 }));
             }
             app.hooks.system_theme = appearance::service();
+            // The commands' file dialogs don't block the frame where the platform's backend
+            // would (#511, #1275); see [`desktop::install_file_dialogs`].
+            desktop::install_file_dialogs(&mut app, &cc.egui_ctx);
             #[cfg(target_os = "macos")]
             {
-                // The commands' file dialogs open as sheets instead of nested modal loops (#511).
-                desktop::install_sheet_dialogs(&mut app, &cc.egui_ctx);
                 app.hooks.app_action = Some(Box::new(native_menu::app_action));
                 app.hooks.clipboard_text = Some(Box::new(native_menu::clipboard_text));
             }
@@ -547,5 +548,18 @@ mod tests {
             let not_utf8 = VarError::NotUnicode(std::ffi::OsString::from_vec(vec![0x39, 0xff]));
             assert_eq!(parse_env(&[], Err(not_utf8)).unwrap_err(), format!("{need}, not `9\u{fffd}`"));
         }
+    }
+
+    /// #1275: a blocking desktop-portal dialog on Linux leaves the window not answering the
+    /// compositor while it is open, so the commands' file dialogs go through the non-blocking
+    /// host hook there (as they do on macOS, #511). Windows' dialog pumps its own messages.
+    #[test]
+    fn commands_file_dialogs_do_not_block_the_frame() {
+        let mut app = effectcraft_ui_egui::EffectcraftApp::new(effectcraft_engine::Session::default());
+        effectcraft_embed::desktop::install_file_dialogs(&mut app, &egui::Context::default());
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        assert!(app.hooks.file_dialog_async.is_some(), "the commands' file dialogs must not block the frame");
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        assert!(app.hooks.file_dialog_async.is_none(), "the blocking dialog pumps its own messages here");
     }
 }

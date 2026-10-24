@@ -1,8 +1,8 @@
 # Plan: Aus sieben Apps werden zwölf
 
-Stand: 2026-10-23. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
+Stand: 2026-10-24. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
 erledigt (MR !2 am 2026-10-14 gemergt), **Phase A gemergt** (MR !3 am 2026-10-22: A1–A5 und H0 fertig; der Rest von A4,
-Lightcraft und hoher Kontrast, liegt seit 2026-10-23 auf Branch `appearance-lightcraft`), dritter Abgleich gemergt (MR !4 am 2026-10-22); ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
+Lightcraft und hoher Kontrast, liegt seit 2026-10-23 auf Branch `appearance-lightcraft`), dritter Abgleich gemergt (MR !4 am 2026-10-22); vierter Abgleich auf Branch `upstream/2026-10-23` (nach !5 und !6); ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
 (`storytold/wordcraft`, `deckcraft`, `gridcraft`, `cadcraft`, `soundcraft`, `craft-launcher`, alle v0.4.0 vom
 2026-10-10) und des Septet-Codes.
 
@@ -131,6 +131,22 @@ Dritter Abgleich am 2026-10-14 auf Basis von `phase-a` (Branch `upstream/2026-10
 nach MR !3; die GPU-Tests von Lightcraft und Photocraft am 2026-10-22 bei freier GPU nachgeholt, alle grün):
 Photocraft v0.9.0, Vectorcraft v0.11.0, Effectcraft v0.10.0, die übrigen v0.8.0. Dabei: Vectorcraft nutzt
 hayro 0.8, daher Pdfcrafts JBIG2-Patch auf hayro-jbig2 0.3.1 übertragen (sonst ungepatcht für alle Apps).
+Vierter Abgleich am 2026-10-23/24 auf Basis von `phase-h` (Branch `upstream/2026-10-23`, nach MR !5 und !6
+mergen): Photocraft v0.15.1 (während der Prüfung erschienen, ohne Konflikt nachgezogen), Vectorcraft und
+Effectcraft v0.16.0, Pdfcraft v0.13.0, Lightcraft v0.13.0, Designcraft und Filmcraft v0.12.0. Dabei:
+upstream hat zwei hayro-0.7-Forks (Pdfcrafts eigenes `vendor/` und den craft-libs-Schnappschuss, den Designcraft,
+Effectcraft und Vectorcraft für craft-pdf brauchen). Ein Root-`[patch]` kann nur einen bedienen: crates.io-hayro
+→ craft-libs ca50d63, Pdfcraft hängt per Pfad an seinem `vendor/`; hayro-cmap und vello_common 0.0.8 aus
+Pdfcrafts `vendor/` für alle. muda-Pins von Photocraft/Vectorcraft auf =0.21.2 (Pdfcrafts neues craft-quit;
+0.21.2 ändert nur Windows-Code). CI bettet craft-fonts a71c20e ein (Thai, Georgisch).
+Geprüft: Build, Septet-Tests, alle App-Testsuiten, Autotests tour/interop/content/assistant-apps für alle 7 Apps.
+Gefunden und behoben: Designcrafts neuer Dateisystem-Wächter kennt unser `user_dirs.rs` nicht; unsere
+Rechtsklick-Fläche im Filmcraft-Spurkopf lag über Upstreams neuem Farbstreifen; Lightcrafts Einstellungsschreiber las
+das prozessweite „gehostet“-Flag, das die Embed-Tests setzen; Pdfcrafts Ebenen-Snapshot ohne unseren Namensknopf.
+Neu übersprungen: Designcrafts arabischer Dialogtest (OPEN: mit unseren craft-fonts, Noto Sans Arabic, wird ein
+Feld abgeschnitten, auch auf Upstream v0.12.0 selbst). GPU-Tests bei
+freier GPU nachgeholt: Pdfcraft grün; Photocrafts zwei Zeitmessungstests übersprungen (scheitern auf Upstream
+v0.15.1 selbst, die GPU ist hier von anderen Programmen belegt).
 
 ### Phase A: Fundament (vor den neuen Apps)
 

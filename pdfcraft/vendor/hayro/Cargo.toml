@@ -49,6 +49,7 @@ version = "1"
 features = ["bytemuck_derive"]
 
 [dependencies.hayro-interpret]
+path = "../hayro-interpret"
 version = "0.7.0"
 default-features = false
 

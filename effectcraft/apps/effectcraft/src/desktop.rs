@@ -75,9 +75,18 @@ pub fn install_hooks(app: &mut EffectcraftApp) {
     }));
 }
 
-/// The commands' file dialogs as sheets on the window instead of nested modal loops (macOS, #511).
-#[cfg(target_os = "macos")]
-pub fn install_sheet_dialogs(app: &mut EffectcraftApp, ctx: &egui::Context) {
-    let ctx = ctx.clone();
-    app.hooks.file_dialog_async = Some(Box::new(move |dialog, done| crate::sheet_dialogs::show(dialog, done, ctx.clone())));
+/// The commands' file dialogs open without blocking the frame where the host's backend would:
+/// on macOS as sheets instead of nested modal loops (#511), on Linux through the desktop
+/// portal from a worker thread — a blocking portal dialog leaves the main thread waiting on its
+/// answer without pumping events, so the window stops answering the compositor and the desktop
+/// offers to force-quit it while the Open dialog is up (#1275). Windows' blocking dialog pumps
+/// its own messages, so it keeps [`effectcraft_ui_egui::Hooks::pick_files`] and friends.
+pub fn install_file_dialogs(app: &mut EffectcraftApp, ctx: &egui::Context) {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        let ctx = ctx.clone();
+        app.hooks.file_dialog_async = Some(Box::new(move |dialog, done| crate::sheet_dialogs::show(dialog, done, ctx.clone())));
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let _ = (app, ctx);
 }

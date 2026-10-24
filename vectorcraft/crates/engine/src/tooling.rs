@@ -1,8 +1,10 @@
 //! Hosting the active tool: pointer/key events → actions → commands.
 
 use serde_json::{Map, Value};
+use vectorcraft_doc::Selection;
 use vectorcraft_geom::Point;
 use vectorcraft_tools::distort::perspective::widget::WidgetPlace;
+use vectorcraft_tools::draw2::FEEDBACK;
 use vectorcraft_tools::{Action, Cursor, Mods, Overlay, PointerEvent, PointerKind, Tool, ToolContext, ToolKey, settings};
 
 use crate::{EngineError, Prefs, Result, Session};
@@ -21,10 +23,14 @@ pub struct ViewInfo {
     pub snap_to_pixel: bool,
     /// View → Snap to Point: picked points (a transform's reference point) land on anchors.
     pub snap_to_point: bool,
+    /// View → Snap to Glyph: drawing snaps to live-text baselines and glyph bounds (needs Smart Guides).
+    pub snap_to_glyph: bool,
     /// View → Show Corner Widget.
     pub corner_widgets: bool,
     /// The document window (none headless): screen-fixed widgets sit in it.
     pub screen: Option<vectorcraft_tools::ScreenFrame>,
+    /// The view's active artboard (an index): artboard rulers measure from it.
+    pub artboard: usize,
 }
 
 impl Default for ViewInfo {
@@ -38,8 +44,10 @@ impl Default for ViewInfo {
             show_bbox: true,
             snap_to_pixel: false,
             snap_to_point: true,
+            snap_to_glyph: false,
             corner_widgets: true,
             screen: None,
+            artboard: 0,
         }
     }
 }
@@ -67,6 +75,20 @@ impl Session {
         self.tool.id()
     }
 
+    /// How many times switching or closing documents, or replacing the active one (File › Revert),
+    /// has started the tool afresh, also inside a `command.batch` or `action.batch`. A frontend
+    /// compares it before and after a command.
+    pub fn tool_resets(&self) -> u64 {
+        self.tool_resets
+    }
+
+    /// Whether the tool's options were set ([`Self::set_tool_option`], `tool.setOption`) after
+    /// [`Self::tool_resets`] last counted, as a Paste or Cut with the Artboard tool sets them after a
+    /// batch's Revert step.
+    pub fn tool_set_since_reset(&self) -> bool {
+        self.tool_set_since_reset
+    }
+
     /// Choose a tool (the toolbar, its shortcut, MCP), finishing any pending tool work first.
     pub fn select_tool(&mut self, id: &str, view: ViewInfo) -> Result<()> {
         // Choosing a perspective tool shows the document's perspective grid; Hide Grid hides it
@@ -86,10 +108,19 @@ impl Session {
         if self.tool.id() == id {
             return Ok(());
         }
+        // Sampling type keeps its highlighted characters as the target. Capture before the
+        // Type tool deactivates (which commits typing and clears its editing state).
+        let is_type = |id: &str| matches!(id, "type" | "areaType" | "typeOnPath" | "verticalType" | "verticalAreaType" | "verticalTypeOnPath");
+        let text_selection = ((id == "eyedropper" && is_type(self.tool.id())) || (self.tool.id() == "eyedropper" && is_type(id)))
+            .then(|| self.tool.options())
+            .filter(|o| o.get("editing").is_some_and(|v| !v.is_null()) && o.get("start") != o.get("end"));
         let acts = self.with_tool_cx(view, |t, cx| t.deactivate(cx));
         self.apply_actions(acts)?;
         self.keep_tool_settings();
         self.tool = self.make_tool(id);
+        if let Some(selection) = text_selection {
+            self.tool.set_option("textSelection", &selection);
+        }
         if vectorcraft_tools::catalog::is_selection_tool(id) {
             self.last_selection_tool = Some(self.tool.id());
         }
@@ -98,10 +129,18 @@ impl Session {
 
     /// The selection tool Cmd lends tool `id` for a drag: the one chosen last; until one is,
     /// Direct Selection to the tools that edit anchors (the Pen) and Selection to the others.
-    /// None for the selection tools themselves and the view tools.
-    fn lent_tool(&self, id: &str) -> Option<&'static str> {
+    /// Cmd+Alt lends Group Selection while Direct Selection is active. Cmd still lends the last
+    /// selection tool from other tools (Alt on the lent Direct Selection gesture stays copy/subtract).
+    /// None for the other selection tools and the view tools.
+    fn lent_tool(&self, id: &str, mods: &Mods) -> Option<&'static str> {
         use vectorcraft_tools::catalog::{edits_anchors, is_selection_tool};
-        if is_selection_tool(id) || matches!(id, "hand" | "zoom" | "rotateView") {
+        if matches!(id, "hand" | "zoom" | "rotateView") {
+            return None;
+        }
+        if id == "directSelection" && mods.cmd && mods.alt {
+            return Some("groupSelection");
+        }
+        if is_selection_tool(id) {
             return None;
         }
         Some(self.last_selection_tool.unwrap_or(if edits_anchors(id) { "directSelection" } else { "selection" }))
@@ -114,7 +153,7 @@ impl Session {
         if ev.kind != PointerKind::Down || !ev.mods.cmd || self.lender.is_some() {
             return *ev;
         }
-        let Some(id) = self.lent_tool(self.tool.id()) else { return *ev };
+        let Some(id) = self.lent_tool(self.tool.id(), &ev.mods) else { return *ev };
         // Typing in progress is kept as its own step first: the lent tool's drag previews from the
         // document its interaction started from, which would drop the typing (#1881).
         if crate::cmd::typing_in_progress(self) {
@@ -184,6 +223,7 @@ impl Session {
         let (unit, stroke_unit) = (self.general_unit(), self.stroke_unit());
         let cx = ToolContext {
             doc: &st.doc,
+            ruler_origin: st.doc.ruler_origin_for(view.artboard),
             revision: (st.uid, st.revision),
             selection: &st.selection,
             zoom: view.zoom,
@@ -198,14 +238,19 @@ impl Session {
             // wins instead of pixels quietly rounding every drag to whole points (#1816).
             snap_to_pixel: view.snap_to_pixel && !view.snap_to_grid,
             snap_to_point: view.snap_to_point,
+            snap_tangent: self.prefs.snap_tangent,
+            snap_perpendicular: self.prefs.snap_perpendicular,
+            snap_to_glyph: view.snap_to_glyph && view.smart_guides && !view.snap_to_grid,
             corner_widgets: view.corner_widgets,
             fill_active: self.fill_active,
             gradient_stop: self.selected_stop(),
             appearance_item: self.appearance_item(),
             constrain_angle: self.prefs.constrain_angle,
+            keyboard_increment: self.prefs.keyboard_increment,
             freeform_point: self.selected_freeform_point(),
             raster_sample: self.prefs.eyedropper.sample_size,
             preview_bounds: self.prefs.use_preview_bounds,
+            preview_memo: Some(&self.preview_memo),
             unit,
             stroke_unit,
             paste_plain_text: self.prefs.paste_text_formatting == "plain",
@@ -267,6 +312,7 @@ impl Session {
         if let Some(r) = self.plane_widget_pointer(ev, view) {
             return r;
         }
+        self.leave_draw_inside(ev, view)?;
         let ev = &self.lend_selection_tool(ev);
         let acts = self.with_tool_cx(view, |t, cx| t.pointer(cx, ev));
         let r = self.take_tool_panic().and_then(|()| {
@@ -280,6 +326,26 @@ impl Session {
             self.give_back_tool(view)?;
         }
         r
+    }
+
+    /// In Draw Inside, a double-click with a selection tool outside the geometric bounds of the
+    /// object new art goes inside, grown by the selection tolerance, or after that object is gone,
+    /// sets the drawing mode to Draw Normal (`view.drawMode {mode: "normal"}`, as Shift+D does).
+    /// The tool then takes the double-click as in Draw Normal.
+    fn leave_draw_inside(&mut self, ev: &PointerEvent, view: ViewInfo) -> Result<()> {
+        if ev.kind != PointerKind::DoubleClick
+            || self.draw_mode != crate::DrawMode::Inside
+            || !vectorcraft_tools::catalog::is_selection_tool(self.tool.id())
+        {
+            return Ok(());
+        }
+        let Some(d) = self.active() else { return Ok(()) };
+        let tol = self.prefs.selection_tolerance / view.zoom.max(1e-9);
+        let inside = self.draw_inside.and_then(|t| d.doc.bounds_of(&[t], false)).is_some_and(|b| b.inflate(tol, tol).contains(ev.pos));
+        if !inside {
+            self.execute("view.drawMode", &serde_json::json!({ "mode": "normal" }))?;
+        }
+        Ok(())
     }
 
     /// A guide dragged out of a ruler, whatever the tool: a vertical one out of the left ruler, a
@@ -378,14 +444,24 @@ impl Session {
 
     pub fn overlays(&mut self, view: ViewInfo) -> Vec<Overlay> {
         let mut v = self.with_tool_cx(view, |t, cx| t.overlays(cx));
+        // The Type tools draw the overflow markers of selected type themselves.
+        if !matches!(self.tool.id(), "type" | "areaType" | "typeOnPath" | "verticalType" | "verticalAreaType" | "verticalTypeOnPath") {
+            let mut marks = std::mem::take(&mut self.overflow_marks);
+            v.extend(self.with_tool_cx(view, |_, cx| vectorcraft_tools::text::overflow_markers(&mut marks, cx)));
+            self.overflow_marks = marks;
+        }
         if let Some(g) = self.ruler_guide.take() {
             v.extend(self.with_tool_cx(view, |_, cx| g.overlays(cx)));
             self.ruler_guide = Some(g);
         }
+        let deferred_preview = self.unapplied_interaction_preview();
         if let Some(d) = self.active() {
             let w = self.prefs.perspective_widget;
             let place = w.show.then_some(WidgetPlace { screen: view.screen.as_ref(), corner: w.position });
             v.splice(0..0, vectorcraft_tools::distort::perspective::grid_overlays_in(&d.doc, 1.0 / view.zoom.max(1e-9), place));
+        }
+        if let Some((cmd, p)) = deferred_preview {
+            v.extend(self.deferred_preview_overlays_from_command(&cmd, &p));
         }
         v
     }
@@ -394,7 +470,7 @@ impl Session {
     /// tools' a crosshair, [`Cursor::precise`]). With Cmd held, the pointer of the selection tool a
     /// press would borrow ([`Self::lend_selection_tool`]).
     pub fn cursor(&mut self, p: Point, mods: Mods, view: ViewInfo) -> Cursor {
-        let lent = if mods.cmd && self.lender.is_none() { self.lent_tool(self.tool.id()) } else { None };
+        let lent = if mods.cmd && self.lender.is_none() { self.lent_tool(self.tool.id(), &mods) } else { None };
         let c = match lent {
             Some(id) => {
                 let lent = self.make_tool(id);
@@ -413,6 +489,7 @@ impl Session {
     }
     pub fn set_tool_option(&mut self, key: &str, v: &Value) {
         self.tool.set_option(key, v);
+        self.tool_set_since_reset = true;
         self.keep_tool_settings();
     }
 
@@ -426,6 +503,7 @@ impl Session {
     /// Liquify tools' Global Brush Dimensions). Returns the tool's options.
     pub fn set_tool_options(&mut self, id: Option<&str>, values: &Map<String, Value>) -> Value {
         let active = id.is_none_or(|id| id == self.tool.id());
+        self.tool_set_since_reset |= active;
         let mut other = (!active).then(|| self.make_tool(id.unwrap_or_default()));
         let t = other.as_deref_mut().unwrap_or(self.tool.as_mut());
         for (k, v) in values {
@@ -453,13 +531,23 @@ impl Session {
         if let Some(k) = p.get("key").and_then(Value::as_str) {
             values.insert(k.to_string(), p.get("value").cloned().unwrap_or(Value::Null));
         }
+        if tool.unwrap_or(self.tool_id()) == "dimension" {
+            if let Some(style) = values.get("style") {
+                vectorcraft_doc::dimension::DimensionOptions::from_params(style.clone())?;
+            }
+            if let Some(mode) = values.get("mode")
+                && !mode.as_str().is_some_and(|m| ["linear", "angular", "radial", "radius", "diameter"].contains(&m))
+            {
+                return Err("Unknown dimension mode".into());
+            }
+        }
         Ok(self.set_tool_options(tool, &values))
     }
 
     /// Let the active tool finish work a command from outside it ended ([`vectorcraft_tools::Tool::after_command`]):
-    /// the Type tool stops editing text that is no longer selected. Only while it edits text.
+    /// the Type tool and the Eyedropper clear a character range whose text is no longer selected.
     pub(crate) fn after_command(&mut self) {
-        if self.in_tool_actions || !self.tool.wants_text() {
+        if self.in_tool_actions || (!self.tool.wants_text() && self.tool.id() != "eyedropper") {
             return;
         }
         let acts = self.with_tool_cx(self.last_view, |t, cx| t.after_command(cx));
@@ -482,19 +570,49 @@ impl Session {
         for a in acts {
             match a {
                 Action::Begin(label) => self.begin_interaction(&label)?,
-                Action::Preview(cmd, p) => match self.preview(&cmd, &p) {
-                    Ok(v) => {
-                        if let Some(w) = v.get("warning").and_then(Value::as_str)
-                            && !ui.iter().any(|r| matches!(r, UiRequest::Status(s) if s == w))
-                        {
-                            ui.push(UiRequest::Status(w.to_string()));
+                Action::Preview(cmd, p) => {
+                    // Performance › Real-time Drawing and Editing (#394): off, remember the latest
+                    // params and apply them once on Commit instead of every move.
+                    if !self.prefs.real_time_drawing {
+                        self.clear_deferred_overlay_cache();
+                        let st = self.doc_mut()?;
+                        if let Some(it) = &mut st.interaction {
+                            it.preview = Some((cmd, p));
                         }
+                        continue;
                     }
-                    Err(e) => log::warn!("preview {cmd}: {e}"),
-                },
+                    self.clear_deferred_overlay_cache();
+                    match self.preview(&cmd, &p) {
+                        Ok(v) => {
+                            if let Some(w) = v.get("warning").and_then(Value::as_str)
+                                && !ui.iter().any(|r| matches!(r, UiRequest::Status(s) if s == w))
+                            {
+                                ui.push(UiRequest::Status(w.to_string()));
+                            }
+                        }
+                        Err(e) => log::warn!("preview {cmd}: {e}"),
+                    }
+                }
                 // The drag is over: the dabs of a Liquify stroke have no further use.
                 Action::Commit => {
                     self.liquify_stroke = None;
+                    let deferred = self.unapplied_interaction_preview();
+                    if let Some((cmd, p)) = deferred {
+                        match self.preview(&cmd, &p) {
+                            Ok(v) => {
+                                if let Some(w) = v.get("warning").and_then(Value::as_str)
+                                    && !ui.iter().any(|r| matches!(r, UiRequest::Status(s) if s == w))
+                                {
+                                    ui.push(UiRequest::Status(w.to_string()));
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("preview {cmd}: {e}");
+                                self.cancel_interaction()?;
+                                continue;
+                            }
+                        }
+                    }
                     self.commit_interaction()?
                 }
                 Action::Cancel => {
@@ -502,7 +620,11 @@ impl Session {
                     self.cancel_interaction()?
                 }
                 Action::Exec(cmd, p) => {
-                    self.execute(&cmd, &p)?;
+                    // A command's warning (Crop Image's when the image couldn't be decoded) goes to the
+                    // status bar too.
+                    if let Some(w) = self.execute(&cmd, &p)?.get("warning").and_then(Value::as_str) {
+                        ui.push(UiRequest::Status(w.to_string()));
+                    }
                 }
                 Action::Dialog(k, p) => ui.push(UiRequest::Dialog(k, p)),
                 Action::SwitchTool(t) => ui.push(UiRequest::SwitchTool(t)),
@@ -514,4 +636,50 @@ impl Session {
         }
         Ok(ui)
     }
+
+    /// Canvas feedback while Real-time Drawing is off: run the pending preview command once, take
+    /// outlines from the objects it touched, then put the document back at the interaction snapshot.
+    fn deferred_preview_overlays_from_command(&mut self, cmd: &str, p: &Value) -> Vec<Overlay> {
+        if self.deferred_overlay_cache.as_ref().is_some_and(|(c, params, _)| c == cmd && params == p) {
+            return self.deferred_overlay_cache.as_ref().map(|(_, _, o)| o.clone()).unwrap_or_default();
+        }
+        let (snapshot, selection, revision, paint, interaction_fields) = {
+            let Some(st) = self.active() else { return vec![] };
+            let Some(it) = st.interaction.as_ref() else { return vec![] };
+            if !std::sync::Arc::ptr_eq(&it.doc, &st.doc) {
+                return vec![];
+            }
+            let interaction_fields = (it.preview.clone(), it.copies.clone(), it.perspective_again.clone());
+            (st.doc.clone(), st.selection.clone(), st.revision, self.pending_paint.clone(), interaction_fields)
+        };
+        let overlays = if self.preview(cmd, p).is_ok() {
+            self.active().map(|st| outlines_for_selection(&st.doc, &st.selection)).unwrap_or_default()
+        } else {
+            vec![]
+        };
+        if let Ok(st) = self.doc_mut() {
+            st.doc = snapshot;
+            st.selection = selection;
+            st.revision = revision;
+            if let Some(it) = &mut st.interaction {
+                it.preview = interaction_fields.0;
+                it.copies = interaction_fields.1;
+                it.perspective_again = interaction_fields.2;
+            }
+        }
+        self.pending_paint = paint;
+        self.deferred_overlay_cache = Some((cmd.to_string(), p.clone(), overlays.clone()));
+        overlays
+    }
+}
+
+fn outlines_for_selection(doc: &vectorcraft_doc::Document, selection: &Selection) -> Vec<Overlay> {
+    selection
+        .objects
+        .iter()
+        .filter_map(|&id| {
+            let n = doc.node(id)?;
+            vectorcraft_render::drawn_outline(doc, n).map(|(path, _)| Overlay::Path { path, color: FEEDBACK, width: 1.0, dashed: false })
+        })
+        .collect()
 }

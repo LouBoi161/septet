@@ -28,6 +28,12 @@ pub struct Opening {
     pub pending: Vec<Pending>,
 }
 
+/// Is a long operation running that should show the busy cursor and status spinner (background
+/// save/export with a label, or a file opening off the UI thread)?
+pub fn long_operation_busy(app: &VectorcraftApp) -> bool {
+    app.background.jobs.iter().any(|j| !j.label.is_empty() && !j.cancelled()) || !app.opening.pending.is_empty()
+}
+
 /// Does opening happen off the UI thread here? Not on wasm (no threads), in unit tests (they look
 /// at the document right after asking for it), or with `VECTORCRAFT_SYNC_OPEN` set.
 pub fn available() -> bool {
@@ -43,13 +49,14 @@ pub fn start(app: &mut VectorcraftApp, path: &str, bytes: Vec<u8>) -> Result<Val
     let (name, file) = (path.to_string(), bytes.clone());
     // Update Links (Preferences › File Handling) applies there as it is set now.
     let update_links = app.session.prefs.update_links == "automatically";
+    let low_res_proxy_eps = app.session.prefs.low_res_proxy_eps;
     // The automation roots in force here are in force there.
     let scope = ScopeHandle::capture();
     let spawned = std::thread::Builder::new().name("vectorcraft-open".into()).spawn(move || {
         let r = scope
             .run(|| {
                 vectorcraft_engine::guard::catch_panic(|| {
-                    fileio::read_for_open(&name, &file, Some(name.clone()), &Value::Null, update_links).map_err(|e| e.to_string())
+                    fileio::read_for_open(&name, &file, Some(name.clone()), &Value::Null, update_links, low_res_proxy_eps).map_err(|e| e.to_string())
                 })
             })
             .unwrap_or_else(|msg| Err(format!("internal error: {msg} (please report this bug)")));
@@ -113,6 +120,43 @@ mod tests {
 
     use super::*;
     use crate::Services;
+
+    #[test]
+    fn long_operation_busy_while_a_file_opens_or_a_background_save_runs() {
+        let mut app = VectorcraftApp::new(Session::new(), Services::default());
+        assert!(!long_operation_busy(&app));
+        start(&mut app, "/art/Wait.vectorcraft", vectorcraft_format::save(&vectorcraft_doc::Document::new(10.0, 10.0), false)).unwrap();
+        assert!(long_operation_busy(&app));
+        let t0 = std::time::Instant::now();
+        while long_operation_busy(&app) && t0.elapsed().as_secs() < 30 {
+            poll(&mut app);
+            std::thread::yield_now();
+        }
+        assert!(!long_operation_busy(&app));
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let services = Services { write_shared: Some(std::sync::Arc::new(|_: &str, _: &[u8]| Ok(()))), ..Default::default() };
+        app = VectorcraftApp::new(Session::new(), services);
+        crate::background::run(
+            &mut app,
+            true,
+            "Saving test.vectorcraft".into(),
+            None,
+            move |_| {
+                let _ = held.recv_timeout(std::time::Duration::from_secs(10));
+                Ok(json!({}))
+            },
+            |_, r| r,
+        )
+        .unwrap();
+        assert!(long_operation_busy(&app));
+        let _ = release.send(());
+        let t0 = std::time::Instant::now();
+        while long_operation_busy(&app) && t0.elapsed().as_secs() < 30 {
+            crate::background::poll(&mut app);
+            std::thread::yield_now();
+        }
+        assert!(!long_operation_busy(&app));
+    }
 
     /// #1694: a file that finishes opening while a dialog is up waits for it to close, so the
     /// dialog's document stays the active one.

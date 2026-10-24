@@ -95,6 +95,24 @@ pub fn normalize(text: &str, lang: Lang) -> Result<Vec<Token>, NormalizeError> {
                     out.push(Token::Punct(c));
                 }
             }
+            '-' if matches!(peek(rest, 1), Some('$' | '€' | '£'))
+                && !text
+                    .get(..pos)
+                    .and_then(|before| before.chars().next_back())
+                    .is_some_and(|b| b.is_alphanumeric() || matches!(b, '$' | '€' | '£' | '-')) =>
+            {
+                // A negative amount ("-$5"): keep the sign so a loss is not read as a gain.
+                // A hyphen right after a word or amount ("$10-$20") is a range, not a sign.
+                pos += 1;
+                match parse_money(rest.get(1..).unwrap_or(""), lang) {
+                    Some((words, used)) => {
+                        pos += used;
+                        out.push(Token::Word("minus".into()));
+                        push_words(&mut out, &words);
+                    }
+                    None => out.push(Token::Punct(c)),
+                }
+            }
             _ if c.is_ascii_digit() => match parse_number_cluster(rest, lang) {
                 Some((tokens, used)) => {
                     pos += used;
@@ -348,9 +366,10 @@ fn parse_amount(rest: &str, _lang: Lang) -> Option<(u64, usize, usize, u32, bool
     let major = int_digits.parse::<u64>().ok()?;
     let had_minor = after_decimal && !frac_digits.is_empty();
     // One fractional digit denotes tenths of a major unit (e.g. $1.5 = $1.50),
-    // not five minor units. Preserve the existing two-digit and longer readings.
+    // not five minor units. Digits beyond the second are sub-cent precision and are
+    // dropped, so the minor part never exceeds 99 (`$3.459` reads as 45 cents).
     let minor = if had_minor {
-        let value = frac_digits.parse::<u32>().ok()?;
+        let value = frac_digits.get(..2).unwrap_or(&frac_digits).parse::<u32>().ok()?;
         if frac_digits.len() == 1 { value * 10 } else { value }
     } else {
         0
@@ -412,6 +431,8 @@ fn parse_time(rest: &str) -> Option<(Vec<Token>, usize)> {
     for (lit, letter_pair) in [("am", ['a', 'm']), ("pm", ['p', 'm'])] {
         if after.get(..2).is_some_and(|s| s.eq_ignore_ascii_case(lit)) {
             for letter in letter_pair {
+                // Uppercase "A" so it is read as a letter name, not the article.
+                let letter = if letter == 'a' { 'A' } else { letter };
                 tokens.push(Token::Word(letter.into()));
             }
             used += 2;
@@ -943,7 +964,7 @@ fn parse_wordish(rest: &str, _lang: Lang) -> Option<(Vec<Token>, usize)> {
     if word.len() == 1 && matches!(lower.as_str(), "a" | "p") && peek(rest, used) == Some('.') && matches!(peek(rest, used + 1), Some('m') | Some('M')) {
         let after_m = used + 2;
         if peek(rest, after_m).is_none_or(|c| !c.is_alphanumeric()) {
-            let mut tokens = vec![Token::Word(word.to_ascii_lowercase())];
+            let mut tokens = vec![Token::Word(if lower == "a" { "A".into() } else { lower.clone() })];
             tokens.push(Token::Word("m".into()));
             let consumed = if peek(rest, after_m) == Some('.') { after_m + 1 } else { after_m };
             return Some((tokens, consumed));
@@ -1237,6 +1258,34 @@ mod tests {
     }
 
     #[test]
+    fn negative_money_keeps_its_sign() {
+        for lang in [Lang::EnUs, Lang::EnGb] {
+            assert_eq!(words("-$5", lang), "minus five dollars");
+            assert_eq!(words("-€3.50", lang), "minus three euros and fifty cents");
+            assert_eq!(words("-£2", lang), "minus two pounds");
+            assert_eq!(words("a refund of -$1.05", lang), "a refund of minus one dollar and five cents");
+            assert_eq!(words("(-$5)", lang), "( minus five dollars )");
+            // A hyphen between two amounts is a range, not a sign.
+            assert_eq!(words("$10-$20", lang), "ten dollars - twenty dollars");
+            assert_eq!(words("€5-€8", lang), "five euros - eight euros");
+            assert_eq!(words("$10.50-$20", lang), "ten dollars and fifty cents - twenty dollars");
+            // A hyphen after a word or before a non-amount stays punctuation.
+            assert_eq!(words("a-$5", lang), "a - five dollars");
+            assert!(!words("-$x", lang).contains("minus"));
+        }
+    }
+
+    #[test]
+    fn money_fraction_beyond_two_digits_is_not_hundreds_of_cents() {
+        for lang in [Lang::EnUs, Lang::EnGb] {
+            assert_eq!(words("gas is $3.459 a gallon", lang), "gas is three dollars and forty-five cents a gallon");
+            assert_eq!(words("$1.999", lang), "one dollar and ninety-nine cents");
+            assert_eq!(words("$1.250", lang), "one dollar and twenty-five cents");
+            assert_eq!(words("$1.005", lang), "one dollar");
+        }
+    }
+
+    #[test]
     fn first_digit_group_keeps_leading_zeros() {
         for lang in [Lang::EnUs, Lang::EnGb] {
             for (input, expected) in [
@@ -1316,7 +1365,7 @@ mod tests {
         assert_eq!(words("23:59", Lang::EnUs), "twenty-three fifty-nine");
         assert_eq!(words("3:30pm", Lang::EnUs), "three thirty p m");
         assert_eq!(words("3:30 p.m.", Lang::EnUs), "three thirty p m");
-        assert_eq!(words("9:00 a.m.", Lang::EnUs), "nine zero a m");
+        assert_eq!(words("9:00 a.m.", Lang::EnUs), "nine zero A m");
     }
 
     #[test]

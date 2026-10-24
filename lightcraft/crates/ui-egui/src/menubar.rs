@@ -123,6 +123,8 @@ const LAYOUT: &[(&str, &[&str])] = &[
             "view.photoGrid",
             "view.squareGrid",
             "@Grid Info",
+            "view.thumbSizeUp",
+            "view.thumbSizeDown",
             "view.detail",
             "view.compare",
             "view.survey",
@@ -132,10 +134,13 @@ const LAYOUT: &[(&str, &[&str])] = &[
             "@Sidebar Sections",
             "view.photoCounts",
             "view.faceBoxes",
+            "view.focusPoint",
+            "view.zoomToFocus",
             "view.filmstrip",
             "view.histogram",
             "view.navigator",
             "view.infoOverlay",
+            "@Loupe Overlay",
             "@Appearance",
             "---",
             "view.fullScreenPreview",
@@ -161,15 +166,20 @@ const LAYOUT: &[(&str, &[&str])] = &[
             "view.maskOverlayMode",
             "view.maskOverlayColor",
             "view.maskPins",
+            "@Tool Overlay",
             "view.cropOverlay",
             "---",
             "@Sort",
             "@Stacks",
             "view.filterBar",
             "library.clearFilter",
+            "library.refresh",
+            "library.holdView",
             "---",
             "compare.swap",
             "compare.makeSelect",
+            "---",
+            "view.viewOptions",
         ],
     ),
     (
@@ -202,11 +212,14 @@ const LAYOUT: &[(&str, &[&str])] = &[
             "photo.saveMetadataToFile",
             "photo.readMetadataFromFile",
             "photo.reload",
+            "photo.readFocusPoints",
             "app.showInFinder",
+            "app.showInFolders",
             "dialog.rename",
             "dialog.captureTime",
             "photo.tagFromTracklog",
             "---",
+            "album.removePhotos",
             "photo.delete",
             "photo.restore",
             "photo.deletePermanently",
@@ -286,10 +299,20 @@ fn host_supports(app: &LightcraftApp, id: &str) -> bool {
         "file.restoreLibrary" => app.services.restore_library.is_some(),
         "photo.restore" | "photo.deletePermanently" => selection_deleted(app),
         "photo.delete" => !selection_deleted(app),
+        // only in an album that holds its photos (not a smart one)
+        "album.removePhotos" => in_normal_album(app) && !selection_deleted(app),
         // only where the trash is on screen
         "library.emptyRecentlyDeleted" => app.session.source == lightcraft_engine::LibrarySource::RecentlyDeleted,
         id if crate::links::ARTCRAFT.contains(&id) => crate::links::shown(id),
         _ => true,
+    }
+}
+
+/// The library shows an album that holds its photos (not a smart album, not a folder of albums).
+pub(crate) fn in_normal_album(app: &LightcraftApp) -> bool {
+    match app.session.source {
+        lightcraft_engine::LibrarySource::Album(a) => app.session.catalog.album(a).is_some_and(|a| !a.folder && !a.is_smart()),
+        _ => false,
     }
 }
 
@@ -316,6 +339,8 @@ pub fn checked(app: &LightcraftApp, id: &str) -> Option<bool> {
         "view.reference" => Some(u.view == ViewMode::Reference),
         "view.leftPanel" => Some(u.left_panel),
         "view.faceBoxes" => Some(u.face_boxes),
+        "view.focusPoint" => Some(u.settings.focus_point),
+        "view.zoomToFocus" => Some(u.settings.zoom_to_focus),
         "view.filmstrip" => Some(u.filmstrip),
         "view.histogram" => Some(u.histogram),
         "view.clipping" => Some(u.show_clipping),
@@ -329,7 +354,10 @@ pub fn checked(app: &LightcraftApp, id: &str) -> Option<bool> {
         "view.beforeAfterSplit" => Some(u.before_after == crate::state::BeforeAfter::Split),
         "view.autoAdvance" => Some(u.auto_advance),
         "view.filterBar" => Some(u.filter_bar),
+        "view.soloSections" => Some(u.single_panel),
         "view.navigator" => Some(u.navigator),
+        "view.layoutImage" => Some(u.layout_image.show && !u.layout_image.path.trim().is_empty()),
+        "library.holdView" => Some(app.session.hold_view),
         "view.fullScreenPreview" => Some(u.fullscreen),
         "view.lightsOut" => Some(u.lights_out != crate::state::LightsOut::On),
         "view.enterFullScreen" => Some(app.window_is_fullscreen),
@@ -368,7 +396,7 @@ fn live_label(app: &LightcraftApp, id: &str, label: &str) -> String {
 }
 
 /// The parameterized submenus.
-fn expanded(app: &LightcraftApp, name: &str) -> Option<Vec<MenuNode>> {
+pub(crate) fn expanded(app: &LightcraftApp, name: &str) -> Option<Vec<MenuNode>> {
     let active = app.session.active().and_then(|id| app.session.catalog.photo(id).cloned());
     let has = active.is_some();
     Some(match name {
@@ -512,6 +540,48 @@ fn expanded(app: &LightcraftApp, name: &str) -> Option<Vec<MenuNode>> {
             }
             v
         }
+        "Loupe Overlay" => {
+            // Lightroom Classic's View ▸ Loupe Overlay ▸ Layout Image: choose the graphic, show it,
+            // and how opaque it is and how dark the photo is outside it
+            let li = &app.ui.layout_image;
+            let chosen = !li.path.trim().is_empty();
+            let mut v = vec![
+                item("view.chooseLayoutImage", Value::Null, "Choose Layout Image…", None, true, None),
+                item(
+                    "view.layoutImage",
+                    Value::Null,
+                    "Show Layout Image",
+                    crate::shortcuts::shortcut_of(&app.ui.settings.keymap, "view.layoutImage"),
+                    chosen,
+                    Some(li.show && chosen),
+                ),
+                MenuNode::Separator,
+            ];
+            let near = |a: f32, b: f32| (a - b).abs() < 0.005;
+            for step in crate::state::LayoutImage::OPACITY_STEPS {
+                let label = format!("{} {:.0}%", crate::i18n::tr("Opacity"), step * 100.0);
+                v.push(item("view.layoutImageOpacity", json!({"opacity": step}), label, None, chosen, Some(near(li.opacity, step))));
+            }
+            v.push(MenuNode::Separator);
+            for step in crate::state::LayoutImage::MATTE_STEPS {
+                let label =
+                    if step == 0.0 { crate::i18n::tr("No Matte").to_string() } else { format!("{} {:.0}%", crate::i18n::tr("Matte"), step * 100.0) };
+                v.push(item("view.layoutImageMatte", json!({"matte": step}), label, None, chosen, Some(near(li.matte, step))));
+            }
+            v
+        }
+        "Tool Overlay" => {
+            // when the spot and mask pins show; the last item steps to the next mode (Shift+H)
+            use crate::state::ToolOverlay;
+            let mut v: Vec<MenuNode> = ToolOverlay::ALL
+                .into_iter()
+                .map(|m| item("view.toolOverlay", json!({"mode": m.name()}), m.label(), None, true, Some(app.ui.tool_overlay == m)))
+                .collect();
+            v.push(MenuNode::Separator);
+            let shortcut = crate::shortcuts::shortcut_of(&app.ui.settings.keymap, "view.toolOverlay");
+            v.push(item("view.toolOverlay", Value::Null, "Cycle Tool Overlay", shortcut, true, None));
+            v
+        }
         "Grid Info" => ["filename", "exposure", "date"]
             .into_iter()
             .zip(["File Name", "Exposure (shutter · aperture · ISO)", "Capture Date"])
@@ -649,7 +719,7 @@ fn expanded(app: &LightcraftApp, name: &str) -> Option<Vec<MenuNode>> {
             v
         }
         "Add to Album" => {
-            let targets = app.session.targets(&Value::Null);
+            let targets = app.session.selected();
             let sel = !targets.is_empty();
             // albums hold library photos (issue #684): a Local-only selection is told what to do first
             let local_only = crate::panels::grid::local_only(app, &targets);
@@ -675,6 +745,13 @@ fn expanded(app: &LightcraftApp, name: &str) -> Option<Vec<MenuNode>> {
 fn node(app: &LightcraftApp, e: &MenuEntry) -> MenuNode {
     // Shift+P picks and advances in Library; don't advertise it on Presets in those views.
     let shortcut = if e.id == "panel.presets" && crate::shortcuts::library_grid(app) { None } else { e.shortcut.as_deref() };
+    // in an album the Delete key removes from the album (issue #1805): the menu says so
+    let delete_key = crate::shortcuts::shortcut_of(&app.ui.settings.keymap, "photo.delete");
+    let shortcut = match e.id.as_str() {
+        "album.removePhotos" => delete_key,
+        "photo.delete" if matches!(app.session.source, lightcraft_engine::LibrarySource::Album(_)) => None,
+        _ => shortcut,
+    };
     item(&e.id, Value::Null, live_label(app, &e.id, &e.label), shortcut, e.enabled, checked(app, &e.id))
 }
 
@@ -771,7 +848,18 @@ pub fn menu_bar(app: &LightcraftApp) -> Vec<(String, Vec<MenuNode>)> {
 /// Compare/Survey; Auto Advance moves on).
 pub fn run_item(app: &mut LightcraftApp, id: &str, params: Value) -> Result<Value, String> {
     let mut params = if params.is_null() { json!({}) } else { params };
-    let culling_cmd = matches!(id, "photo.rate" | "photo.flag" | "photo.label" | "photo.pick" | "photo.reject" | "photo.unflag");
+    let culling_cmd = matches!(
+        id,
+        "photo.rate"
+            | "photo.flag"
+            | "photo.label"
+            | "photo.pick"
+            | "photo.reject"
+            | "photo.unflag"
+            | "photo.cycleFlag"
+            | "photo.increaseFlag"
+            | "photo.decreaseFlag"
+    );
     if culling_cmd {
         crate::panels::compare::target_active(app, &mut params);
     }
@@ -804,6 +892,8 @@ pub fn shortcut_text(sc: &str, mac: bool) -> String {
             "Escape" => "⎋",
             "Left" => "←",
             "Right" => "→",
+            "Up" => "↑",
+            "Down" => "↓",
             k => k,
         };
         format!("{mods}{key}")
@@ -880,9 +970,10 @@ pub fn show_in_window(app: &mut LightcraftApp, ui: &mut egui::Ui, max_width: f32
     }
     if let Some((id, params)) = clicked {
         let r = run_item(app, &id, params);
-        // an export that can't start (e.g. no folder) says why instead of doing nothing
+        // an export that can't start (e.g. no folder), or a backup / restore the host refuses
+        // (changes still unsaved, nothing stored in this browser), says why instead of doing nothing
         if let Err(e) = r
-            && matches!(id.as_str(), "app.export" | "app.exportPrevious")
+            && matches!(id.as_str(), "app.export" | "app.exportPrevious" | "file.backupLibrary" | "file.restoreLibrary")
         {
             app.toast(ui.ctx(), e);
         }
@@ -935,7 +1026,7 @@ fn switch_open_title(ctx: &egui::Context, titles: &[egui::Response]) -> Option<e
 /// bounded like every level. The row is registered as `menusub:<label>` (the untranslated
 /// label), and while its submenu is open it is the anchor the next frame's room is measured from.
 fn submenu(ui: &mut egui::Ui, label: &str, text: String, depth: usize, bar_bottom: Option<f32>, children: impl FnOnce(&mut egui::Ui)) {
-    let r = ui.menu_button(text, |ui| crate::menu_level::level(ui, depth + 1, bar_bottom, children));
+    let r = crate::widgets::menu_button(ui, text, |ui| crate::menu_level::level(ui, depth + 1, bar_bottom, children));
     crate::widgets::register(ui.ctx(), format!("menusub:{label}"), r.response.rect);
     if r.inner.is_some() {
         crate::menu_level::set_anchor(ui.ctx(), depth + 1, r.response.rect);
@@ -962,6 +1053,7 @@ fn nodes_ui(ui: &mut egui::Ui, nodes: &[MenuNode], mac: bool, clicked: &mut Opti
                     b = b.shortcut_text(shortcut_text(sc, mac));
                 }
                 let r = ui.add_enabled(*enabled, b);
+                crate::widgets::register(ui.ctx(), format!("menuitem:{id}"), r.rect);
                 if *checked == Some(true) {
                     let t = crate::theme::Tokens::get(ui.ctx());
                     let c = egui::Rect::from_center_size(egui::pos2(r.rect.left() + 11.0, r.rect.center().y), egui::vec2(13.0, 13.0));
@@ -990,6 +1082,17 @@ mod tests {
             MenuNode::Submenu { children, .. } => find(children, id),
             _ => None,
         })
+    }
+
+    #[test]
+    fn view_menu_offers_the_hold_and_the_refresh_and_checks_the_hold_while_it_is_on() {
+        let mut a = app();
+        let view = |a: &LightcraftApp| menu_bar(a).into_iter().find(|(t, _)| t == "View").expect("View menu").1;
+        let items = view(&a);
+        assert!(matches!(find(&items, "library.refresh"), Some(MenuNode::Item { enabled: true, .. })));
+        assert!(matches!(find(&items, "library.holdView"), Some(MenuNode::Item { checked: Some(false), .. })), "off unless asked for");
+        a.session.execute("library.holdView", &json!({"on": true})).expect("hold the view");
+        assert!(matches!(find(&view(&a), "library.holdView"), Some(MenuNode::Item { checked: Some(true), .. })));
     }
 
     /// The Sort submenu is expanded by hand: Reshuffle appears once (not again from the registry),
@@ -1193,6 +1296,12 @@ mod tests {
         let r = run_item(&mut app, "app.export", json!({"preset": "Tiny PNG", "dir": "  "}));
         assert_eq!(r.unwrap_err(), crate::control::NO_EXPORT_FOLDER);
         assert_eq!(written.lock().unwrap().len(), n, "nothing written without a folder");
+        // "Same folder as original photo" needs no folder; a demo photo has none of its own, so it
+        // gets its own error rather than a file written elsewhere (issue #956)
+        let r = run_item(&mut app, "app.export", json!({"preset": "Tiny PNG", "dir": "  ", "destinationMode": "sameAsOriginal"}));
+        let e = r.unwrap_err();
+        assert!(e.contains("no folder on disk"), "{e}");
+        assert_eq!(written.lock().unwrap().len(), n, "nothing written for a photo without a folder");
     }
 
     #[test]
@@ -1289,6 +1398,30 @@ mod tests {
         let p = app.session.catalog.photo(id).unwrap();
         assert_eq!(p.file_name, "one-renamed.png");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A backup the host refuses (changes still unsaved, issue #1508) says why when started from
+    /// the menu, as a refused export does; the refusal used to reach only the control channel.
+    #[test]
+    fn a_refused_backup_from_the_menu_shows_why() {
+        // the host refuses, as the web one does while changes are still unsaved (issue #1508)
+        let refusal = "Backup not started: 1 change could not be saved to browser storage yet";
+        let services = crate::Services {
+            backup_library: Some(Box::new(move |_: &mut lightcraft_engine::Session| Err(refusal.to_string()))),
+            ..Default::default()
+        };
+        let app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), services);
+        let mut h = crate::headless::Headless::new(app, [1400.0, 900.0], 1.0);
+        let t = std::time::Duration::from_secs(30);
+        h.settle(t);
+        for id in ["menu:File", "menuitem:file.backupLibrary"] {
+            let r = h.request("ui.clickWidget", json!({"id": id}), t);
+            assert_eq!(r["ok"], true, "{id}: {r}");
+            h.step();
+        }
+        // (read at once: a toast keeps the UI repainting until it expires, so settling would outlive it)
+        let toast = h.app.ui.toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+        assert!(toast.contains(refusal), "the refusal is shown: {toast:?}");
     }
 
     /// #1528: `file.findMissing` with `wait: true` must propagate folder validation and search

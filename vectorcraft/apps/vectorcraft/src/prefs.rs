@@ -42,6 +42,40 @@ pub fn install_fonts() {
     }
 }
 
+/// The folder `name` in [`data_dir`], for what the user keeps: none in a run without preferences
+/// (`VECTORCRAFT_NO_PREFS`), which keeps nothing. Without a data root it is
+/// [`prefs_dir`]'s folder of the same name, which `vectorcraft-cli` reads too.
+fn store_dir(name: &str) -> Option<PathBuf> {
+    if !prefs_enabled() {
+        return None;
+    }
+    Some(data_dir()?.join(name))
+}
+
+/// Register the ICC profiles `color.loadProfile` kept in the `Color Profiles` folder (#2174), and
+/// keep the ones loaded from now on there. Before anything names a profile.
+pub fn attach_profile_store(session: &mut vectorcraft_engine::Session) {
+    if let Some(dir) = store_dir("Color Profiles") {
+        session.attach_profile_store(dir);
+    }
+}
+
+/// Install the plug-ins Install Plug-in kept in the `Plug-ins` folder (#2541), and keep the ones
+/// installed from now on there.
+pub fn attach_plugin_store(session: &mut vectorcraft_engine::Session) {
+    if let Some(dir) = store_dir("Plug-ins") {
+        session.attach_plugin_store(dir);
+    }
+}
+
+/// Take the saved PDF presets from the `PDF Presets` folder (#2168), and keep the ones saved from
+/// now on there. After the preferences were restored: the folder is the one place the presets live.
+pub fn attach_pdf_preset_store(session: &mut vectorcraft_engine::Session) {
+    if let Some(dir) = store_dir("PDF Presets") {
+        session.attach_pdf_preset_store(dir);
+    }
+}
+
 /// Runs without preferences (`VECTORCRAFT_NO_PREFS`, agents' test runs) neither read nor write them.
 pub fn prefs_enabled() -> bool {
     std::env::var_os("VECTORCRAFT_NO_PREFS").is_none()
@@ -79,10 +113,13 @@ fn decode_saved_prefs(bytes: &[u8]) -> Option<UiState> {
     let mut value: Value = serde_json::from_slice(bytes).ok()?;
     let object = value.as_object_mut()?;
     recover(object, "docking_hidden");
-    if let Some(Value::Array(workspaces)) = object.get_mut("custom_workspaces") {
-        for workspace in workspaces {
-            if let Some(object) = workspace.as_object_mut() {
-                recover(object, "dockingHidden");
+    // Saved workspaces and the layout changes kept for each workspace carry the same layouts.
+    for key in ["custom_workspaces", "workspace_changes"] {
+        if let Some(Value::Array(workspaces)) = object.get_mut(key) {
+            for workspace in workspaces {
+                if let Some(object) = workspace.as_object_mut() {
+                    recover(object, "dockingHidden");
+                }
             }
         }
     }
@@ -127,6 +164,7 @@ mod tests {
         app.ui.engine_prefs = json!({"interfaceLanguage":"fr", "uiBrightness":"light"});
         app.ui.custom_workspaces =
             vec![vectorcraft_ui_egui::workspaces::capture(&app.ui, "Future"), vectorcraft_ui_egui::workspaces::capture(&app.ui, "Valid")];
+        app.ui.workspace_changes = vec![vectorcraft_ui_egui::workspaces::capture(&app.ui, "Future")];
         let original = serde_json::to_value(&app.ui).unwrap();
         let valid_location = original["docking_hidden"]["layers"].clone();
         assert!(valid_location.is_object());
@@ -137,6 +175,8 @@ mod tests {
                 raw["docking_hidden"] = invalid_hidden.clone();
                 raw["custom_workspaces"][0]["docking"] = invalid_layout.clone();
                 raw["custom_workspaces"][0]["dockingHidden"] = invalid_hidden.clone();
+                raw["workspace_changes"][0]["docking"] = invalid_layout.clone();
+                raw["workspace_changes"][0]["dockingHidden"] = invalid_hidden.clone();
                 assert!(serde_json::from_value::<UiState>(raw.clone()).is_err(), "runtime serde stays strict");
                 let loaded = decode_saved_prefs(&serde_json::to_vec(&raw).unwrap()).unwrap();
                 assert_eq!(loaded.engine_prefs, app.ui.engine_prefs);
@@ -153,6 +193,8 @@ mod tests {
                 assert!(loaded.custom_workspaces[0].docking.is_none());
                 assert!(!loaded.custom_workspaces[0].docking_hidden.contains_key("layers"));
                 assert_eq!(serde_json::to_value(&loaded.custom_workspaces[1]).unwrap(), original["custom_workspaces"][1]);
+                assert_eq!(loaded.workspace_changes.len(), 1, "a remembered layout is recovered, not the whole file lost");
+                assert!(loaded.workspace_changes[0].docking.is_none());
             }
         }
         let roundtrip = decode_saved_prefs(&serde_json::to_vec(&original).unwrap()).unwrap();

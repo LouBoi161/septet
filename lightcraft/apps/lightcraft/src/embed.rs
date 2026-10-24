@@ -77,6 +77,11 @@ impl Embedded {
         // the host draws the window chrome
         app.integrated_titlebar = false;
         app.notices.extend(prefs_warning);
+        // an empty library opens where Import is offered (a grid, with the sidebar); before the
+        // snapshot below, so this alone isn't written to the settings file
+        if problem.is_none() {
+            lightcraft_ui_egui::panels::empty_library::open_on_empty_library(&mut app);
+        }
         // what's on disk now: only changes are written
         let prefs = PrefsWriter::new(&app, keep_prefs_file, crate::prefs::prefs_path());
         app.library_problem = problem;
@@ -321,6 +326,17 @@ impl Embedded {
             })),
         );
         let (display_profile, keywords, save_keywords) = (ask("pick a monitor profile"), ask("pick a keyword list"), ask("choose where to save"));
+        let (slideshow_templates, save_slideshow) = (ask("pick slideshow templates"), ask("choose where to save"));
+        let saved_slideshow = (
+            sv.pick_slideshow_templates.replace(Box::new(move || {
+                slideshow_templates();
+                Vec::new()
+            })),
+            sv.save_slideshow_template.replace(Box::new(move |_| {
+                save_slideshow();
+                None
+            })),
+        );
         let saved_keywords = (
             sv.pick_display_profile.replace(Box::new(move || {
                 display_profile();
@@ -401,6 +417,7 @@ impl Embedded {
         ) = saved;
         (sv.pick_lightroom_catalog, sv.pick_model_file, sv.pick_denoise_model) = saved_more;
         (sv.pick_display_profile, sv.pick_keyword_list, sv.save_keyword_list) = saved_keywords;
+        (sv.pick_slideshow_templates, sv.save_slideshow_template) = saved_slideshow;
         sv.picker = picker;
         let opened = !had_dialog && self.app.ui.dialog.is_some();
         if opened {

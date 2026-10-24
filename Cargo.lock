@@ -738,12 +738,27 @@ dependencies = [
 
 [[package]]
 name = "bit-set"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
+dependencies = [
+ "bit-vec 0.8.0",
+]
+
+[[package]]
+name = "bit-set"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09ec2f926cc3060f09db9ebc5b52823d85268d24bb917e472c0c4bea35780a7d"
 dependencies = [
- "bit-vec",
+ "bit-vec 0.9.1",
 ]
+
+[[package]]
+name = "bit-vec"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
 name = "bit-vec"
@@ -1626,6 +1641,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "core-text"
+version = "20.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9d2790b5c08465d49f8dc05c8bcae9fea467855947db39b0f8145c091aaced5"
+dependencies = [
+ "core-foundation 0.9.4",
+ "core-graphics",
+ "foreign-types",
+ "libc",
+]
+
+[[package]]
 name = "core_detect"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1721,11 +1748,68 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-atomic"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=e9546e191dd62f2bc1d61eca45dbdc2f1b3c1d8e#e9546e191dd62f2bc1d61eca45dbdc2f1b3c1d8e"
+dependencies = [
+ "rustix 1.1.5",
+]
+
+[[package]]
+name = "craft-cms"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=e9546e191dd62f2bc1d61eca45dbdc2f1b3c1d8e#e9546e191dd62f2bc1d61eca45dbdc2f1b3c1d8e"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
+name = "craft-docpath"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=82a24b006eefa036b43c09a67fb9a3fbd17ffe63#82a24b006eefa036b43c09a67fb9a3fbd17ffe63"
+
+[[package]]
+name = "craft-pdf"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=89dcbb3060377a26c99a6d80caa16084366704c4#89dcbb3060377a26c99a6d80caa16084366704c4"
+dependencies = [
+ "bytemuck",
+ "hayro 0.7.1 (git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d)",
+ "hayro-interpret 0.7.0 (git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d)",
+ "hayro-syntax 0.7.2 (git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d)",
+ "krilla",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-pdf"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d#ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d"
+dependencies = [
+ "hayro-interpret 0.7.0 (git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d)",
+ "hayro-syntax 0.7.2 (git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d)",
+ "krilla",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-print"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=3d37da389a3618ab9b76109da11416e9ca4ea719#3d37da389a3618ab9b76109da11416e9ca4ea719"
 dependencies = [
  "craft-winprint-gdi",
+ "miniz_oxide 0.8.9",
+ "roxmltree 0.20.0",
+ "tempfile",
+ "winprint",
+ "winsafe",
+]
+
+[[package]]
+name = "craft-print"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=666c358065261a2816b376fa3bb10538dbf53040#666c358065261a2816b376fa3bb10538dbf53040"
+dependencies = [
  "miniz_oxide 0.8.9",
  "roxmltree 0.20.0",
  "tempfile",
@@ -1742,15 +1826,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "craft-print"
+name = "craft-quit"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=f03ec27ab2c405969428512178f746183cd55ca0#f03ec27ab2c405969428512178f746183cd55ca0"
+source = "git+https://github.com/storytold/craft-libs?rev=f58bc1a3df490992d633393d0898af0588ce882c#f58bc1a3df490992d633393d0898af0588ce882c"
 dependencies = [
- "miniz_oxide 0.8.9",
- "roxmltree 0.20.0",
- "tempfile",
- "winprint",
- "winsafe",
+ "dispatch2",
+ "egui",
+ "muda",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
 ]
 
 [[package]]
@@ -1760,6 +1844,15 @@ source = "git+https://github.com/storytold/craft-libs?rev=5c874d51eeb3de70e735c8
 dependencies = [
  "egui",
  "serde",
+]
+
+[[package]]
+name = "craft-window"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=1f805378d454dac48b5c214029d254055fdf961b#1f805378d454dac48b5c214029d254055fdf961b"
+dependencies = [
+ "egui",
+ "wayland-client",
 ]
 
 [[package]]
@@ -2082,7 +2175,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "arboard",
  "designcraft-engine",
@@ -2091,46 +2184,53 @@ dependencies = [
  "designcraft-ui-egui",
  "eframe",
  "egui",
+ "fmv-macos-events",
  "log",
  "muda",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
  "rfd",
  "serde",
  "serde_json",
  "winit",
  "winresource",
+ "winsafe",
 ]
 
 [[package]]
 name = "designcraft-color"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
+ "craft-cms",
  "kurbo 0.13.1",
- "moxcms 0.8.1",
  "serde",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "designcraft-compose"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "designcraft-color",
  "designcraft-doc",
  "designcraft-fonts",
  "designcraft-geom",
+ "fancy-regex",
  "hypher",
  "log",
  "miniz_oxide 0.8.9",
  "regex",
  "unicode-bidi",
  "unicode-bidi-mirroring",
+ "unicode-script",
  "unicode-segmentation",
 ]
 
 [[package]]
 name = "designcraft-doc"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
+ "chrono",
  "designcraft-color",
  "designcraft-geom",
  "serde",
@@ -2140,9 +2240,11 @@ dependencies = [
 
 [[package]]
 name = "designcraft-engine"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "caseless",
+ "craft-atomic",
+ "craft-docpath",
  "craft-print 0.1.0 (git+https://github.com/storytold/craft-libs?rev=d991bf6792f8ade99c51358bf3c1d902c8cd96b5)",
  "designcraft-color",
  "designcraft-compose",
@@ -2154,12 +2256,14 @@ dependencies = [
  "designcraft-idml",
  "designcraft-images",
  "designcraft-pdf",
+ "designcraft-pptx",
  "designcraft-render",
  "designcraft-textimport",
  "designcraft-tools",
+ "indd",
  "log",
- "quick-xml 0.38.4",
- "regex",
+ "quick-xml 0.41.0",
+ "same-file",
  "serde",
  "serde_json",
  "tempfile",
@@ -2169,8 +2273,9 @@ dependencies = [
 
 [[package]]
 name = "designcraft-epub"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
+ "chrono",
  "designcraft-color",
  "designcraft-doc",
  "zip 3.0.0",
@@ -2178,8 +2283,9 @@ dependencies = [
 
 [[package]]
 name = "designcraft-fonts"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
+ "core-text",
  "harfrust 0.13.3",
  "kurbo 0.13.1",
  "log",
@@ -2191,9 +2297,10 @@ dependencies = [
 
 [[package]]
 name = "designcraft-format"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "designcraft-doc",
+ "designcraft-images",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -2202,7 +2309,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-geom"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "flo_curves",
  "kurbo 0.13.1",
@@ -2213,75 +2320,100 @@ dependencies = [
 
 [[package]]
 name = "designcraft-idml"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "designcraft-color",
  "designcraft-doc",
  "designcraft-geom",
- "quick-xml 0.38.4",
+ "designcraft-images",
+ "log",
+ "quick-xml 0.41.0",
  "thiserror 2.0.21",
  "zip 3.0.0",
 ]
 
 [[package]]
 name = "designcraft-images"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
+ "craft-cms",
  "designcraft-color",
  "designcraft-fonts",
  "image",
+ "log",
  "resvg 0.47.0",
  "tiff",
+ "zune-core 0.5.3",
+ "zune-jpeg 0.5.15",
 ]
 
 [[package]]
 name = "designcraft-pdf"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
+ "chrono",
+ "craft-pdf 0.1.0 (git+https://github.com/storytold/craft-libs?rev=89dcbb3060377a26c99a6d80caa16084366704c4)",
  "designcraft-color",
  "designcraft-compose",
  "designcraft-doc",
  "designcraft-fonts",
  "designcraft-geom",
  "designcraft-images",
- "hayro-syntax 0.7.2",
+ "hayro-syntax 0.7.2 (git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d)",
  "image",
- "krilla",
  "krilla-svg",
  "log",
  "thiserror 2.0.21",
 ]
 
 [[package]]
-name = "designcraft-render"
-version = "0.8.0"
+name = "designcraft-pptx"
+version = "0.12.0"
 dependencies = [
+ "chrono",
  "designcraft-color",
  "designcraft-compose",
  "designcraft-doc",
  "designcraft-fonts",
  "designcraft-geom",
  "designcraft-images",
- "hayro",
+ "image",
+ "skrifa 0.47.0",
+ "thiserror 2.0.21",
+ "zip 3.0.0",
+]
+
+[[package]]
+name = "designcraft-render"
+version = "0.12.0"
+dependencies = [
+ "craft-pdf 0.1.0 (git+https://github.com/storytold/craft-libs?rev=89dcbb3060377a26c99a6d80caa16084366704c4)",
+ "designcraft-color",
+ "designcraft-compose",
+ "designcraft-doc",
+ "designcraft-fonts",
+ "designcraft-geom",
+ "designcraft-images",
  "image",
  "log",
  "serde",
+ "thiserror 2.0.21",
  "vello_common 0.2.0",
  "vello_cpu 0.2.0",
 ]
 
 [[package]]
 name = "designcraft-textimport"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "designcraft-doc",
- "quick-xml 0.38.4",
+ "quick-xml 0.41.0",
  "zip 3.0.0",
 ]
 
 [[package]]
 name = "designcraft-tools"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "designcraft-color",
  "designcraft-compose",
@@ -2293,7 +2425,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-ui-egui"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "craft-ui",
  "designcraft-color",
@@ -2306,7 +2438,6 @@ dependencies = [
  "designcraft-tools",
  "egui",
  "log",
- "regex",
  "serde",
  "serde_json",
  "toml 1.1.7+spec-1.1.0",
@@ -2608,7 +2739,7 @@ dependencies = [
 
 [[package]]
 name = "effectcraft"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "cpal",
  "effectcraft-engine",
@@ -2633,18 +2764,18 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-av1enc"
-version = "0.10.0"
+version = "0.16.0"
 
 [[package]]
 name = "effectcraft-color"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "effectcraft-effects"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "effectcraft-color",
  "effectcraft-geom",
@@ -2661,8 +2792,9 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-engine"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
+ "craft-docpath",
  "effectcraft-color",
  "effectcraft-effects",
  "effectcraft-geom",
@@ -2694,7 +2826,7 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-export"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "effectcraft-av1enc",
  "effectcraft-hevcenc",
@@ -2718,7 +2850,7 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-expr"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "boa_engine",
  "effectcraft-geom",
@@ -2732,14 +2864,14 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-geom"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "effectcraft-gpu"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "bytemuck",
  "effectcraft-color",
@@ -2760,11 +2892,11 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-hevcenc"
-version = "0.10.0"
+version = "0.16.0"
 
 [[package]]
 name = "effectcraft-host"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "effectcraft-engine",
  "effectcraft-export",
@@ -2778,7 +2910,7 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-interchange"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "effectcraft-color",
  "effectcraft-keyframe",
@@ -2797,7 +2929,7 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-keyframe"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "effectcraft-color",
  "effectcraft-geom",
@@ -2808,8 +2940,9 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-lottie"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
+ "craft-docpath",
  "effectcraft-color",
  "effectcraft-effects",
  "effectcraft-keyframe",
@@ -2824,8 +2957,9 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-media"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
+ "craft-docpath",
  "effectcraft-model",
  "effectcraft-pdf",
  "effectcraft-project",
@@ -2846,12 +2980,13 @@ dependencies = [
  "log",
  "rayon",
  "serde_json",
+ "symphonia",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "effectcraft-model"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "effectcraft-geom",
  "image",
@@ -2863,11 +2998,11 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-opusenc"
-version = "0.10.0"
+version = "0.16.0"
 
 [[package]]
 name = "effectcraft-path"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "effectcraft-geom",
  "effectcraft-keyframe",
@@ -2879,8 +3014,9 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-pdf"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
+ "craft-pdf 0.1.0 (git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d)",
  "effectcraft-svg",
  "effectcraft-text",
  "kurbo 0.13.1",
@@ -2891,7 +3027,7 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-plugin"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "effectcraft-effects",
  "serde_json",
@@ -2900,7 +3036,7 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-project"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "effectcraft-color",
  "effectcraft-geom",
@@ -2913,14 +3049,14 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-psd"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "miniz_oxide 0.8.9",
 ]
 
 [[package]]
 name = "effectcraft-raster"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "effectcraft-color",
  "effectcraft-geom",
@@ -2929,7 +3065,7 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-render"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "effectcraft-color",
  "effectcraft-effects",
@@ -2951,7 +3087,7 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-script"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "boa_engine",
  "effectcraft-engine",
@@ -2966,7 +3102,7 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-segment"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "miniz_oxide 0.8.9",
  "ndarray",
@@ -2975,7 +3111,7 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-svg"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "effectcraft-geom",
  "effectcraft-path",
@@ -2987,7 +3123,7 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-text"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "effectcraft-keyframe",
  "harfrust 0.12.0",
@@ -2999,14 +3135,14 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-time"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "effectcraft-track"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "effectcraft-raster",
  "effectcraft-segment",
@@ -3018,7 +3154,7 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-ui-egui"
-version = "0.10.0"
+version = "0.16.0"
 dependencies = [
  "craft-ui",
  "effectcraft-color",
@@ -3046,7 +3182,7 @@ dependencies = [
 
 [[package]]
 name = "effectcraft-vp9enc"
-version = "0.10.0"
+version = "0.16.0"
 
 [[package]]
 name = "eframe"
@@ -3444,6 +3580,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "exacl"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8de9e551ced9d700a31dacb8b168129640240fcd7a279a3fa4d59608b84ebcae"
+dependencies = [
+ "bitflags 2.13.2",
+ "log",
+ "scopeguard",
+ "uuid",
+]
+
+[[package]]
 name = "exr"
 version = "1.74.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3500,6 +3648,17 @@ dependencies = [
  "num-traits",
  "pulp 0.18.22",
  "reborrow",
+]
+
+[[package]]
+name = "fancy-regex"
+version = "0.19.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d301f5bf187b3c295fce6468d3875037a0bccc5f6b151c63cac2f85babf21912"
+dependencies = [
+ "bit-set 0.8.0",
+ "regex-automata",
+ "regex-syntax",
 ]
 
 [[package]]
@@ -3595,7 +3754,7 @@ dependencies = [
 
 [[package]]
 name = "filmcraft"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "arboard",
  "chrono",
@@ -3606,9 +3765,9 @@ dependencies = [
  "filmcraft-export",
  "filmcraft-gpu",
  "filmcraft-platform",
- "filmcraft-project 0.8.0",
+ "filmcraft-project 0.12.0",
  "filmcraft-render",
- "filmcraft-time 0.8.0",
+ "filmcraft-time 0.12.0",
  "filmcraft-ui-egui",
  "log",
  "muda",
@@ -3635,9 +3794,9 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-aac"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-bitstream 0.8.0",
+ "filmcraft-bitstream 0.12.0",
  "thiserror 2.0.21",
 ]
 
@@ -3651,23 +3810,23 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-ac3"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "filmcraft-apv"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-bitstream 0.8.0",
+ "filmcraft-bitstream 0.12.0",
  "rayon",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "filmcraft-audio-dsp"
-version = "0.8.0"
+version = "0.12.0"
 
 [[package]]
 name = "filmcraft-av1"
@@ -3681,16 +3840,16 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-av1"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-bitstream 0.8.0",
+ "filmcraft-bitstream 0.12.0",
  "rayon",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "filmcraft-avi"
-version = "0.8.0"
+version = "0.12.0"
 
 [[package]]
 name = "filmcraft-bitstream"
@@ -3699,16 +3858,16 @@ source = "git+https://github.com/storytold/filmcraft?rev=2c5ba7a72619935f0481f99
 
 [[package]]
 name = "filmcraft-bitstream"
-version = "0.8.0"
+version = "0.12.0"
 
 [[package]]
 name = "filmcraft-captions"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-color 0.8.0",
- "filmcraft-project 0.8.0",
+ "filmcraft-color 0.12.0",
+ "filmcraft-project 0.12.0",
  "filmcraft-text",
- "filmcraft-time 0.8.0",
+ "filmcraft-time 0.12.0",
  "roxmltree 0.21.1",
  "thiserror 2.0.21",
 ]
@@ -3720,7 +3879,7 @@ source = "git+https://github.com/storytold/filmcraft?rev=2c5ba7a72619935f0481f99
 
 [[package]]
 name = "filmcraft-cfb"
-version = "0.8.0"
+version = "0.12.0"
 
 [[package]]
 name = "filmcraft-codecs"
@@ -3756,32 +3915,32 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-codecs"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-aac 0.8.0",
- "filmcraft-ac3 0.8.0",
+ "filmcraft-aac 0.12.0",
+ "filmcraft-ac3 0.12.0",
  "filmcraft-apv",
- "filmcraft-av1 0.8.0",
+ "filmcraft-av1 0.12.0",
  "filmcraft-avi",
- "filmcraft-bitstream 0.8.0",
- "filmcraft-color 0.8.0",
- "filmcraft-dnx 0.8.0",
- "filmcraft-frame 0.8.0",
- "filmcraft-h264 0.8.0",
- "filmcraft-hevc 0.8.0",
- "filmcraft-isobmff 0.8.0",
- "filmcraft-matroska 0.8.0",
- "filmcraft-media 0.8.0",
+ "filmcraft-bitstream 0.12.0",
+ "filmcraft-color 0.12.0",
+ "filmcraft-dnx 0.12.0",
+ "filmcraft-frame 0.12.0",
+ "filmcraft-h264 0.12.0",
+ "filmcraft-hevc 0.12.0",
+ "filmcraft-isobmff 0.12.0",
+ "filmcraft-matroska 0.12.0",
+ "filmcraft-media 0.12.0",
  "filmcraft-mpa",
- "filmcraft-mpeg2v 0.8.0",
- "filmcraft-mpegts 0.8.0",
- "filmcraft-mxf 0.8.0",
- "filmcraft-ogg 0.8.0",
- "filmcraft-opus 0.8.0",
- "filmcraft-prores 0.8.0",
- "filmcraft-time 0.8.0",
+ "filmcraft-mpeg2v 0.12.0",
+ "filmcraft-mpegts 0.12.0",
+ "filmcraft-mxf 0.12.0",
+ "filmcraft-ogg 0.12.0",
+ "filmcraft-opus 0.12.0",
+ "filmcraft-prores 0.12.0",
+ "filmcraft-time 0.12.0",
  "filmcraft-vp8",
- "filmcraft-vp9 0.8.0",
+ "filmcraft-vp9 0.12.0",
  "image",
  "log",
  "rayon",
@@ -3800,14 +3959,14 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-color"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "filmcraft-dng"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "rayon",
  "thiserror 2.0.21",
@@ -3825,44 +3984,45 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-dnx"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-bitstream 0.8.0",
+ "filmcraft-bitstream 0.12.0",
  "rayon",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "filmcraft-edit"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-project 0.8.0",
- "filmcraft-time 0.8.0",
+ "filmcraft-project 0.12.0",
+ "filmcraft-time 0.12.0",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "filmcraft-engine"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
+ "craft-docpath",
  "filmcraft-audio-dsp",
  "filmcraft-captions",
- "filmcraft-codecs 0.8.0",
- "filmcraft-color 0.8.0",
+ "filmcraft-codecs 0.12.0",
+ "filmcraft-color 0.12.0",
  "filmcraft-edit",
  "filmcraft-export",
  "filmcraft-format",
- "filmcraft-frame 0.8.0",
- "filmcraft-geom 0.8.0",
- "filmcraft-interchange 0.8.0",
- "filmcraft-media 0.8.0",
- "filmcraft-mxf 0.8.0",
- "filmcraft-project 0.8.0",
+ "filmcraft-frame 0.12.0",
+ "filmcraft-geom 0.12.0",
+ "filmcraft-interchange 0.12.0",
+ "filmcraft-media 0.12.0",
+ "filmcraft-mxf 0.12.0",
+ "filmcraft-project 0.12.0",
  "filmcraft-render",
  "filmcraft-scopes",
  "filmcraft-speech",
  "filmcraft-text",
- "filmcraft-time 0.8.0",
+ "filmcraft-time 0.12.0",
  "filmcraft-tts",
  "log",
  "serde",
@@ -3873,25 +4033,25 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-export"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-aac 0.8.0",
+ "filmcraft-aac 0.12.0",
  "filmcraft-apv",
  "filmcraft-audio-dsp",
- "filmcraft-color 0.8.0",
- "filmcraft-dnx 0.8.0",
+ "filmcraft-color 0.12.0",
+ "filmcraft-dnx 0.12.0",
  "filmcraft-flac",
- "filmcraft-frame 0.8.0",
- "filmcraft-geom 0.8.0",
- "filmcraft-h264enc 0.8.0",
- "filmcraft-isobmff 0.8.0",
- "filmcraft-media 0.8.0",
- "filmcraft-mxf 0.8.0",
- "filmcraft-project 0.8.0",
- "filmcraft-prores 0.8.0",
+ "filmcraft-frame 0.12.0",
+ "filmcraft-geom 0.12.0",
+ "filmcraft-h264enc 0.12.0",
+ "filmcraft-isobmff 0.12.0",
+ "filmcraft-media 0.12.0",
+ "filmcraft-mxf 0.12.0",
+ "filmcraft-project 0.12.0",
+ "filmcraft-prores 0.12.0",
  "filmcraft-render",
  "filmcraft-text",
- "filmcraft-time 0.8.0",
+ "filmcraft-time 0.12.0",
  "image",
  "rayon",
  "serde",
@@ -3902,21 +4062,22 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-flac"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-bitstream 0.8.0",
+ "filmcraft-bitstream 0.12.0",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "filmcraft-format"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-media 0.8.0",
- "filmcraft-project 0.8.0",
+ "filmcraft-media 0.12.0",
+ "filmcraft-project 0.12.0",
  "log",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
@@ -3933,10 +4094,10 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-frame"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-color 0.8.0",
- "filmcraft-time 0.8.0",
+ "filmcraft-color 0.12.0",
+ "filmcraft-time 0.12.0",
  "rayon",
  "serde",
 ]
@@ -3951,21 +4112,21 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-geom"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "filmcraft-gpu"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-color 0.8.0",
- "filmcraft-frame 0.8.0",
- "filmcraft-geom 0.8.0",
- "filmcraft-project 0.8.0",
+ "filmcraft-color 0.12.0",
+ "filmcraft-frame 0.12.0",
+ "filmcraft-geom 0.12.0",
+ "filmcraft-project 0.12.0",
  "filmcraft-render",
- "filmcraft-time 0.8.0",
+ "filmcraft-time 0.12.0",
  "log",
  "pollster 0.4.0",
  "rayon",
@@ -3984,9 +4145,9 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-h264"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-bitstream 0.8.0",
+ "filmcraft-bitstream 0.12.0",
  "rayon",
  "thiserror 2.0.21",
 ]
@@ -4003,9 +4164,9 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-h264enc"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-bitstream 0.8.0",
+ "filmcraft-bitstream 0.12.0",
  "rayon",
  "thiserror 2.0.21",
 ]
@@ -4022,9 +4183,9 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-hevc"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-bitstream 0.8.0",
+ "filmcraft-bitstream 0.12.0",
  "rayon",
  "thiserror 2.0.21",
 ]
@@ -4048,14 +4209,14 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-interchange"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-cfb 0.8.0",
- "filmcraft-color 0.8.0",
- "filmcraft-geom 0.8.0",
- "filmcraft-media 0.8.0",
- "filmcraft-project 0.8.0",
- "filmcraft-time 0.8.0",
+ "filmcraft-cfb 0.12.0",
+ "filmcraft-color 0.12.0",
+ "filmcraft-geom 0.12.0",
+ "filmcraft-media 0.12.0",
+ "filmcraft-project 0.12.0",
+ "filmcraft-time 0.12.0",
  "roxmltree 0.21.1",
  "serde",
  "serde_json",
@@ -4073,9 +4234,9 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-isobmff"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-bitstream 0.8.0",
+ "filmcraft-bitstream 0.12.0",
  "thiserror 2.0.21",
 ]
 
@@ -4086,7 +4247,7 @@ source = "git+https://github.com/storytold/filmcraft?rev=2c5ba7a72619935f0481f99
 
 [[package]]
 name = "filmcraft-matroska"
-version = "0.8.0"
+version = "0.12.0"
 
 [[package]]
 name = "filmcraft-media"
@@ -4104,12 +4265,12 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-media"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-color 0.8.0",
+ "filmcraft-color 0.12.0",
  "filmcraft-dng",
- "filmcraft-frame 0.8.0",
- "filmcraft-time 0.8.0",
+ "filmcraft-frame 0.12.0",
+ "filmcraft-time 0.12.0",
  "image",
  "rayon",
  "serde",
@@ -4118,9 +4279,9 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-mpa"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-bitstream 0.8.0",
+ "filmcraft-bitstream 0.12.0",
  "thiserror 2.0.21",
 ]
 
@@ -4135,7 +4296,7 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-mpeg2v"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "rayon",
  "thiserror 2.0.21",
@@ -4151,7 +4312,7 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-mpegts"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -4163,7 +4324,7 @@ source = "git+https://github.com/storytold/filmcraft?rev=2c5ba7a72619935f0481f99
 
 [[package]]
 name = "filmcraft-mxf"
-version = "0.8.0"
+version = "0.12.0"
 
 [[package]]
 name = "filmcraft-ogg"
@@ -4172,7 +4333,7 @@ source = "git+https://github.com/storytold/filmcraft?rev=2c5ba7a72619935f0481f99
 
 [[package]]
 name = "filmcraft-ogg"
-version = "0.8.0"
+version = "0.12.0"
 
 [[package]]
 name = "filmcraft-opus"
@@ -4181,21 +4342,21 @@ source = "git+https://github.com/storytold/filmcraft?rev=2c5ba7a72619935f0481f99
 
 [[package]]
 name = "filmcraft-opus"
-version = "0.8.0"
+version = "0.12.0"
 
 [[package]]
 name = "filmcraft-platform"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-bitstream 0.8.0",
- "filmcraft-codecs 0.8.0",
- "filmcraft-color 0.8.0",
+ "filmcraft-bitstream 0.12.0",
+ "filmcraft-codecs 0.12.0",
+ "filmcraft-color 0.12.0",
  "filmcraft-export",
- "filmcraft-frame 0.8.0",
- "filmcraft-h264 0.8.0",
- "filmcraft-hevc 0.8.0",
- "filmcraft-isobmff 0.8.0",
- "filmcraft-time 0.8.0",
+ "filmcraft-frame 0.12.0",
+ "filmcraft-h264 0.12.0",
+ "filmcraft-hevc 0.12.0",
+ "filmcraft-isobmff 0.12.0",
+ "filmcraft-time 0.12.0",
  "libloading",
  "log",
  "objc2-core-foundation",
@@ -4221,12 +4382,12 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-project"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-color 0.8.0",
- "filmcraft-geom 0.8.0",
- "filmcraft-media 0.8.0",
- "filmcraft-time 0.8.0",
+ "filmcraft-color 0.12.0",
+ "filmcraft-geom 0.12.0",
+ "filmcraft-media 0.12.0",
+ "filmcraft-time 0.12.0",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -4244,26 +4405,26 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-prores"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-bitstream 0.8.0",
+ "filmcraft-bitstream 0.12.0",
  "rayon",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "filmcraft-render"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "filmcraft-audio-dsp",
  "filmcraft-captions",
- "filmcraft-color 0.8.0",
- "filmcraft-frame 0.8.0",
- "filmcraft-geom 0.8.0",
- "filmcraft-media 0.8.0",
- "filmcraft-project 0.8.0",
+ "filmcraft-color 0.12.0",
+ "filmcraft-frame 0.12.0",
+ "filmcraft-geom 0.12.0",
+ "filmcraft-media 0.12.0",
+ "filmcraft-project 0.12.0",
  "filmcraft-text",
- "filmcraft-time 0.8.0",
+ "filmcraft-time 0.12.0",
  "rayon",
  "serde",
  "serde_json",
@@ -4271,18 +4432,18 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-scopes"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-color 0.8.0",
+ "filmcraft-color 0.12.0",
  "serde",
 ]
 
 [[package]]
 name = "filmcraft-speech"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-project 0.8.0",
- "filmcraft-time 0.8.0",
+ "filmcraft-project 0.12.0",
+ "filmcraft-time 0.12.0",
  "rayon",
  "serde",
  "serde_json",
@@ -4291,9 +4452,9 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-text"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-color 0.8.0",
+ "filmcraft-color 0.12.0",
  "harfrust 0.12.0",
  "shared-craft-fonts",
  "skrifa 0.44.0",
@@ -4312,14 +4473,14 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-time"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "filmcraft-tts"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -4327,26 +4488,26 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-ui-egui"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "cpu-time",
  "craft-ui",
  "eframe",
  "egui",
  "filmcraft-audio-dsp",
- "filmcraft-color 0.8.0",
+ "filmcraft-color 0.12.0",
  "filmcraft-edit",
  "filmcraft-engine",
  "filmcraft-export",
- "filmcraft-frame 0.8.0",
- "filmcraft-geom 0.8.0",
+ "filmcraft-frame 0.12.0",
+ "filmcraft-geom 0.12.0",
  "filmcraft-gpu",
- "filmcraft-media 0.8.0",
- "filmcraft-project 0.8.0",
+ "filmcraft-media 0.12.0",
+ "filmcraft-project 0.12.0",
  "filmcraft-render",
  "filmcraft-scopes",
  "filmcraft-text",
- "filmcraft-time 0.8.0",
+ "filmcraft-time 0.12.0",
  "filmcraft-tts",
  "image",
  "log",
@@ -4361,7 +4522,7 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-vp8"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -4378,9 +4539,9 @@ dependencies = [
 
 [[package]]
 name = "filmcraft-vp9"
-version = "0.8.0"
+version = "0.12.0"
 dependencies = [
- "filmcraft-bitstream 0.8.0",
+ "filmcraft-bitstream 0.12.0",
  "rayon",
  "thiserror 2.0.21",
 ]
@@ -4551,19 +4712,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fontdb"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2660c5e9157bf76d2db1294e4a9feba604ef610819a3b591088d0d8392a3290f"
-dependencies = [
- "fontconfig-parser",
- "log",
- "memmap2",
- "slotmap",
- "tinyvec",
-]
-
-[[package]]
 name = "fontique"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4572,9 +4720,17 @@ dependencies = [
  "hashbrown 0.17.1",
  "linebender_resource_handle",
  "memmap2",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
+ "objc2-core-text",
+ "objc2-foundation 0.3.2",
  "parlance",
  "read-fonts 0.41.0",
+ "roxmltree 0.21.1",
  "smallvec",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+ "yeslogic-fontconfig-sys",
 ]
 
 [[package]]
@@ -5723,6 +5879,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hayro"
+version = "0.7.1"
+source = "git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d#ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d"
+dependencies = [
+ "bytemuck",
+ "hayro-interpret 0.7.0 (git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d)",
+ "image",
+ "kurbo 0.13.1",
+ "log",
+ "pic-scale",
+ "vello_cpu 0.0.8",
+]
+
+[[package]]
 name = "hayro-ccitt"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5737,8 +5907,6 @@ checksum = "2866f0d976e76497480b853d5e258dab6e4b89ecfe991124e08f15dfa8fd03ad"
 [[package]]
 name = "hayro-cmap"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24d285dc30731c8485de5fa732fbdf2b3affdf01e4da7c2135022ca6fa664bf6"
 dependencies = [
  "brotli",
  "hayro-postscript",
@@ -5763,21 +5931,29 @@ dependencies = [
 
 [[package]]
 name = "hayro-interpret"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac9df074ff163a63864cec9b0bf640ccbff8abf4e44481df7369ce0ac172ffbe"
+version = "0.7.0"
+source = "git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d#ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d"
 dependencies = [
  "bitflags 2.13.2",
  "hayro-cmap",
- "hayro-syntax 0.8.0",
+ "hayro-syntax 0.7.2 (git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d)",
  "kurbo 0.13.1",
  "moxcms 0.8.1",
  "phf 0.13.1",
  "rustc-hash 2.1.3",
  "siphasher",
- "skrifa 0.46.2",
+ "skrifa 0.47.0",
  "smallvec",
  "yoke 0.8.3",
+]
+
+[[package]]
+name = "hayro-jbig2"
+version = "0.3.0"
+source = "git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d#ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d"
+dependencies = [
+ "fearless_simd 0.4.1",
+ "hayro-ccitt 0.3.0",
 ]
 
 [[package]]
@@ -5798,15 +5974,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hayro-jpeg2000"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "122c5f834c37a2260b9c851bb8be685cf539b2a8b94b704a931ef7d2525d5835"
-dependencies = [
- "fearless_simd 1.1.0",
-]
-
-[[package]]
 name = "hayro-postscript"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5818,8 +5985,8 @@ version = "0.7.2"
 dependencies = [
  "flate2",
  "hayro-ccitt 0.3.0",
- "hayro-jbig2",
- "hayro-jpeg2000 0.3.5",
+ "hayro-jbig2 0.3.1",
+ "hayro-jpeg2000",
  "memchr",
  "rustc-hash 2.1.3",
  "smallvec",
@@ -5829,17 +5996,17 @@ dependencies = [
 
 [[package]]
 name = "hayro-syntax"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cdc818d8d265dcb42081d488f7599df4f73fb79e9d347ecedcd3c23809d2026"
+version = "0.7.2"
+source = "git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d#ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d"
 dependencies = [
  "flate2",
- "hayro-ccitt 0.4.0",
- "hayro-jbig2",
- "hayro-jpeg2000 0.4.1",
+ "hayro-ccitt 0.3.0",
+ "hayro-jbig2 0.3.0",
+ "hayro-jpeg2000",
  "memchr",
  "rustc-hash 2.1.3",
  "smallvec",
+ "stringprep",
  "zune-jpeg 0.5.15",
 ]
 
@@ -5850,7 +6017,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0b3db92c4917aad24ff30d61413a9a7509ae88b27aee1ae34eff881e1d2723a"
 dependencies = [
  "flate2",
- "hayro-syntax 0.7.2",
+ "hayro-syntax 0.7.2 (git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d)",
  "pdf-writer",
 ]
 
@@ -6259,6 +6426,11 @@ name = "imgref"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e44b0a4eaa4c82f441d50a963f2d5f05a787240aeee097597033e72accfd22f"
+
+[[package]]
+name = "indd"
+version = "0.1.0"
+source = "git+https://github.com/storytold/indd-utils?branch=main#136f973a9d5f1b3ef34e46e27f4a08af196efde7"
 
 [[package]]
 name = "indexmap"
@@ -6728,8 +6900,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 [[package]]
 name = "krilla"
 version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27da593198b20eeba65caeb73c2bbeec3e53ab08fa549898312ce81c4fce5e33"
+source = "git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d#ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d"
 dependencies = [
  "base64 0.22.1",
  "bumpalo",
@@ -6761,7 +6932,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1237d7c37b16ca9fbc2e72dde13a10d321f9a44aceee35c062bc0a43bfc7ce16"
 dependencies = [
  "flate2",
- "fontdb 0.23.0",
+ "fontdb",
  "krilla",
  "resvg 0.47.0",
  "skrifa 0.42.1",
@@ -6909,8 +7080,9 @@ dependencies = [
 
 [[package]]
 name = "lightcraft"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
+ "chrono",
  "eframe",
  "egui",
  "lightcraft-codecs",
@@ -6933,8 +7105,9 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-catalog"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
+ "chrono",
  "crc32fast",
  "lightcraft-develop",
  "lightcraft-meta",
@@ -6948,7 +7121,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-codecs"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "avif-serialize",
  "bytemuck",
@@ -6975,7 +7148,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-color"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "lightcraft-geom",
  "serde",
@@ -6983,7 +7156,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-denoise"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "faer-core",
  "lightcraft-denoise-core",
@@ -6999,7 +7172,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-denoise-core"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "lightcraft-raster",
  "miniz_oxide 0.8.9",
@@ -7013,7 +7186,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-develop"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "lightcraft-color",
  "lightcraft-geom",
@@ -7024,9 +7197,11 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-engine"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "ab_glyph",
+ "chrono",
+ "craft-docpath",
  "harfrust 0.12.0",
  "lightcraft-catalog",
  "lightcraft-codecs",
@@ -7048,6 +7223,7 @@ dependencies = [
  "lightcraft-raw",
  "lightcraft-scenes",
  "lightcraft-segment",
+ "lightcraft-slideshow",
  "log",
  "miniz_oxide 0.8.9",
  "rayon",
@@ -7061,7 +7237,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-faces"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "matrixmultiply",
  "ndarray",
@@ -7074,7 +7250,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-fetch"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "log",
  "rustls",
@@ -7085,7 +7261,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-geocode"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "miniz_oxide 0.8.9",
  "serde",
@@ -7093,19 +7269,20 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-geom"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "lightcraft-gpu"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "bytemuck",
  "lightcraft-color",
  "lightcraft-denoise",
  "lightcraft-develop",
+ "lightcraft-faces",
  "lightcraft-geom",
  "lightcraft-pipeline",
  "lightcraft-raster",
@@ -7116,14 +7293,14 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-inpaint"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
 name = "lightcraft-lensdb"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "lightcraft-develop",
  "lightcraft-geom",
@@ -7132,7 +7309,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-merge"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "lightcraft-codecs",
  "lightcraft-color",
@@ -7148,8 +7325,9 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-meta"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
+ "chrono",
  "lightcraft-geom",
  "lightcraft-tiff",
  "quick-xml 0.38.4",
@@ -7158,7 +7336,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-pipeline"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "lightcraft-color",
  "lightcraft-develop",
@@ -7172,7 +7350,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-preview"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "jpeg-encoder 0.7.1",
  "lightcraft-raster",
@@ -7184,7 +7362,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-raster"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "lightcraft-color",
  "lightcraft-geom",
@@ -7194,8 +7372,9 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-raw"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
+ "jpeg-encoder 0.7.1",
  "jxl-oxide",
  "lightcraft-color",
  "lightcraft-geom",
@@ -7212,7 +7391,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-scenes"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "lightcraft-color",
  "lightcraft-raster",
@@ -7222,7 +7401,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-segment"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "candle-core",
  "candle-nn",
@@ -7234,12 +7413,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "lightcraft-slideshow"
+version = "0.13.0"
+dependencies = [
+ "lightcraft-raster",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lightcraft-sysmem"
-version = "0.8.0"
+version = "0.13.0"
 
 [[package]]
 name = "lightcraft-tiff"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -7247,7 +7435,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-ui-egui"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "craft-ui",
  "egui",
@@ -7260,6 +7448,7 @@ dependencies = [
  "lightcraft-pipeline",
  "lightcraft-preview",
  "lightcraft-raster",
+ "lightcraft-slideshow",
  "log",
  "serde",
  "serde_json",
@@ -7567,9 +7756,9 @@ dependencies = [
 
 [[package]]
 name = "muda"
-version = "0.21.1"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a7b000cca0783af26837fe2ebd9ddf1c42279463c085b97622ee1d2f444b89e"
+checksum = "4340e89c178916e62879c5c36b7f699019369be413e496178a6983ce91b8bc03"
 dependencies = [
  "crossbeam-channel",
  "dpi",
@@ -7598,7 +7787,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a616d2fb8c89516ac2723a581f69d6c18576046bed761bd6b305e5618e6ae130"
 dependencies = [
  "arrayvec",
- "bit-set",
+ "bit-set 0.10.0",
  "bitflags 2.13.2",
  "cfg-if",
  "cfg_aliases",
@@ -8722,8 +8911,10 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
+ "chrono",
+ "craft-quit",
  "eframe",
  "egui",
  "fmv-macos-events",
@@ -8732,6 +8923,7 @@ dependencies = [
  "pdfcraft-engine",
  "pdfcraft-render",
  "pdfcraft-ui-egui",
+ "raw-window-handle",
  "rustls-native-certs",
  "serde_json",
  "uds_windows",
@@ -8745,7 +8937,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-a11y"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
@@ -8757,7 +8949,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-annot"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "pdfcraft-cos",
  "pdfcraft-fonts",
@@ -8767,7 +8959,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-audit"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
@@ -8778,14 +8970,13 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-automation"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "pdfcraft-cos",
  "pdfcraft-engine",
  "pdfcraft-organize",
  "pdfcraft-platform",
  "pdfcraft-render",
- "png 0.18.1",
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
@@ -8793,19 +8984,21 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-compare"
-version = "0.8.0"
+version = "0.13.0"
 
 [[package]]
 name = "pdfcraft-content"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
+ "hayro-syntax 0.7.2",
  "pdfcraft-cos",
 ]
 
 [[package]]
 name = "pdfcraft-cos"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
+ "chrono",
  "pdfcraft-crypt",
  "pdfcraft-filters",
  "thiserror 2.0.21",
@@ -8813,7 +9006,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-create"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "encoding_rs",
  "image",
@@ -8828,7 +9021,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-crypt"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "aes 0.9.3",
  "md-5 0.11.0",
@@ -8839,7 +9032,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-edit"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "kurbo 0.13.1",
  "pdfcraft-annot",
@@ -8853,9 +9046,10 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-engine"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "chrono",
+ "craft-docpath",
  "icu_properties",
  "idna",
  "image",
@@ -8885,19 +9079,21 @@ dependencies = [
  "pdfcraft-xfdf",
  "png 0.18.1",
  "thiserror 2.0.21",
+ "tiff",
+ "unicode-segmentation",
  "url",
 ]
 
 [[package]]
 name = "pdfcraft-export"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "flate2",
 ]
 
 [[package]]
 name = "pdfcraft-filters"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "flate2",
  "thiserror 2.0.21",
@@ -8905,7 +9101,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-fonts"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "harfrust 0.12.0",
  "pdfcraft-cos",
@@ -8916,7 +9112,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-forms"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
@@ -8927,18 +9123,19 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-geom"
-version = "0.8.0"
+version = "0.13.0"
 
 [[package]]
 name = "pdfcraft-js"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "boa_engine",
+ "chrono",
 ]
 
 [[package]]
 name = "pdfcraft-measure"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "pdfcraft-annot",
  "pdfcraft-content",
@@ -8950,14 +9147,14 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-model"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "pdfcraft-cos",
 ]
 
 [[package]]
 name = "pdfcraft-ocr"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "ocrs",
  "pdfcraft-fonts",
@@ -8967,7 +9164,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-optimize"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "image",
  "pdfcraft-annot",
@@ -8979,7 +9176,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-organize"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
@@ -8988,26 +9185,29 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-platform"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "async-channel",
  "futures-lite",
+ "rustix 1.1.5",
  "zbus",
 ]
 
 [[package]]
 name = "pdfcraft-preflight"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
+ "pdfcraft-content",
  "pdfcraft-cos",
  "pdfcraft-model",
+ "roxmltree 0.20.0",
 ]
 
 [[package]]
 name = "pdfcraft-print"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
- "craft-print 0.1.0 (git+https://github.com/storytold/craft-libs?rev=f03ec27ab2c405969428512178f746183cd55ca0)",
+ "craft-print 0.1.0 (git+https://github.com/storytold/craft-libs?rev=666c358065261a2816b376fa3bb10538dbf53040)",
  "pdfcraft-content",
  "pdfcraft-cos",
  "pdfcraft-model",
@@ -9016,7 +9216,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-redact"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "pdfcraft-annot",
  "pdfcraft-content",
@@ -9025,16 +9225,17 @@ dependencies = [
  "pdfcraft-fonts",
  "pdfcraft-forms",
  "pdfcraft-model",
+ "pdfcraft-xfa",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "pdfcraft-render"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "bytemuck",
  "getrandom 0.4.3",
- "hayro",
+ "hayro 0.7.1",
  "hayro-syntax 0.7.2",
  "kurbo 0.13.1",
  "log",
@@ -9047,7 +9248,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-sign"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "aes 0.9.3",
  "aws-lc-rs",
@@ -9055,6 +9256,7 @@ dependencies = [
  "bp256",
  "bp384",
  "cbc",
+ "chrono",
  "crypto-bigint 0.7.5",
  "des",
  "ecdsa 0.17.0",
@@ -9081,15 +9283,19 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-ui-egui"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
+ "block2 0.6.2",
  "bytemuck",
+ "chrono",
+ "craft-quit",
  "craft-ui",
  "eframe",
  "egui",
  "egui_extras",
+ "fontconfig-parser",
  "getrandom 0.4.3",
  "js-sys",
  "log",
@@ -9102,6 +9308,7 @@ dependencies = [
  "pdfcraft-model",
  "pdfcraft-platform",
  "pdfcraft-render",
+ "plist",
  "png 0.18.1",
  "pollster 1.0.1",
  "rfd",
@@ -9120,7 +9327,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-xfa"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -9134,7 +9341,7 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-xfdf"
-version = "0.8.0"
+version = "0.13.0"
 dependencies = [
  "pdfcraft-annot",
  "pdfcraft-cos",
@@ -9289,10 +9496,11 @@ dependencies = [
 
 [[package]]
 name = "photocraft"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "arboard",
  "async-io",
+ "chrono",
  "core-graphics2",
  "dispatch2",
  "eframe",
@@ -9322,6 +9530,7 @@ dependencies = [
  "rfd",
  "ron",
  "serde_json",
+ "tempfile",
  "winit",
  "winresource",
  "winsafe",
@@ -9333,7 +9542,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-affinity"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "crc32fast",
  "flate2",
@@ -9342,7 +9551,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-algo"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -9354,7 +9563,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-automation"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "base64 0.22.1",
  "cap-std",
@@ -9364,7 +9573,6 @@ dependencies = [
  "photocraft-doc",
  "photocraft-engine",
  "photocraft-format",
- "photocraft-geom",
  "photocraft-io",
  "rmcp",
  "schemars",
@@ -9376,14 +9584,14 @@ dependencies = [
 
 [[package]]
 name = "photocraft-cms"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
 name = "photocraft-codecs"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "exr",
  "flate2",
@@ -9402,7 +9610,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-color"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-cms",
  "serde",
@@ -9410,7 +9618,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-compose"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-color",
  "photocraft-doc",
@@ -9422,7 +9630,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-doc"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -9433,9 +9641,10 @@ dependencies = [
 
 [[package]]
 name = "photocraft-engine"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "blake3",
+ "chrono",
  "craft-print 0.1.0 (git+https://github.com/storytold/craft-libs?rev=3d37da389a3618ab9b76109da11416e9ca4ea719)",
  "flate2",
  "photocraft-algo",
@@ -9447,6 +9656,7 @@ dependencies = [
  "photocraft-format",
  "photocraft-geom",
  "photocraft-io",
+ "photocraft-ipp",
  "photocraft-ops",
  "photocraft-paint",
  "photocraft-plugins",
@@ -9455,19 +9665,22 @@ dependencies = [
  "photocraft-text",
  "photocraft-vector",
  "rayon",
- "roxmltree 0.20.0",
+ "roxmltree 0.21.1",
+ "same-file",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "winsafe",
 ]
 
 [[package]]
 name = "photocraft-format"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "blake3",
  "crc32fast",
+ "exacl",
  "flate2",
  "libc",
  "photocraft-codecs",
@@ -9480,18 +9693,19 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "winsafe",
 ]
 
 [[package]]
 name = "photocraft-geom"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "photocraft-gpu"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "half",
  "log",
@@ -9506,9 +9720,10 @@ dependencies = [
 
 [[package]]
 name = "photocraft-io"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "blake3",
+ "craft-docpath",
  "flate2",
  "photocraft-affinity",
  "photocraft-algo",
@@ -9526,21 +9741,25 @@ dependencies = [
  "photocraft-text",
  "photocraft-vector",
  "resvg 0.45.1",
- "roxmltree 0.20.0",
+ "roxmltree 0.21.1",
  "serde_json",
  "thiserror 2.0.21",
 ]
 
 [[package]]
+name = "photocraft-ipp"
+version = "0.15.1"
+
+[[package]]
 name = "photocraft-ops"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-doc",
 ]
 
 [[package]]
 name = "photocraft-paint"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -9550,12 +9769,13 @@ dependencies = [
 
 [[package]]
 name = "photocraft-plugins"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
  "photocraft-raster",
  "rayon",
+ "rustix 1.1.5",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -9564,7 +9784,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-psd"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "flate2",
  "thiserror 2.0.21",
@@ -9572,16 +9792,17 @@ dependencies = [
 
 [[package]]
 name = "photocraft-raster"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
+ "rayon",
  "serde",
 ]
 
 [[package]]
 name = "photocraft-raw"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "flate2",
  "jxl-oxide",
@@ -9592,7 +9813,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-tablet"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "block2 0.6.2",
  "objc2 0.6.4",
@@ -9603,7 +9824,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-text"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "flate2",
  "parley",
@@ -9612,13 +9833,14 @@ dependencies = [
  "photocraft-geom",
  "photocraft-psd",
  "photocraft-raster",
+ "rayon",
  "shared-craft-fonts",
  "skrifa 0.44.0",
 ]
 
 [[package]]
 name = "photocraft-ui-egui"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "base64 0.22.1",
  "craft-print 0.1.0 (git+https://github.com/storytold/craft-libs?rev=3d37da389a3618ab9b76109da11416e9ca4ea719)",
@@ -9650,12 +9872,13 @@ dependencies = [
  "serde_json",
  "sys-locale",
  "toml 1.1.7+spec-1.1.0",
+ "unicode-bidi",
  "winsafe",
 ]
 
 [[package]]
 name = "photocraft-vector"
-version = "0.9.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-color",
  "photocraft-doc",
@@ -9805,6 +10028,19 @@ name = "plain"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
+
+[[package]]
+name = "plist"
+version = "1.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "327a4cb2ad49dc48adfdc9da89e22c64d488b508c67a044d71ba729e4521a285"
+dependencies = [
+ "base64 0.23.1",
+ "indexmap",
+ "quick-xml 0.42.0",
+ "serde",
+ "time",
+]
 
 [[package]]
 name = "png"
@@ -10166,6 +10402,15 @@ name = "quick-xml"
 version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41b1177fdf999d2321d3fb46ff47159d9c1fb9ad66a4879f8c50a0b504615e9b"
 dependencies = [
  "memchr",
 ]
@@ -11312,6 +11557,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "sctk-adwaita"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6277f0217056f77f1d8f49f2950ac6c278c0d607c45f5ee99328d792ede24ec"
+dependencies = [
+ "log",
+ "smithay-client-toolkit 0.19.2",
+ "tiny-skia 0.11.4",
+]
+
+[[package]]
 name = "sec1"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11867,16 +12123,6 @@ checksum = "819ab7d62b1d3e72d9d9dea5650bac30424f9111364bb94928dbf5ecad1baa68"
 dependencies = [
  "bytemuck",
  "read-fonts 0.41.0",
-]
-
-[[package]]
-name = "skrifa"
-version = "0.46.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4febebda507fb889c545a37a135517769d1391941013561292897961d1887d6"
-dependencies = [
- "bytemuck",
- "read-fonts 0.43.3",
 ]
 
 [[package]]
@@ -13195,7 +13441,7 @@ dependencies = [
  "base64 0.22.1",
  "data-url",
  "flate2",
- "fontdb 0.23.0",
+ "fontdb",
  "imagesize 0.13.0",
  "kurbo 0.11.3",
  "log",
@@ -13222,7 +13468,7 @@ dependencies = [
  "base64 0.22.1",
  "data-url",
  "flate2",
- "fontdb 0.23.0",
+ "fontdb",
  "imagesize 0.14.0",
  "kurbo 0.13.1",
  "log",
@@ -13247,11 +13493,8 @@ version = "0.48.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "977d0a4abdef933f424a99fe09f95576e089b90aebc6f016a3bc813762493e91"
 dependencies = [
- "base64 0.23.1",
  "data-url",
  "flate2",
- "fontdb 0.24.0",
- "harfrust 0.12.0",
  "imagesize 0.15.0",
  "kurbo 0.13.1",
  "log",
@@ -13259,14 +13502,9 @@ dependencies = [
  "roxmltree 0.21.1",
  "simplecss",
  "siphasher",
- "skrifa 0.44.0",
  "strict-num",
  "svgtypes 0.16.1",
  "tiny-skia-path 0.12.0",
- "unicode-bidi",
- "unicode-script",
- "unicode-vo",
- "xmlwriter",
 ]
 
 [[package]]
@@ -13312,12 +13550,14 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "arboard",
  "block2 0.6.2",
+ "chrono",
  "clipboard-win",
  "craft-print 0.1.0 (git+https://github.com/storytold/craft-libs?rev=d991bf6792f8ade99c51358bf3c1d902c8cd96b5)",
+ "craft-window",
  "eframe",
  "egui",
  "image",
@@ -13336,6 +13576,7 @@ dependencies = [
  "vectorcraft-render",
  "vectorcraft-text",
  "vectorcraft-ui-egui",
+ "wayland-backend",
  "wayland-client",
  "wayland-protocols",
  "webbrowser",
@@ -13343,11 +13584,12 @@ dependencies = [
  "winit",
  "winresource",
  "winsafe",
+ "zbus",
 ]
 
 [[package]]
 name = "vectorcraft-affinity"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "crc32fast",
  "flate2",
@@ -13357,7 +13599,7 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-brush"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "kurbo 0.13.1",
  "serde",
@@ -13369,7 +13611,7 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-cad"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "image",
  "kurbo 0.13.1",
@@ -13384,7 +13626,7 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-color"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "kurbo 0.13.1",
  "moxcms 0.8.1",
@@ -13395,8 +13637,10 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-doc"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
+ "chrono",
+ "hayro-ccitt 0.3.0",
  "image",
  "kurbo 0.13.1",
  "serde",
@@ -13410,8 +13654,9 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-effects"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
+ "image",
  "kurbo 0.13.1",
  "serde_json",
  "vectorcraft-doc",
@@ -13424,12 +13669,14 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-engine"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
+ "craft-docpath",
  "flate2",
  "image",
  "kurbo 0.13.1",
  "log",
+ "roxmltree 0.21.1",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -13455,9 +13702,10 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-eps"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "flate2",
+ "hayro-ccitt 0.3.0",
  "image",
  "kurbo 0.13.1",
  "ruzstd",
@@ -13475,7 +13723,7 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-format"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "flate2",
  "rustix 1.1.5",
@@ -13487,7 +13735,7 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-geom"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "kurbo 0.13.1",
  "serde",
@@ -13496,7 +13744,7 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-metafile"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "image",
  "kurbo 0.13.1",
@@ -13510,7 +13758,7 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-pathops"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "kurbo 0.13.1",
  "linesweeper 0.5.0",
@@ -13520,18 +13768,18 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-pdf"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "aes 0.8.4",
+ "chrono",
+ "craft-pdf 0.1.0 (git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d)",
  "flate2",
- "hayro-interpret 0.8.0",
- "hayro-syntax 0.8.0",
  "image",
  "jpeg-encoder 0.6.1",
- "krilla",
  "kurbo 0.13.1",
  "log",
  "md-5 0.10.6",
+ "roxmltree 0.21.1",
  "serde",
  "sha2 0.10.9",
  "skrifa 0.47.0",
@@ -13548,7 +13796,7 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-plugins"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -13561,7 +13809,7 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-render"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "flate2",
  "gif 0.14.2",
@@ -13581,12 +13829,13 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-scriptcheck"
-version = "0.11.0"
+version = "0.16.0"
 
 [[package]]
 name = "vectorcraft-svg"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
+ "craft-docpath",
  "flate2",
  "image",
  "kurbo 0.13.1",
@@ -13605,7 +13854,7 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-text"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "harfrust 0.13.3",
  "icu_segmenter",
@@ -13620,12 +13869,13 @@ dependencies = [
  "unicode-segmentation",
  "vectorcraft-doc",
  "vectorcraft-geom",
+ "vello_cpu 0.2.0",
  "windows-registry",
 ]
 
 [[package]]
 name = "vectorcraft-three-d"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "vectorcraft-geom",
  "vectorcraft-pathops",
@@ -13633,13 +13883,14 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-tools"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "kurbo 0.13.1",
  "serde",
  "serde_json",
  "vectorcraft-color",
  "vectorcraft-doc",
+ "vectorcraft-effects",
  "vectorcraft-geom",
  "vectorcraft-pathops",
  "vectorcraft-text",
@@ -13647,7 +13898,7 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-trace"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
  "image",
  "kurbo 0.13.1",
@@ -13658,13 +13909,15 @@ dependencies = [
 
 [[package]]
 name = "vectorcraft-ui-egui"
-version = "0.11.0"
+version = "0.16.0"
 dependencies = [
+ "bytemuck",
  "craft-ui",
  "egui",
  "egui_extras",
  "image",
  "log",
+ "rustix 1.1.5",
  "serde",
  "serde_json",
  "toml 1.1.7+spec-1.1.0",
@@ -13690,8 +13943,6 @@ dependencies = [
 [[package]]
 name = "vello_common"
 version = "0.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3361bff7f7d82c0c496b92048db83846691f0e844cc28dee92b1c824291b55ee"
 dependencies = [
  "bytemuck",
  "fearless_simd 0.4.1",
@@ -14242,8 +14493,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "14c018fce9b6270aa203c2fdd56f3cce996713534bd757e4ea58c8560b121f14"
 dependencies = [
  "arrayvec",
- "bit-set",
- "bit-vec",
+ "bit-set 0.10.0",
+ "bit-vec 0.9.1",
  "bitflags 2.13.2",
  "bytemuck",
  "cfg_aliases",
@@ -14315,7 +14566,7 @@ dependencies = [
  "android_system_properties",
  "arrayvec",
  "ash",
- "bit-set",
+ "bit-set 0.10.0",
  "bitflags 2.13.2",
  "block2 0.6.2",
  "bytemuck",
@@ -14839,6 +15090,7 @@ dependencies = [
  "raw-window-handle",
  "redox_syscall 0.4.1",
  "rustix 0.38.44",
+ "sctk-adwaita",
  "smithay-client-toolkit 0.19.2",
  "smol_str",
  "tracing",
@@ -15163,6 +15415,17 @@ name = "yansi"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
+
+[[package]]
+name = "yeslogic-fontconfig-sys"
+version = "6.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d8b8abf912b9a29ff112e1671c97c33636903d13a69712037190e6805af4f76"
+dependencies = [
+ "dlib",
+ "once_cell",
+ "pkg-config",
+]
 
 [[package]]
 name = "yoke"

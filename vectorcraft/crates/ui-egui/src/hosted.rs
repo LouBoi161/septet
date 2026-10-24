@@ -125,6 +125,8 @@ pub(crate) fn with_accent(mut t: crate::theme::Tokens) -> crate::theme::Tokens {
         t.accent = recolor(t.accent, from, to);
         t.accent_strong = recolor(t.accent_strong, from, to);
         t.row_selected = recolor(t.row_selected, from, to);
+        t.flyout_active = recolor(t.flyout_active, from, to);
+        t.tool_active = recolor(t.tool_active, from, to);
     }
     if contrast() {
         t.text_dim = t.text_dim.lerp_to_gamma(t.text, 0.6);

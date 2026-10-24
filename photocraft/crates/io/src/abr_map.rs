@@ -290,6 +290,7 @@ impl Mapper<'_> {
             control,
             fade_steps: num(d, "fStp").map_or(25, |v| v.clamp(1.0, 9999.0) as u32),
             minimum: pct(d, "Mnm ").unwrap_or(0.0).clamp(0.0, 1.0),
+            ..Dynamic::default()
         }
     }
 
@@ -472,7 +473,8 @@ impl Mapper<'_> {
                 tilt_y: (num(d, "brushPoseTiltY").unwrap_or(0.0) * 0.9).clamp(-90.0, 90.0) as f32,
                 rotation: num(d, "brushPoseAngle").unwrap_or(0.0).rem_euclid(360.0) as f32,
                 pressure: pct(d, "brushPosePressure").unwrap_or(1.0).clamp(0.0, 1.0),
-                override_tilt: boolean(d, "overridePoseTiltX").unwrap_or(false) || boolean(d, "overridePoseTiltY").unwrap_or(false),
+                override_tilt_x: boolean(d, "overridePoseTiltX").unwrap_or(false),
+                override_tilt_y: boolean(d, "overridePoseTiltY").unwrap_or(false),
                 override_rotation: boolean(d, "overridePoseAngle").unwrap_or(false),
                 override_pressure: boolean(d, "overridePosePressure").unwrap_or(false),
             };

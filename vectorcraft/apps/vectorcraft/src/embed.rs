@@ -82,8 +82,15 @@ impl Embedded {
                 desktop::open_url(url);
             }
         }));
-        let mut app = VectorcraftApp::new(Session::new(), services);
+        let mut session = Session::new();
+        // The profiles loaded before come back before the preferences name any of them.
+        prefs::attach_profile_store(&mut session);
+        prefs::attach_plugin_store(&mut session);
+        let mut app = VectorcraftApp::new(session, services);
         prefs::load_prefs(&mut app, prefs::read_prefs());
+        // The saved PDF presets live in their own folder, which takes over from the copy the
+        // preferences file used to hold.
+        prefs::attach_pdf_preset_store(&mut app.session);
         desktop::set_user_folders(&mut app);
         // The device is the host's, shared by every app it shows: it handles losing it.
         if let Some(rs) = render_state {

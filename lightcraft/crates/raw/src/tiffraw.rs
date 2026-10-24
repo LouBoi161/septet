@@ -156,7 +156,15 @@ fn decode_chunk(data: &[u8], info: &ImageInfo, c: &Chunk, order: ByteOrder, pack
         return Err(RawError::Limit("chunk too large"));
     }
     match info.compression {
-        comp::NONE => unpack_chunk(src, order, packing, cw, ch, cpp, bits, float, 1),
+        comp::NONE => {
+            // uncompressed: missing rows are filled with zeros, but a chunk holding a small fraction of what its
+            // samples need is no picture: refused before the nominal chunk is allocated (issue #1512)
+            let need = (n as u64).saturating_mul(u64::from(bits)) / 8;
+            if (src.len() as u64).saturating_mul(64) < need {
+                return Err(RawError::Corrupt(format!("an uncompressed chunk of {n} samples has only {} bytes", src.len())));
+            }
+            unpack_chunk(src, order, packing, cw, ch, cpp, bits, float, 1)
+        }
         comp::JPEG => {
             let f = ljpeg::decode(src, n.saturating_mul(2).max(1 << 16))?;
             if f.data.len() < n {
@@ -184,8 +192,12 @@ fn decode_chunk(data: &[u8], info: &ImageInfo, c: &Chunk, order: ByteOrder, pack
         }
         comp::ADOBE_DEFLATE | comp::DEFLATE => {
             let bytes_per = if float { bits.div_ceil(8) as usize } else { 0 };
-            let row_bytes = if float { cw * cpp * bytes_per } else { (cw * cpp * bits as usize).div_ceil(8) };
-            let raw = inflate(src, row_bytes * ch)?;
+            // row bytes in u64: a wrapping `cw · cpp · …` in usize could come out small on 32-bit targets and slip past the gate
+            let row_bytes = if float { cw as u64 * cpp as u64 * bytes_per as u64 } else { (cw as u64 * cpp as u64 * bits as u64).div_ceil(8) };
+            // the gate caps at MAX_SAMPLES (≤ 2^30), so the `usize` cast below is lossless on 32-bit targets too
+            let inflate_len =
+                crate::checked_pixel_count(row_bytes, ch as u64).ok_or_else(|| RawError::Corrupt("bad TIFF chunk dimensions".into()))?;
+            let raw = inflate(src, inflate_len as usize)?;
             unpack_chunk(&raw, order, packing, cw, ch, cpp, bits, float, info.predictor)
         }
         comp::JPEG_XL => jxl_chunk(src, cw, ch, vw, vh, cpp, bits, float),
@@ -217,7 +229,7 @@ fn jxl_chunk_check(src: &[u8], cw: usize, ch: usize, vw: usize, vh: usize, cpp: 
 }
 
 /// Decode one baseline JPEG chunk to 8-bit samples: (samples, width, height, channels).
-fn lossy_jpeg(src: &[u8], cpp: usize) -> Result<(Vec<u8>, usize, usize, usize)> {
+pub(crate) fn lossy_jpeg(src: &[u8], cpp: usize) -> Result<(Vec<u8>, usize, usize, usize)> {
     use zune_core::bytestream::ZCursor;
     use zune_core::colorspace::ColorSpace;
     use zune_core::options::DecoderOptions;
@@ -403,6 +415,31 @@ mod lossy_tests {
         // the second strip starts past the end of the file
         let past_end = strip_info(comp::NONE, vec![0, 100], vec![8, 8]);
         assert!(read_image(&file, &past_end, ByteOrder::Little, Packing::Msb).is_err());
+    }
+
+    /// A small image whose uncompressed tile claims to be enormous (16384 x 16384 nominal, a few bytes of data) is
+    /// refused before that tile is allocated (issue #1512); an edge tile stored at its full nominal size decodes.
+    #[test]
+    fn a_huge_nominal_uncompressed_tile_with_little_data_is_refused() {
+        let info = |tile: u32, bytes: u64| ImageInfo {
+            width: 8,
+            height: 8,
+            bits_per_sample: vec![16],
+            samples_per_pixel: 1,
+            compression: comp::NONE,
+            photometric: 32803,
+            planar: 1,
+            predictor: 1,
+            sample_format: 1,
+            new_subfile_type: 0,
+            layout: Layout::Tiles { tile_width: tile, tile_height: tile },
+            offsets: vec![0],
+            byte_counts: vec![bytes],
+        };
+        let small = vec![1u8; 2 * 16 * 16];
+        assert!(read_image(&small, &info(16, small.len() as u64), ByteOrder::Little, Packing::Msb).is_ok());
+        let data = vec![1u8; 4096];
+        assert!(matches!(read_image(&data, &info(16384, data.len() as u64), ByteOrder::Little, Packing::Msb), Err(RawError::Corrupt(_))));
     }
 
     /// A lossless-JPEG tile may be coded only as tall as the part inside the image, never shorter.

@@ -60,7 +60,7 @@ pub fn paint_app_icon(ui: &egui::Ui, rect: Rect) {
     let tex = tex.or_else(|| {
         let pm = designcraft_render::images::decoded(BYTES.get_or_init(|| Arc::new(APP_ICON_PNG.to_vec())), 0)?;
         let ci = egui::ColorImage::from_rgba_premultiplied([pm.width() as usize, pm.height() as usize], pm.data_as_u8_slice());
-        let t = ctx.load_texture("designcraft_app_icon", ci, egui::TextureOptions::LINEAR);
+        let t = crate::widgets::load_texture(ctx, "designcraft_app_icon", ci, egui::TextureOptions::LINEAR);
         ctx.data_mut(|d| d.insert_temp(key, t.clone()));
         Some(t)
     });
@@ -115,8 +115,18 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
     }
     let t = Tokens::get(ctx);
     let mut open: Option<&'static str> = None;
-    let resp = egui::Modal::new(egui::Id::new("about")).show(ctx, |ui| {
+    let area = egui::Id::new("about");
+    let instance = area.with("placement");
+    let resp = crate::modal_drag::modal(ctx, area, instance).show(ctx, |ui| {
         ui.set_width(if app.ui.about_tab == 0 { 460.0 } else { 640.0 });
+        // The tab row is the title row. The tabs register after the drag area, so they stay clickable.
+        let margin = egui::Frame::popup(ui.style()).inner_margin;
+        let top = ui.cursor().top();
+        let title_row = Rect::from_min_max(
+            pos2(ui.max_rect().left() - margin.leftf(), top - margin.topf()),
+            pos2(ui.max_rect().right() + margin.rightf(), top + ui.spacing().interact_size.y),
+        );
+        crate::modal_drag::title_drag(ui, instance, title_row);
         ui.horizontal(|ui| {
             for (i, l) in ABOUT_TABS.iter().enumerate() {
                 let i = i as u8;
@@ -131,9 +141,9 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
             ui.allocate_ui_with_layout(vec2(ui.available_width(), h), egui::Layout::top_down(egui::Align::Min), |ui| {
                 ui.set_min_height(h);
                 if app.ui.about_tab == 1 {
-                    crate::credits::contributors_ui(ui);
+                    crate::credits::contributors_ui(ui, &app.ui.language);
                 } else {
-                    crate::credits::models_ui(ui);
+                    crate::credits::models_ui(ui, &app.ui.language);
                 }
             });
             ui.separator();
@@ -193,7 +203,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                 let w = if community { 330.0 } else { 160.0 };
                 ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
                 for &(text, key) in row {
-                    if link(ui, text, links::get(key).unwrap_or_default(), t.accent) {
+                    if link(ui, crate::i18n::tr(&app.ui.language, text), links::get(key).unwrap_or_default(), t.accent) {
                         open = Some(key);
                     }
                     ui.add_space(6.0);
@@ -224,6 +234,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                 ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
                 for (slug, name, what) in SIBLINGS {
                     let url = format!("{}/apps/{slug}", links::WEBSITE);
+                    let what = crate::i18n::tr(&app.ui.language, what);
                     let hover = if community { format!("{what} — {url}") } else { what.to_string() };
                     let b = ui.add(egui::Button::new(egui::RichText::new(*name).size(12.0)).corner_radius(10.0)).on_hover_text(hover);
                     if b.clicked() {
