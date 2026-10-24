@@ -4,7 +4,8 @@ Stand: 2026-10-24. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` 
 erledigt (MR !2 am 2026-10-14 gemergt), **Phase A gemergt** (MR !3 am 2026-10-22: A1–A5 und H0 fertig; der Rest von A4,
 Lightcraft und hoher Kontrast, gemergt mit MR !5 am 2026-10-24), dritter Abgleich gemergt (MR !4 am 2026-10-22), Phase H
 (ComfyUI) gemergt (MR !6 am 2026-10-24), vierter Abgleich gemergt (MR !7 am 2026-10-24); **Phase B begonnen:
-WordCraft gemergt** (MR !8 am 2026-10-24), als Nächstes DeckCraft. Grundlage: Untersuchung der Upstream-Repos
+WordCraft gemergt** (MR !8 am 2026-10-24); **Apps installieren/deinstallieren und Updates in der App** (2026-10-25,
+siehe unten), danach Release 0.3.0; als Nächstes DeckCraft. Grundlage: Untersuchung der Upstream-Repos
 (`storytold/wordcraft`, `deckcraft`, `gridcraft`, `cadcraft`, `soundcraft`, `craft-launcher`, alle v0.4.0 vom
 2026-10-10) und des Septet-Codes.
 
@@ -77,6 +78,21 @@ AppImage). Er lädt keine Module in eine laufende App. Seine Bausteine sind trot
   gelöscht: CJK- und Arabisch-Schriften, Instrumente und Loops für den Sound-Einfachmodus, Vorlagen.
   Das macht den Download kleiner, ohne die Architektur zu brechen.
 - Optional später: **Editionen** als getrennte Downloads (z. B. „Office“ und „Studio“), gebaut aus denselben Features.
+
+**Stand 2026-10-25 (User: „inapp updaten, installen und uninstallen“, Variante „Apps verwalten“ gewählt):**
+- Home › Apps (`septet/src/manage.rs`): Apps installieren und deinstallieren. Deinstalliert = aus Home, „+“,
+  „Öffnen mit“, Dateitypen und Claudes Werkzeugen raus (`kinds::set_uninstalled`, gespeichert unter `septet/apps`);
+  eine offene App wird vorher geschlossen (mit der üblichen Nachfrage). Einstellungen und zuletzt geöffnete Dateien
+  bleiben. Der Download wird dadurch nicht kleiner (alle Apps bleiben im Programm).
+- Updates (`septet/src/update.rs`): fragt GitHubs `releases/latest` (einmal am Tag, abschaltbar, lädt nichts ohne
+  Klick), lädt die Datei für die Installationsart, prüft SHA-256 gegen `SHA256SUMS.txt`, ersetzt AppImage,
+  tar.gz-Programm, portable `septet.exe` (alte wird `septet.exe.old`) oder `Septet.app` sofort; der Windows-Installer
+  läuft still beim Beenden (`septet.iss`: `/RELAUNCH=1` startet Septet danach wieder). Aus dem Quellcode gebaut oder in
+  einem nicht beschreibbaren Ordner: keine Updates, die Seite sagt warum. Kein eigener Code aus `craft-launcher`.
+- Geprüft: Unit-Tests (Versionen, Prüfsummen, Installationsarten, tar/zip ersetzen), Autotest `manage` auf Xvfb mit
+  Schein-Release (Linux tar.gz: gefunden, geladen, ersetzt, neu gestartet; falsche Prüfsumme: Abbruch, nichts
+  ersetzt). **Nicht geprüft:** AppImage, Windows (Installer, portable) und macOS echt – erst mit einem Release nach
+  0.3.0 möglich.
 
 ## Upstream-Updates von ArtCraft
 

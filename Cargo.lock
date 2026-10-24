@@ -11681,7 +11681,7 @@ checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "septet"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -11696,6 +11696,7 @@ dependencies = [
  "filmcraft",
  "filmcraft-text",
  "filmcraft-ui-egui",
+ "flate2",
  "image",
  "libc",
  "lightcraft",
@@ -11714,6 +11715,8 @@ dependencies = [
  "rustls-native-certs",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tar",
  "ureq",
  "uuid",
  "vectorcraft",
@@ -11726,6 +11729,7 @@ dependencies = [
  "wordcraft-fonts",
  "wordcraft-ui-egui",
  "x11rb",
+ "zip 3.0.0",
 ]
 
 [[package]]

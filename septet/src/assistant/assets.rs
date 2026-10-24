@@ -69,17 +69,22 @@ fn allowed(url: &str) -> bool {
     SOURCES.iter().any(|(h, prefix)| host.eq_ignore_ascii_case(h) && path.starts_with(prefix))
 }
 
-fn agent() -> Result<ureq::Agent, String> {
+/// HTTPS with the OS's trusted roots (also for updates, `update.rs`).
+pub fn tls_config() -> Result<ureq::tls::TlsConfig, String> {
     let certs: Vec<ureq::tls::Certificate<'static>> =
         rustls_native_certs::load_native_certs().certs.iter().map(|c| ureq::tls::Certificate::from_der(c.as_ref()).to_owned()).collect();
     if certs.is_empty() {
         return Err("No trusted certificates found on this system.".into());
     }
+    Ok(ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::new_with_certs(&certs)).build())
+}
+
+fn agent() -> Result<ureq::Agent, String> {
     Ok(ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(60)))
         // Redirects could leave the allowed sources; only GitHub's raw links redirect, to raw.githubusercontent.com.
         .max_redirects(0)
-        .tls_config(ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::new_with_certs(&certs)).build())
+        .tls_config(tls_config()?)
         .build()
         .new_agent())
 }

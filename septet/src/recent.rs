@@ -87,8 +87,9 @@ impl Recent {
 
     pub fn load() -> Self {
         let mut files = Self::file().and_then(|f| std::fs::read(f).ok()).and_then(|b| serde_json::from_slice::<Vec<RecentFile>>(&b).ok()).unwrap_or_default();
-        // Files of apps this build doesn't have are dropped (from disk too, at the next save).
-        files.retain(|f| f.app.installed());
+        // Files of apps this build doesn't have are dropped (from disk too, at the next save); those
+        // of uninstalled apps stay for when they come back, and Home leaves them out.
+        files.retain(|f| f.app.is_built());
         Recent { files, dirty: false }
     }
 

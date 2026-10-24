@@ -50,3 +50,12 @@ Name: "{autodesktop}\Septet"; Filename: "{app}\septet.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\septet.exe"; Description: "{cm:LaunchProgram,Septet}"; Flags: nowait postinstall skipifsilent
+; An update from inside Septet runs this silently as Septet quits (septet/src/update.rs); on
+; "Restart Now" it passes /RELAUNCH=1, and Septet starts again as the user, not elevated.
+Filename: "{app}\septet.exe"; Flags: nowait skipifnotsilent runasoriginaluser; Check: Relaunch
+
+[Code]
+function Relaunch: Boolean;
+begin
+  Result := ExpandConstant('{param:relaunch|0}') = '1';
+end;

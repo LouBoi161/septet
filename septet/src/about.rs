@@ -39,8 +39,8 @@ pub fn dialog(open: &mut bool, ctx: &Context) {
             });
         });
         ui.add_space(12.0);
-        // The apps this build has (`kinds::APPS`).
-        let names: Vec<&str> = crate::kinds::APPS.iter().map(|a| a.name).collect();
+        // The apps installed (`kinds::installed_specs`).
+        let names: Vec<&str> = crate::kinds::installed_specs().map(|a| a.name).collect();
         let list = match names.split_last() {
             Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
             _ => names.concat(),
@@ -54,8 +54,8 @@ pub fn dialog(open: &mut bool, ctx: &Context) {
         );
         ui.add_space(6.0);
         ui.label(
-            "Based on PhotoCraft, VectorCraft, LightCraft, DesignCraft, PdfCraft, FilmCraft and EffectCraft by the \
-             ArtCraft team, used under the MIT License or the Apache License 2.0.",
+            "Based on PhotoCraft, VectorCraft, LightCraft, DesignCraft, PdfCraft, FilmCraft, EffectCraft and WordCraft by \
+             the ArtCraft team, used under the MIT License or the Apache License 2.0.",
         );
         ui.add_space(6.0);
         ui.label(
