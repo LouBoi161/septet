@@ -132,6 +132,9 @@ pub struct PrefsWriter {
     /// When the window was first looked at: its watch goes by the clock from then on, not by
     /// the interface's time, which stands still while the window is hidden.
     window_since: Option<std::time::Instant>,
+    /// Inside a host ([`lightcraft_ui_egui::hosted`], as [`PrefsWriter::new`] found it): the
+    /// window is the host's, not LightCraft's to remember.
+    hosted: bool,
 }
 
 impl PrefsWriter {
@@ -144,6 +147,7 @@ impl PrefsWriter {
             written: serde_json::to_vec_pretty(&app.ui).unwrap_or_default(),
             library: app.ui.settings.library_path.clone(),
             keep_file,
+            hosted: lightcraft_ui_egui::hosted::is_hosted(),
             ..Default::default()
         }
     }
@@ -190,8 +194,7 @@ impl PrefsWriter {
 
     pub fn tick(&mut self, app: &mut LightcraftApp, ctx: &egui::Context) {
         let now = ctx.input(|i| i.time);
-        // hosted: the window is the host's, not LightCraft's to remember
-        if !lightcraft_ui_egui::hosted::is_hosted() {
+        if !self.hosted {
             self.watch_window(app, ctx);
         }
         let moved = app.ui.settings.library_path != self.library;
