@@ -31,6 +31,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "`OutputRoot` checks the folder against the write root before it creates anything and then only writes inside it. Its reads are of the font files that draw the document's text (installed fonts and the `Document Fonts` folder), never of a path a command names",
     ),
     (
+        "engine/src/user_dirs.rs",
+        "`set_data_root` creates the data folder a host application or a portable install chooses (Septet); no command parameter names it",
+    ),
+    (
         "fonts/src/fontdb.rs",
         "the installed-font scan reads the platform's fixed font folders (`system_font_dirs`: no command parameter or document field names one), and `load_document_fonts` asks the caller's `allow` check about its folder and each font file before opening either",
     ),
