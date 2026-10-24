@@ -5,7 +5,7 @@ erledigt (MR !2 am 2026-10-14 gemergt), **Phase A gemergt** (MR !3 am 2026-10-22
 Lightcraft und hoher Kontrast, gemergt mit MR !5 am 2026-10-24), dritter Abgleich gemergt (MR !4 am 2026-10-22), Phase H
 (ComfyUI) gemergt (MR !6 am 2026-10-24), vierter Abgleich gemergt (MR !7 am 2026-10-24); **Phase B begonnen:
 WordCraft gemergt** (MR !8 am 2026-10-24); **Apps installieren/deinstallieren und Updates in der App** (2026-10-25,
-siehe unten), danach Release 0.3.0; als Nächstes DeckCraft. Grundlage: Untersuchung der Upstream-Repos
+siehe unten), **Release 0.3.0** am 2026-10-25 (GitHub und GitLab); als Nächstes DeckCraft. Grundlage: Untersuchung der Upstream-Repos
 (`storytold/wordcraft`, `deckcraft`, `gridcraft`, `cadcraft`, `soundcraft`, `craft-launcher`, alle v0.4.0 vom
 2026-10-10) und des Septet-Codes.
 
@@ -91,8 +91,10 @@ AppImage). Er lädt keine Module in eine laufende App. Seine Bausteine sind trot
   einem nicht beschreibbaren Ordner: keine Updates, die Seite sagt warum. Kein eigener Code aus `craft-launcher`.
 - Geprüft: Unit-Tests (Versionen, Prüfsummen, Installationsarten, tar/zip ersetzen), Autotest `manage` auf Xvfb mit
   Schein-Release (Linux tar.gz: gefunden, geladen, ersetzt, neu gestartet; falsche Prüfsumme: Abbruch, nichts
-  ersetzt). **Nicht geprüft:** AppImage, Windows (Installer, portable) und macOS echt – erst mit einem Release nach
-  0.3.0 möglich.
+  ersetzt). Nach dem Release das echte 0.3.0-AppImage gegen GitHubs echte Datei (als „0.3.1“ angekündigt): geladen,
+  Prüfsumme stimmt, AppImage ersetzt, neu gestartet. **Nicht geprüft:** Windows (Installer, portable) und macOS echt.
+  Hinweis: AppImageLauncher (beim User installiert) verschiebt gestartete AppImages nach `~/Applications`; dann
+  ersetzt das Update die Datei dort (Tests mit `APPIMAGELAUNCHER_DISABLE=1`).
 
 ## Upstream-Updates von ArtCraft
 
