@@ -228,6 +228,8 @@ hosted!(pdfcraft_embed::Embedded, agent, appearance);
 hosted!(filmcraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "effectcraft")]
 hosted!(effectcraft_embed::Embedded, agent, appearance);
+#[cfg(feature = "wordcraft")]
+hosted!(wordcraft_embed::Embedded, agent, appearance);
 
 /// An app's [`EntryPoints`] from its `Embedded` type, for its entry in `kinds::APPS`.
 macro_rules! entry_points {

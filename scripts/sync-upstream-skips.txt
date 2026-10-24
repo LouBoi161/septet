@@ -59,3 +59,7 @@ designcraft dialogs::tests::arabic_new_document_fields_remain_reachable_and_edit
 # machine's card (RTX 4070 Ti, 30-46 % busy) stretch. Our crates/gpu is upstream's.
 photocraft timing::a_refresh_that_submits_several_times_is_one_measurement
 photocraft timing::gpu_time_tracks_execution_not_submission
+
+# Upstream v0.10.0 fails the same way here (checked 2026-10-24 on the release commit itself, with and without
+# CRAFT_FONTS_DIR): the installed Noto Thai fonts change which face covers the run.
+wordcraft fontdb::tests::a_thai_run_with_latin_falls_back_to_one_face

@@ -250,6 +250,7 @@ impl Autotest {
                     AppKind::Pdfcraft,
                     AppKind::Filmcraft,
                     AppKind::Effectcraft,
+                    AppKind::Wordcraft,
                 ];
                 // Each app's own theme command opens Septet's dialog while Septet sets the look. (Claude
                 // reaches only these apps' theme commands; the others' are tested in their crates.)
@@ -258,6 +259,7 @@ impl Autotest {
                     (AppKind::Designcraft, "window.brightness", serde_json::json!({"brightness": "light"})),
                     (AppKind::Filmcraft, "view.theme.light", serde_json::json!({})),
                     (AppKind::Lightcraft, "view.theme", serde_json::json!({"theme": "paper"})),
+                    (AppKind::Wordcraft, "view.interfaceTheme", serde_json::json!({"value": "light"})),
                 ];
                 let short = |k: AppKind| k.name().to_ascii_lowercase();
                 let shot = |name: String| Step::Shot(Box::leak(name.into_boxed_str()));
@@ -269,7 +271,12 @@ impl Autotest {
                     Step::Shot("a02-home-lightest"),
                 ];
                 for kind in &apps {
-                    steps.extend([Step::Open(*kind), Step::Wait(6.0), shot(format!("a03-{}-lightest", short(*kind)))]);
+                    steps.extend([Step::Open(*kind), Step::Wait(6.0)]);
+                    // Wordcraft starts on File › Home with no document, where its theme command doesn't run.
+                    if *kind == AppKind::Wordcraft {
+                        steps.extend([Step::Tool("app_execute", serde_json::json!({"app": "wordcraft", "command": "file.new"})), Step::ToolWait(10.0)]);
+                    }
+                    steps.push(shot(format!("a03-{}-lightest", short(*kind))));
                 }
                 steps.extend([Step::Appearance(Theme::Darkest, 1.25), Step::Wait(1.0)]);
                 for kind in &apps {
@@ -432,6 +439,8 @@ impl Autotest {
                 ("mask.add", json!({"kind": "linear"})),
             ],
             AppKind::Pdfcraft => vec![("doc_create", json!({"from": "blank", "pages": 2, "width": 400, "height": 300, "name": "Layers"}))],
+            // No layers panel.
+            AppKind::Wordcraft => vec![("file.new", json!({}))],
         };
         // More commands after these: `SEPTET_AUTOTEST_CMDS` = [["command", {params}], …].
         let more: Vec<(String, serde_json::Value)> =
@@ -541,6 +550,19 @@ impl Autotest {
                 "object",
                 2,
                 vec![run("file.place", json!({}))],
+            ),
+            AppKind::Wordcraft => (
+                run("file.new", json!({})),
+                "bold",
+                vec![
+                    run("text.insert", json!({"text": "Hello from Septet"})),
+                    run("select.text", json!({"text": "Hello"})),
+                    run("format.bold", json!({})),
+                    run("caret.docEnd", json!({})),
+                ],
+                "paragraph",
+                2,
+                vec![run("file.exportPdf", json!({}))],
             ),
             AppKind::Unknown => unreachable!("autotests name installed apps"),
             AppKind::Effectcraft => (

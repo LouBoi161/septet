@@ -1,5 +1,5 @@
-//! Septet: Photocraft, Vectorcraft, Lightcraft, Designcraft, Pdfcraft, Filmcraft and Effectcraft
-//! in one window, as tabs you can drag into windows of their own.
+//! Septet: Photocraft, Vectorcraft, Lightcraft, Designcraft, Pdfcraft, Filmcraft, Effectcraft and
+//! Wordcraft in one window, as tabs you can drag into windows of their own.
 //!
 //! Usage: `septet [files…]` — each file opens in the app made for it.
 //!

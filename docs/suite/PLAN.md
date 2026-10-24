@@ -2,7 +2,9 @@
 
 Stand: 2026-10-24. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
 erledigt (MR !2 am 2026-10-14 gemergt), **Phase A gemergt** (MR !3 am 2026-10-22: A1–A5 und H0 fertig; der Rest von A4,
-Lightcraft und hoher Kontrast, liegt seit 2026-10-23 auf Branch `appearance-lightcraft`), dritter Abgleich gemergt (MR !4 am 2026-10-22); vierter Abgleich auf Branch `upstream/2026-10-23` (nach !5 und !6); ComfyUI-Anbindung als Phase H eingeplant. Grundlage: Untersuchung der Upstream-Repos
+Lightcraft und hoher Kontrast, gemergt mit MR !5 am 2026-10-24), dritter Abgleich gemergt (MR !4 am 2026-10-22), Phase H
+(ComfyUI) gemergt (MR !6 am 2026-10-24), vierter Abgleich gemergt (MR !7 am 2026-10-24); **Phase B begonnen:
+WordCraft** auf Branch `phase-b-wordcraft`. Grundlage: Untersuchung der Upstream-Repos
 (`storytold/wordcraft`, `deckcraft`, `gridcraft`, `cadcraft`, `soundcraft`, `craft-launcher`, alle v0.4.0 vom
 2026-10-10) und des Septet-Codes.
 
@@ -193,6 +195,17 @@ Skills für Claude, Autotest-Szenario, Theme-Anbindung.
 | CADCraft | S–M | Globales `install_io()` einmal aufrufen; GPU-Canvas über `egui_wgpu`-Callback; `undo` heißt dort nicht `edit.undo`; interaktive Befehle (Kommandozeile mit Nachfragen) für Claude sperren. 277 Befehle, PNG/SVG/PDF-Render vorhanden. |
 
 Empfohlene Reihenfolge: **WordCraft → DeckCraft → GridCraft → CADCraft**.
+
+**Stand 2026-10-24: WordCraft eingebaut** (Branch `phase-b-wordcraft`): Subtree v0.10.0, ArtCraft-Marken entfernt,
+Embed-API (`wordcraft/apps/wordcraft/src/embed.rs`, Bibliothek `wordcraft_embed`), `hosted`-Modul (keine Schriften,
+kein Zoom, keine Eingabe-Optionen, Fenster gehört Septet; Hell/Dunkel, Akzent und „Mehr Kontrast“ von Septet; Theme-Befehle
+öffnen Septets Dialog), Daten-Ordner für den portablen Modus, craft-fonts geteilt, Claude-Werkzeuge in-process (Befehle
+ohne Dialoge, Ersetzen ungespeicherter Arbeit nur mit `force`, Inspect-Ansichten, Seiten-Render auf einem Arbeits-Thread),
+Skill `septet:wordcraft`, Autotests (`assistant-apps`, `appearance`), CI und Abgleich-Skript kennen die App. Alle Änderungen
+in Upstream-Dateien: `docs/suite/upstream-patches.md`.
+Offen bei WordCraft: Ziehen aus WordCraft in andere Apps (`outgoing_drag`), `place_paths` an der Mausposition,
+Neuladen extern geänderter Dateien beim Sichtbarwerden, Layout pro Render cachen (bisher kein Problem gesehen),
+CJK-Zusatzschriften für Eingabemethoden gehostet (`set_fonts` fällt weg, `add_font` wäre nötig).
 
 ### Phase C: Alles miteinander kompatibel
 

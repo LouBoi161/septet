@@ -39,7 +39,13 @@ pub fn dialog(open: &mut bool, ctx: &Context) {
             });
         });
         ui.add_space(12.0);
-        ui.label("Seven creative apps in one workspace: Photocraft, Vectorcraft, Lightcraft, Designcraft, Pdfcraft, Filmcraft and Effectcraft.");
+        // The apps this build has (`kinds::APPS`).
+        let names: Vec<&str> = crate::kinds::APPS.iter().map(|a| a.name).collect();
+        let list = match names.split_last() {
+            Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+            _ => names.concat(),
+        };
+        ui.label(format!("Creative apps in one workspace: {list}."));
         ui.add_space(10.0);
         ui.label(RichText::new("License").font(theme::semibold(13.0)));
         ui.label(
