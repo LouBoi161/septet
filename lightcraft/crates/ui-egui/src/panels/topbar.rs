@@ -220,7 +220,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                         ui.separator();
                     }
                     for kind in group {
-                        let r = ui.selectable_label(app.ui.settings.theme(app.system_theme(ui.ctx())) == *kind, crate::i18n::tr(kind.label()));
+                        let r = ui.selectable_label(app.shown_theme(ui.ctx()) == *kind, crate::i18n::tr(kind.label()));
                         register(ui.ctx(), format!("menu:themeFavorite-{}", kind.id()), r.rect);
                         if r.clicked() {
                             let _ = app.run("view.theme", json!({"theme": kind.id()}));

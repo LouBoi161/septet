@@ -187,6 +187,28 @@ impl Embedded {
         }
     }
 
+    /// Septet's brightness, 0 (darkest) to 3 (lightest: Midnight, Charcoal, Silver, Paper), and
+    /// accent instead of the app's own until `None`. Neither is saved as the app's: the standalone
+    /// app keeps its own.
+    pub fn set_appearance(&mut self, level: Option<u8>, accent: Option<egui::Color32>) {
+        use lightcraft_ui_egui::theme::ThemeKind;
+        const BY_LEVEL: [ThemeKind; 4] = [ThemeKind::Midnight, ThemeKind::Charcoal, ThemeKind::Silver, ThemeKind::Paper];
+        lightcraft_ui_egui::hosted::set_accent(accent);
+        lightcraft_ui_egui::hosted::set_theme(level.map(|l| BY_LEVEL[usize::from(l.min(3))]));
+        self.ctx.request_repaint();
+    }
+
+    /// More contrast (secondary text, borders, icons), as Septet's Appearance asks; never saved.
+    pub fn set_contrast(&mut self, more: bool) {
+        lightcraft_ui_egui::hosted::set_contrast(more);
+        self.ctx.request_repaint();
+    }
+
+    /// While Septet sets the theme, the app's appearance commands and settings open Septet's.
+    pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
+        lightcraft_ui_egui::hosted::set_open_appearance(handler);
+    }
+
     /// While photos dragged from the grid are on the move: "Photo “IMG_0001.CR2”" or "3 photos".
     pub fn outgoing_drag(&self) -> Option<String> {
         let ids = self.app.ui.dragging_photos.as_deref().filter(|ids| !ids.is_empty())?;

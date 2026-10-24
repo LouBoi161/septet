@@ -502,7 +502,11 @@ fn expanded(app: &LightcraftApp, name: &str) -> Option<Vec<MenuNode>> {
             for group in [[ThemeKind::Charcoal, ThemeKind::Midnight], [ThemeKind::Silver, ThemeKind::Paper]] {
                 v.push(MenuNode::Separator);
                 for k in group {
-                    let on = if k.is_dark() { s.dark_theme.kind() == k } else { s.light_theme.kind() == k };
+                    let on = match crate::hosted::theme() {
+                        Some(hosted) => hosted == k,
+                        None if k.is_dark() => s.dark_theme.kind() == k,
+                        None => s.light_theme.kind() == k,
+                    };
                     v.push(item("view.theme", json!({"theme": k.id()}), k.label(), None, true, Some(on)));
                 }
             }

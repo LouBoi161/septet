@@ -50,11 +50,13 @@ pub struct Appearance {
     pub ui_scale: f32,
     /// Buttons, selections and focus in every app (one of [`ACCENTS`]); `None`: each app's own.
     pub accent: Option<[u8; 3]>,
+    /// Secondary text, borders and icons closer to the text colour, in Septet and every app.
+    pub more_contrast: bool,
 }
 
 impl Default for Appearance {
     fn default() -> Self {
-        Appearance { theme: Theme::default(), ui_scale: 1.0, accent: None }
+        Appearance { theme: Theme::default(), ui_scale: 1.0, accent: None, more_contrast: false }
     }
 }
 
@@ -172,6 +174,8 @@ pub fn dialog(open: &mut bool, ctx: &Context, appearance: &mut Appearance) {
                 }
             }
         });
+        ui.add_space(8.0);
+        ui.checkbox(&mut appearance.more_contrast, "More contrast").on_hover_text("Secondary text, borders and icons stand out more, at every brightness.");
         ui.add_space(12.0);
         ui.label(RichText::new("UI size").font(theme::semibold(13.0)));
         let current = appearance.ui_scale();
@@ -194,10 +198,10 @@ pub fn dialog(open: &mut bool, ctx: &Context, appearance: &mut Appearance) {
     }
 }
 
-/// Septet's own look at `level` (`None`: dark, as before A4) with `accent`: the shell's colours and
-/// egui's style for its own widgets.
-pub fn apply_to_shell(ctx: &Context, level: Option<u8>, accent: Option<Color32>) {
-    theme::set_level(level, accent);
+/// Septet's own look at `level` (`None`: dark, as before A4) with `accent` and maybe more contrast:
+/// the shell's colours and egui's style for its own widgets.
+pub fn apply_to_shell(ctx: &Context, level: Option<u8>, accent: Option<Color32>, more_contrast: bool) {
+    theme::set_level(level, accent, more_contrast);
     let light = level.is_some_and(|l| l >= 2);
     ctx.set_theme(if light { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
 }
@@ -220,11 +224,12 @@ mod tests {
 
     #[test]
     fn saved_settings_read_back_and_bad_sizes_are_clamped() {
-        let a = Appearance { theme: Theme::Light, ui_scale: 1.25, accent: Some(ACCENTS[2].1) };
+        let a = Appearance { theme: Theme::Light, ui_scale: 1.25, accent: Some(ACCENTS[2].1), more_contrast: true };
         let back: Appearance = ron::from_str(&ron::to_string(&a).unwrap()).unwrap();
         assert_eq!(back, a);
         let partial: Appearance = ron::from_str("(theme: Darkest)").unwrap();
         assert_eq!(partial.ui_scale(), 1.0);
+        assert!(!partial.more_contrast);
         assert_eq!(Appearance { ui_scale: 9.0, ..Default::default() }.ui_scale(), 1.75);
         assert_eq!(Appearance { ui_scale: f32::NAN, ..Default::default() }.ui_scale(), 1.0);
     }

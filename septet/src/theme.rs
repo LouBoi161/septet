@@ -4,7 +4,7 @@
 
 use egui::{Color32, FontData, FontDefinitions, FontFamily, Visuals};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
 /// The level Home and empty windows show, 0 (darkest) to 3 (lightest); [`NO_LEVEL`]: dark.
 static LEVEL: AtomicU8 = AtomicU8::new(NO_LEVEL);
@@ -12,11 +12,14 @@ const NO_LEVEL: u8 = u8::MAX;
 /// Their accent as `0xRRGGBB`, or [`NO_ACCENT`]: Septet's neutral one.
 static ACCENT: AtomicU32 = AtomicU32::new(NO_ACCENT);
 const NO_ACCENT: u32 = u32::MAX;
+/// Whether they show more contrast.
+static MORE_CONTRAST: AtomicBool = AtomicBool::new(false);
 
 /// Set by `appearance::apply_to_shell`.
-pub fn set_level(level: Option<u8>, accent: Option<Color32>) {
+pub fn set_level(level: Option<u8>, accent: Option<Color32>, more_contrast: bool) {
     LEVEL.store(level.unwrap_or(NO_LEVEL), Ordering::Relaxed);
     ACCENT.store(accent.map_or(NO_ACCENT, |c| u32::from_be_bytes([0, c.r(), c.g(), c.b()])), Ordering::Relaxed);
+    MORE_CONTRAST.store(more_contrast, Ordering::Relaxed);
 }
 
 /// Font family names the shell uses (registered next to the apps' own, see `fonts`).
@@ -90,6 +93,11 @@ impl ShellColors {
             c.card = Color32::from_rgb(0x1d, 0x1d, 0x20);
             c.card_hover = Color32::from_rgb(0x27, 0x27, 0x2b);
             c.card_border = Color32::from_rgb(0x2c, 0x2c, 0x30);
+        }
+        if MORE_CONTRAST.load(Ordering::Relaxed) {
+            c.text_dim = c.text_dim.lerp_to_gamma(c.text, 0.6);
+            c.separator = c.separator.lerp_to_gamma(c.text, 0.35);
+            c.card_border = c.card_border.lerp_to_gamma(c.text, 0.35);
         }
         c
     }

@@ -191,6 +191,11 @@ impl Embedded {
         vectorcraft_ui_egui::hosted::set_brightness(level.map(|l| Brightness::ALL[usize::from(l.min(3))]));
     }
 
+    /// More contrast (secondary text, borders, icons), as Septet's Appearance asks; never saved.
+    pub fn set_contrast(&mut self, more: bool) {
+        vectorcraft_ui_egui::hosted::set_contrast(more);
+    }
+
     /// While Septet sets the brightness, the app's brightness commands open Septet's settings.
     pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
         vectorcraft_ui_egui::hosted::set_open_appearance(handler);

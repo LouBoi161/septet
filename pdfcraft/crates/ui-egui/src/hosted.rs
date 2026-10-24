@@ -69,9 +69,26 @@ pub fn accent() -> Option<egui::Color32> {
     ACCENT.get()
 }
 
-/// Whether the host's accent changed since the last call: the theme is applied again.
+/// Whether the host's accent or contrast changed since the last call: the theme is applied again.
 pub fn take_restyle() -> bool {
     RESTYLE.replace(false)
+}
+
+thread_local! {
+    static CONTRAST: Cell<bool> = const { Cell::new(false) };
+}
+
+/// More contrast, as the host asks: secondary text, borders and icons closer to the text colour,
+/// at any brightness and accent; never saved. `false` (the default) keeps the theme's.
+pub fn set_contrast(more: bool) {
+    if CONTRAST.replace(more) != more {
+        RESTYLE.set(true);
+    }
+}
+
+/// Whether the host asks for more contrast ([`set_contrast`]).
+pub fn contrast() -> bool {
+    CONTRAST.get()
 }
 
 /// `c` recoloured from the theme's accent `from` to `to`: `to`'s hue, with `c`'s saturation and
@@ -85,7 +102,8 @@ pub(crate) fn recolor(c: egui::Color32, from: egui::Color32, to: egui::Color32) 
     HsvaGamma { h: to.h, s: (to.s * c.s / from.s).clamp(0.0, 1.0), v: (to.v * c.v / from.v).clamp(0.0, 1.0), a: c.a }.into()
 }
 
-/// Tokens `t` with the host's accent ([`set_accent`]) in place of the theme's.
+/// Tokens `t` with the host's accent ([`set_accent`]) in place of the theme's, and with more
+/// contrast if the host asks for it ([`set_contrast`]).
 pub(crate) fn with_accent(mut t: crate::theme::Tokens) -> crate::theme::Tokens {
     if let Some(to) = accent() {
         let from = t.accent;
@@ -93,6 +111,13 @@ pub(crate) fn with_accent(mut t: crate::theme::Tokens) -> crate::theme::Tokens {
         t.accent_text = recolor(t.accent_text, from, to);
         t.accent_soft = recolor(t.accent_soft, from, to);
         t.selected = recolor(t.selected, from, to);
+    }
+    if contrast() {
+        t.text_muted = t.text_muted.lerp_to_gamma(t.text, 0.6);
+        t.text_faint = t.text_faint.lerp_to_gamma(t.text, 0.35);
+        t.border = t.border.lerp_to_gamma(t.text, 0.35);
+        t.divider = t.divider.lerp_to_gamma(t.text, 0.35);
+        t.icon = t.icon.lerp_to_gamma(t.text, 0.5);
     }
     t
 }
@@ -207,5 +232,39 @@ mod tests {
         set_theme(None);
         app.sync_theme(&ctx);
         assert_eq!(app.theme, own);
+    }
+}
+
+#[cfg(test)]
+mod contrast_tests {
+    use super::*;
+    use crate::theme::{ThemeKind, Tokens};
+
+    /// More contrast brings secondary text, borders and icons closer to the text colour, dark and
+    /// light alike, leaves the rest as the theme has it, and restyles the app.
+    #[test]
+    fn more_contrast_brings_secondary_colours_towards_the_text() {
+        let off = |c: egui::Color32, text: egui::Color32| {
+            [(c.r(), text.r()), (c.g(), text.g()), (c.b(), text.b())].iter().map(|&(a, b)| i32::from(a).abs_diff(i32::from(b))).sum::<u32>()
+        };
+        for which in [ThemeKind::Dark, ThemeKind::Light] {
+            let own = Tokens::for_kind(which);
+            take_restyle();
+            set_contrast(true);
+            assert!(take_restyle(), "switching restyles");
+            let t = with_accent(own);
+            set_contrast(false);
+            for (name, now, was) in [
+                ("text_muted", t.text_muted, own.text_muted),
+                ("text_faint", t.text_faint, own.text_faint),
+                ("border", t.border, own.border),
+                ("divider", t.divider, own.divider),
+                ("icon", t.icon, own.icon),
+            ] {
+                assert!(off(now, own.text) < off(was, own.text) || was == own.text, "{name} is closer to the text in {which:?}");
+            }
+            assert_eq!((t.text, t.accent), (own.text, own.accent));
+            assert_eq!(with_accent(own).text_muted, own.text_muted, "without it: the theme's own");
+        }
     }
 }

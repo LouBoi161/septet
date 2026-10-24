@@ -211,6 +211,12 @@ impl Embedded {
         self.app.reapply_prefs();
     }
 
+    /// More contrast (secondary text, borders, icons), as Septet's Appearance asks; never saved.
+    pub fn set_contrast(&mut self, more: bool) {
+        effectcraft_ui_egui::hosted::set_contrast(more);
+        self.app.reapply_prefs();
+    }
+
     /// While Septet sets the theme, EffectCraft's theme commands open Septet's settings.
     pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
         effectcraft_ui_egui::hosted::set_open_appearance(handler);

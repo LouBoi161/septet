@@ -645,7 +645,7 @@ impl FilmcraftApp {
         let a = &self.session.prefs.appearance;
         // A host's accent comes first ([`crate::hosted::set_accent`]).
         let highlight = crate::hosted::accent().map(|c| [c.r(), c.g(), c.b()]).or_else(|| filmcraft_engine::settings::parse_hex(&a.highlight_color));
-        self.tokens = Tokens::for_kind(k).with_appearance(highlight, a.accessible_contrast);
+        self.tokens = Tokens::for_kind(k).with_appearance(highlight, a.accessible_contrast || crate::hosted::contrast());
         theme::apply_visuals(ctx, &self.tokens);
         self.apply_tooltips(ctx);
         self.ui.dark = k != ThemeKind::Light;
@@ -2824,5 +2824,25 @@ mod native_menu_tests {
         app.sync_native_menu();
         assert_eq!(last(&sent, "edit.undo"), Some(false));
         assert_eq!(last(&sent, "edit.redo"), Some(true), "the undone edit can be redone");
+    }
+}
+
+#[cfg(test)]
+mod hosted_contrast_tests {
+    use super::*;
+
+    /// A host's "more contrast" shows Settings ▸ Appearance's accessible contrast without saving it.
+    #[test]
+    fn the_hosts_contrast_shows_and_is_not_saved() {
+        let ctx = egui::Context::default();
+        let mut app = FilmcraftApp::new(filmcraft_engine::Session::default());
+        app.set_theme(&ctx, ThemeKind::Dark);
+        let own = app.tokens.text_faint;
+        crate::hosted::set_contrast(true);
+        app.set_theme(&ctx, ThemeKind::Dark);
+        crate::hosted::set_contrast(false);
+        assert_eq!(app.tokens.text_faint, Tokens::for_kind(ThemeKind::Dark).with_appearance(None, true).text_faint);
+        assert_ne!(app.tokens.text_faint, own);
+        assert!(!app.session.prefs.appearance.accessible_contrast, "the host's contrast is not saved");
     }
 }

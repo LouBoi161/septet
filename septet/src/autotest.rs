@@ -69,6 +69,8 @@ enum Step {
     CloseAppearance,
     /// Set Septet's accent colour (one of `appearance::ACCENTS`, by name; `None`: each app's own).
     Accent(Option<&'static str>),
+    /// Appearance › More contrast.
+    Contrast(bool),
     Exit,
 }
 
@@ -233,13 +235,22 @@ impl Autotest {
             // opens Septet's dialog instead.
             Ok("appearance") => {
                 use crate::appearance::Theme;
-                let apps = [AppKind::Photocraft, AppKind::Vectorcraft, AppKind::Designcraft, AppKind::Pdfcraft, AppKind::Filmcraft, AppKind::Effectcraft];
+                let apps = [
+                    AppKind::Photocraft,
+                    AppKind::Vectorcraft,
+                    AppKind::Lightcraft,
+                    AppKind::Designcraft,
+                    AppKind::Pdfcraft,
+                    AppKind::Filmcraft,
+                    AppKind::Effectcraft,
+                ];
                 // Each app's own theme command opens Septet's dialog while Septet sets the look. (Claude
                 // reaches only these apps' theme commands; the others' are tested in their crates.)
                 let commands = [
                     (AppKind::Vectorcraft, "window.brightness", serde_json::json!({"brightness": "light"})),
                     (AppKind::Designcraft, "window.brightness", serde_json::json!({"brightness": "light"})),
                     (AppKind::Filmcraft, "view.theme.light", serde_json::json!({})),
+                    (AppKind::Lightcraft, "view.theme", serde_json::json!({"theme": "paper"})),
                 ];
                 let short = |k: AppKind| k.name().to_ascii_lowercase();
                 let shot = |name: String| Step::Shot(Box::leak(name.into_boxed_str()));
@@ -266,6 +277,14 @@ impl Autotest {
                     steps.extend([Step::Activate(*kind), Step::Wait(1.5), shot(format!("a07-{}-light-pink", short(*kind)))]);
                 }
                 steps.extend([Step::Home, Step::Wait(1.0), Step::Shot("a08-home-light-pink")]);
+                steps.extend([Step::Contrast(true), Step::Wait(1.0), Step::Shot("a10-home-light-contrast")]);
+                for (level, theme) in [("light", Theme::Light), ("darkest", Theme::Darkest)] {
+                    steps.extend([Step::Appearance(theme, 1.0), Step::Wait(1.0)]);
+                    for kind in &apps {
+                        steps.extend([Step::Activate(*kind), Step::Wait(1.5), shot(format!("a10-{}-{level}-contrast", short(*kind)))]);
+                    }
+                }
+                steps.push(Step::Contrast(false));
                 for (kind, command, params) in commands {
                     steps.extend([
                         Step::Activate(kind),
@@ -1063,12 +1082,16 @@ impl Autotest {
                 }
                 Step::Appearance(theme, scale) => {
                     at.note(format!("appearance {theme:?} at {scale}"));
-                    shell.appearance = crate::appearance::Appearance { theme, ui_scale: scale, accent: shell.appearance.accent };
+                    shell.appearance = crate::appearance::Appearance { theme, ui_scale: scale, ..shell.appearance };
                 }
                 Step::CloseAppearance => shell.appearance_dialog = None,
                 Step::Accent(name) => {
                     at.note(format!("accent {name:?}"));
                     shell.appearance.accent = name.and_then(|n| crate::appearance::ACCENTS.iter().find(|(a, _)| *a == n)).map(|(_, rgb)| *rgb);
+                }
+                Step::Contrast(more) => {
+                    at.note(format!("more contrast {more}"));
+                    shell.appearance.more_contrast = more;
                 }
                 Step::LoseGpu => {
                     at.note("losing the GPU device".into());

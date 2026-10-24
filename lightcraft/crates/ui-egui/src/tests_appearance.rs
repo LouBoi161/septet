@@ -258,3 +258,45 @@ fn favorites_validate_roundtrip_and_stars_toggle_without_selecting() {
     assert_eq!(h.app.ui.settings.light_theme, LightTheme::Paper);
     assert_eq!(h.app.ui.settings.dark_theme, DarkTheme::Charcoal);
 }
+
+/// A host (Septet) sets the theme and accent for all its apps: they win over Settings, are never
+/// saved as LightCraft's, and the appearance commands open the host's settings instead.
+#[test]
+fn the_hosts_theme_and_accent_win_and_are_not_saved() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let mut a = app();
+    let ctx = egui::Context::default();
+    let opened = Rc::new(Cell::new(0));
+    let count = Rc::clone(&opened);
+    crate::hosted::set_open_appearance(Box::new(move || count.set(count.get() + 1)));
+    crate::hosted::set_theme(Some(ThemeKind::Paper));
+    frame(&mut a, &ctx);
+    assert_eq!(crate::theme::current(&ctx), Some(ThemeKind::Paper));
+    assert_eq!(a.ui.settings.appearance_mode, AppearanceMode::Dark, "the host's theme is not saved");
+    // the commands leave the settings alone and open the host's
+    a.run("view.theme", json!({"theme": "midnight"})).unwrap();
+    a.run("view.appearance", json!({})).unwrap();
+    assert_eq!(opened.get(), 2);
+    assert_eq!((a.ui.settings.appearance_mode, a.ui.settings.dark_theme), (AppearanceMode::Dark, DarkTheme::Charcoal));
+    frame(&mut a, &ctx);
+    assert_eq!(crate::theme::current(&ctx), Some(ThemeKind::Paper));
+    // an accent recolours the theme's accent; greys stay
+    let green = egui::Color32::from_rgb(0x2e, 0x7d, 0x32);
+    crate::hosted::set_accent(Some(green));
+    frame(&mut a, &ctx);
+    let tokens = crate::theme::Tokens::get(&ctx);
+    let paper = crate::theme::Tokens::for_kind(ThemeKind::Paper);
+    assert_ne!(tokens.accent, paper.accent);
+    let (hue, want) = (egui::ecolor::Hsva::from(tokens.accent).h, egui::ecolor::Hsva::from(green).h);
+    assert!((hue - want).abs() < 0.02, "accent hue {hue} vs {want}");
+    assert_eq!((tokens.chrome, tokens.text), (paper.chrome, paper.text));
+    // the host lets go: LightCraft's own theme and accent are back
+    crate::hosted::set_theme(None);
+    crate::hosted::set_accent(None);
+    frame(&mut a, &ctx);
+    assert_eq!(crate::theme::current(&ctx), Some(ThemeKind::Charcoal));
+    assert_eq!(crate::theme::Tokens::get(&ctx).accent, crate::theme::Tokens::for_kind(ThemeKind::Charcoal).accent);
+    a.run("view.theme", json!({"theme": "midnight"})).unwrap();
+    assert_eq!((opened.get(), a.ui.settings.dark_theme), (2, DarkTheme::Midnight));
+}

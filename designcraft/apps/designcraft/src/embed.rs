@@ -251,6 +251,12 @@ impl Embedded {
         self.app.restyle = true;
     }
 
+    /// More contrast (secondary text, borders, icons), as Septet's Appearance asks; never saved.
+    pub fn set_contrast(&mut self, more: bool) {
+        designcraft_ui_egui::hosted::set_contrast(more);
+        self.app.restyle = true;
+    }
+
     /// While Septet sets the brightness, the app's theme commands open Septet's settings.
     pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
         hosted::set_open_appearance(handler);

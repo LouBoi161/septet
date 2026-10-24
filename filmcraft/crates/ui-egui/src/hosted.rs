@@ -60,9 +60,26 @@ pub fn accent() -> Option<egui::Color32> {
     ACCENT.get()
 }
 
-/// Whether the host's accent changed since the last call: the theme is applied again.
+/// Whether the host's accent or contrast changed since the last call: the theme is applied again.
 pub fn take_restyle() -> bool {
     RESTYLE.replace(false)
+}
+
+thread_local! {
+    static CONTRAST: Cell<bool> = const { Cell::new(false) };
+}
+
+/// More contrast, as the host asks: secondary text, borders and icons closer to the text colour,
+/// at any brightness and accent; never saved. `false` (the default) keeps the theme's.
+pub fn set_contrast(more: bool) {
+    if CONTRAST.replace(more) != more {
+        RESTYLE.set(true);
+    }
+}
+
+/// Whether the host asks for more contrast ([`set_contrast`]).
+pub fn contrast() -> bool {
+    CONTRAST.get()
 }
 
 /// Say whether FilmCraft runs inside a host (set once, before the app is built).

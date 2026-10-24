@@ -666,9 +666,21 @@ fn interface_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
 /// Appearance Mode (`button:settingsAppearance-{0,1,2}`: Auto, Dark, Light) above the light and
 /// dark theme cards (`radio:theme-{id}`), each with a preview of the chosen theme. The card in
 /// use is outlined. Applied on the next frame ([`LightcraftApp::sync_theme`]).
+/// While the host sets the theme, a pointer to its appearance settings instead
+/// (`button:settingsHostAppearance`).
 fn appearance(ui: &mut egui::Ui, t: &Tokens, s: &mut crate::state::AppSettings, system: Option<egui::Theme>) {
     use crate::state::{AppearanceMode as M, DarkTheme, LightTheme};
     heading(ui, t, crate::i18n::tr("Appearance"));
+    if crate::hosted::theme().is_some() {
+        hint(ui, t, "The theme and accent colour are set for all apps in the host's appearance settings.");
+        let r = ui.button(crate::i18n::tr("Appearance Settings…"));
+        register(ui.ctx(), "button:settingsHostAppearance", r.rect);
+        if r.clicked() {
+            crate::hosted::open_appearance();
+        }
+        ui.add_space(2.0);
+        return;
+    }
     ui.label(RichText::new(crate::i18n::tr("Appearance Mode")).color(t.text_label));
     ui.horizontal_wrapped(|ui| {
         choices(ui, "settingsAppearance", &[(M::Auto, "Sync with System"), (M::Dark, "Dark Mode"), (M::Light, "Light Mode")], &mut s.appearance_mode);

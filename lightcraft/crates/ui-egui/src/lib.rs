@@ -904,11 +904,18 @@ impl LightcraftApp {
         self.services.system_theme.as_ref().and_then(|read| read(ctx)).or_else(|| ctx.system_theme())
     }
 
+    /// The theme shown: the host's ([`hosted::theme`]), else the one the settings select.
+    pub fn shown_theme(&self, ctx: &egui::Context) -> theme::ThemeKind {
+        hosted::theme().unwrap_or_else(|| self.ui.settings.theme(self.system_theme(ctx)))
+    }
+
     /// Restyle `ctx` when the theme the settings select (Appearance Mode, the dark and light
-    /// themes, the system's appearance in Auto) is not the one it shows. A no-op otherwise.
+    /// themes, the system's appearance in Auto) or the host's is not the one it shows, or the
+    /// host's accent changed. A no-op otherwise.
     pub fn sync_theme(&mut self, ctx: &egui::Context) {
-        let wanted = self.ui.settings.theme(self.system_theme(ctx));
-        if theme::current(ctx) != Some(wanted) {
+        let wanted = self.shown_theme(ctx);
+        let restyle = hosted::take_restyle();
+        if restyle || theme::current(ctx) != Some(wanted) {
             theme::apply_kind(ctx, wanted);
         }
     }
