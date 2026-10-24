@@ -4,7 +4,7 @@ Stand: 2026-10-24. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` 
 erledigt (MR !2 am 2026-10-14 gemergt), **Phase A gemergt** (MR !3 am 2026-10-22: A1–A5 und H0 fertig; der Rest von A4,
 Lightcraft und hoher Kontrast, gemergt mit MR !5 am 2026-10-24), dritter Abgleich gemergt (MR !4 am 2026-10-22), Phase H
 (ComfyUI) gemergt (MR !6 am 2026-10-24), vierter Abgleich gemergt (MR !7 am 2026-10-24); **Phase B begonnen:
-WordCraft** auf Branch `phase-b-wordcraft`. Grundlage: Untersuchung der Upstream-Repos
+WordCraft gemergt** (MR !8 am 2026-10-24), als Nächstes DeckCraft. Grundlage: Untersuchung der Upstream-Repos
 (`storytold/wordcraft`, `deckcraft`, `gridcraft`, `cadcraft`, `soundcraft`, `craft-launcher`, alle v0.4.0 vom
 2026-10-10) und des Septet-Codes.
 
@@ -196,7 +196,7 @@ Skills für Claude, Autotest-Szenario, Theme-Anbindung.
 
 Empfohlene Reihenfolge: **WordCraft → DeckCraft → GridCraft → CADCraft**.
 
-**Stand 2026-10-24: WordCraft eingebaut** (Branch `phase-b-wordcraft`): Subtree v0.10.0, ArtCraft-Marken entfernt,
+**Stand 2026-10-24: WordCraft eingebaut und gemergt** (MR !8): Subtree v0.10.0, ArtCraft-Marken entfernt,
 Embed-API (`wordcraft/apps/wordcraft/src/embed.rs`, Bibliothek `wordcraft_embed`), `hosted`-Modul (keine Schriften,
 kein Zoom, keine Eingabe-Optionen, Fenster gehört Septet; Hell/Dunkel, Akzent und „Mehr Kontrast“ von Septet; Theme-Befehle
 öffnen Septets Dialog), Daten-Ordner für den portablen Modus, craft-fonts geteilt, Claude-Werkzeuge in-process (Befehle
