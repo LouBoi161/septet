@@ -57,20 +57,24 @@ impl Server {
     }
 
     /// Jobs take ten seconds (to test cancelling).
+    #[cfg(test)]
     pub fn set_slow(&self, slow: bool) {
         self.slow.store(slow, Ordering::Relaxed);
     }
 
     /// Leave a model file out of the loaders' lists.
+    #[cfg(test)]
     pub fn hide_model(&self, file: &str) {
         self.state.lock().unwrap_or_else(PoisonError::into_inner).hidden.push(file.to_owned());
     }
 
     /// Also play Ollama, holding `model` (`/api/ps`); unloading it frees the memory.
+    #[cfg(test)]
     pub fn set_ollama_model(&self, model: Option<&str>) {
         self.state.lock().unwrap_or_else(PoisonError::into_inner).ollama = model.map(str::to_owned);
     }
 
+    #[cfg(test)]
     pub fn set_vram_free_mib(&self, mib: u64) {
         self.vram_free_mib.store(mib, Ordering::Relaxed);
     }
