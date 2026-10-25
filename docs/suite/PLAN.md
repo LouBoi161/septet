@@ -232,9 +232,11 @@ v0.10.0), ArtCraft-Marken entfernt, Embed-API (`deckcraft/apps/deckcraft/src/emb
 - Panic-Hook (`guard.rs`): bleibt. Er protokolliert nur und ruft den vorherigen Hook auf, stört Septet also nicht.
 - `set_zoom_factor` jeden Frame: gehostet aus; der Regler „Interface size“ in den Einstellungen ist gehostet ausgeblendet.
 - Eigener Audio-Ausgang (cpal): bleibt; der Strom öffnet sich erst beim Abspielen. Verstecken des Tabs stoppt Medien.
-- Vollbild: gehostet öffnet die Bildschirmpräsentation ein **eigenes Vollbild-Fenster** (`show::ui_or_window`); der Tab
-  zeigt „The slide show is running in its own window“ mit „End Show“. Leseansicht und „Browsed“-Shows bleiben im Tab.
-  Die Referentenansicht ist wie upstream ein zweites Fenster. Verstecken des Tabs beendet die Show.
+- Vollbild: gehostet schaltet die Bildschirmpräsentation **Septets Fenster auf Vollbild** und liegt als oberste Ebene
+  über allem (`show::ui_or_window`); danach kehrt das Fenster zurück. (Erster Versuch mit eigenem Vollbild-Fenster
+  ruckelte: ein Unterfenster wird nur mit dem Elternfenster gezeichnet, und GNOME drosselt das verdeckte Elternfenster
+  auf etwa ein Bild pro Sekunde.) Leseansicht und „Browsed“-Shows bleiben im Tab. Die Referentenansicht ist wie upstream
+  ein zweites Fenster. Verstecken des Tabs beendet die Show.
 - Fenster schließen: geht über Septets Router (Close → Tab schließen); DeckCrafts Quit-Dialog fragt bei Ungespeichertem.
 - Fallengelassene Dateien liest DeckCraft gehostet nicht selbst (Septet legt sie mit `place_paths` ab).
 Dazu: Schriften nicht setzen (auch nicht die Fallback-Schriften aus `uifonts`), Titelleiste bewegt das Fenster nicht,
@@ -243,8 +245,12 @@ Engine- und UI-Befehle (Dialoge und Dateiwähler abgewiesen, `file.close`/`file.
 `force`), Ansichten document/slide/shape/text/selection/animations/comments/history/documents/show, Render `slide` und
 `deck` (alle Folien als Raster). Skill `septet:deckcraft`. `shared/craft-fonts` liest jetzt auch `latin-manifest.txt`
 (DeckCrafts Präsentationsschriften, ab neueren craft-fonts-Ständen).
-Offen bei DeckCraft: Dateiwähler sind synchron (`rfd`, wie upstream) und halten Septet an, solange sie offen sind;
-Ziehen aus DeckCraft in andere Apps; Ablegen an der Mausposition; Vollbild auf echtem Bildschirm (nur Xvfb geprüft,
+Dateiwähler gehostet nebenläufig (`pickers.rs`), außer an seltenen Stellen (Füllbild, Dialoge), die noch blockieren.
+**Nach Test des Users (2026-10-25 abends):** Fokus-Bug mit Claudes Feld behoben; ein Darstellungs-Knopf in Septets Leiste,
+die Hell/Dunkel-Knöpfe aller Apps gehostet ausgeblendet; **Drag & Drop**: Septet verteilt jetzt alle Datei-Drops
+selbst (`shell.rs` `route_drops`/`split_drops`: was die App aufnimmt, wird abgelegt, sonst öffnet die Standard-App),
+Diagnose mit `SEPTET_DEBUG_DROPS=1`, Autotest `drops`.
+Offen bei DeckCraft: Ziehen aus DeckCraft in andere Apps; Ablegen an der Mausposition; Vollbild auf echtem Bildschirm (nur Xvfb geprüft,
 dort ohne Fenstermanager); Windows/macOS.
 
 ### Phase C: Alles miteinander kompatibel

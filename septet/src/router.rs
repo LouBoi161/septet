@@ -45,6 +45,8 @@ pub struct Shared {
     pub quitting: bool,
     /// Synthetic input for a window's next pass (the autotest's mouse and keyboard).
     pub inject_events: HashMap<ViewportId, Vec<egui::Event>>,
+    /// Files "dropped" on a window in its next pass (the autotest's file drops).
+    pub inject_drops: HashMap<ViewportId, Vec<std::path::PathBuf>>,
     /// The OS asked to close the root window this frame; eframe closes it unless the output cancels.
     cancel_root_close: bool,
     /// Viewport runs in progress (immediate viewports run inside the root's run).
@@ -121,6 +123,9 @@ impl egui::Plugin for Router {
             if let Some(events) = sh.inject_events.remove(&viewport) {
                 input.events.extend(events);
             }
+            if let Some(paths) = sh.inject_drops.remove(&viewport) {
+                input.dropped_files.extend(paths.into_iter().map(|p| Arc::new(TestFile(p)) as egui::DroppedFileHandle));
+            }
         }
         if let Some(slot) = shown(viewport)
             && let Ok(mut slot) = slot.try_borrow_mut()
@@ -171,5 +176,18 @@ impl egui::Plugin for Router {
             }
         }
         sh.shell_cmds = keep;
+    }
+}
+
+/// A file the autotest drops on a window, read from disk like a real drop.
+#[derive(Debug)]
+struct TestFile(std::path::PathBuf);
+
+impl egui::DroppedFile for TestFile {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
     }
 }

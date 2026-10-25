@@ -47,6 +47,26 @@ Neu: `apps/deckcraft/src/lib.rs` (Bibliothek `deckcraft_embed`), `apps/deckcraft
 | `crates/ui-egui/src/backstage.rs` | Discord-Links gehostet weg; Darstellung liest `is_dark()` | Markenlizenz; A4 |
 | `crates/ui-egui/src/dialogs.rs` | Info-Dialog gehostet: „Based on DeckCraft by the ArtCraft team“, ohne getartcraft.com/Discord; Einstellungen: `is_dark()`, Regler „Interface size“ gehostet weg | Markenlizenz; Zoom gehört dem Host |
 | `README.md`, `NOTICE`, `ATTRIBUTION.md`, `docs/brand/*.svg/png` | Logos gelöscht, Hinweis „modified version“, Zeile für `docs/brand/README.md` | Markenlizenz (`cargo xtask assets` prüft `docs/brand/`) |
+| `crates/ui-egui/src/lib.rs` (2026-10-25 abends) | `SlideApp::owns_widget`/`hosted_rect`: gefremdeter Fokus (Septets Chat-Feld) wird beim Textbearbeiten nicht weggenommen; `show_window`, `restore_show_window`, `replay_pick`; `hosted::Replayable` in `pick_and_open`, `pick_and_run`, `pick_and_reuse`, `save_as_dialog`, `export_as`, `hosted::NoDefer` in `save_all` | Fokus-Bug; Show ruckelte im eigenen Fenster (verdecktes Elternfenster wird von GNOME gedrosselt) → Show jetzt im Septet-Fenster; Dateiwähler blockierten Septet („reagiert nicht“) |
+| `crates/ui-egui/src/show.rs` | `ui_or_window`: gehostet Septets Fenster auf Vollbild, Show als `Area` (Foreground) darüber; `restore_fullscreen` | wie oben |
+| `crates/ui-egui/src/ribbon.rs` | Hell/Dunkel-Knopf in der Titelleiste und „Dark Mode“ unter Ansicht gehostet weg | ein Darstellungs-Knopf in Septets Leiste |
+| `apps/deckcraft/src/pickers.rs` (neu), `Cargo.toml` (`pollster`) | Dateiwähler gehostet nebenläufig (`rfd::AsyncFileDialog`, Elternfenster), Aktion läuft mit der Antwort erneut | Septet blieb stehen, solange ein Wähler offen war |
+
+## Darstellungs-Knopf: in allen Apps gehostet ausgeblendet (2026-10-25)
+
+Septet hat einen Darstellungs-Knopf in der Tab-Leiste neben Claude; die eigenen Hell/Dunkel-Knöpfe der Apps sind gehostet
+weg (`if !crate::hosted::is_hosted()` um den Block). Menü- und Einstellungs-Einträge bleiben (sie öffnen gehostet Septets
+Dialog).
+
+| Datei | Was ausgeblendet ist |
+|---|---|
+| `effectcraft/crates/ui-egui/src/header.rs` | Appearance-Mode-Knopf (Monitor/Sonne/Mond) mit Kontextmenü |
+| `filmcraft/crates/ui-egui/src/header.rs` | Appearance-Mode-Knopf mit Kontextmenü |
+| `lightcraft/crates/ui-egui/src/panels/topbar.rs` | Appearance-Mode-Knopf mit Kontextmenü |
+| `photocraft/crates/ui-egui/src/panels.rs` | Appearance-Mode-Knopf in der Titelleiste |
+| `pdfcraft/crates/ui-egui/src/chrome.rs` | „Display theme“-Knopf mit Kontextmenü |
+| `wordcraft/crates/ui-egui/src/ribbon.rs` | „Interface Theme“ unter Ansicht › Dark Mode („Switch Modes“ bleibt: betrifft die Seitenansicht) |
+| `deckcraft/crates/ui-egui/src/ribbon.rs` | Titelleisten-Knopf und Ansicht › „Dark Mode“ |
 
 Bewusst nicht geändert: `engine/src/guard.rs` (der Panic-Hook ruft den vorherigen auf), `control.rs` (läuft gehostet
 nicht; `Embedded::agent_execute` ruft `SlideApp::run` direkt), `Services` (das Embed schaltet Dateiwähler für Claude ab).

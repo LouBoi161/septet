@@ -80,7 +80,7 @@ fn strip_ui(shell: &mut Shell, wi: usize, ui: &mut Ui, strip: Rect) {
     let lights = if mac && !fullscreen { 74.0 } else { 0.0 };
     let strip_left = strip.left() + lights;
     let tabs_left = strip_left + LOGO_W;
-    let tabs_right = strip.right() - captions - PLUS_W - 48.0;
+    let tabs_right = strip.right() - captions - PLUS_W - 86.0;
     let n = shell.windows[wi].tabs.len().max(1);
     let tab_w = ((tabs_right - tabs_left) / n as f32).clamp(TAB_MIN, TAB_MAX);
 
@@ -161,6 +161,8 @@ fn strip_ui(shell: &mut Shell, wi: usize, ui: &mut Ui, strip: Rect) {
     // Claude, left of the window buttons.
     let claude = Rect::from_min_size(pos2(strip.right() - captions - 42.0, strip.top() + TAB_TOP + 2.0), vec2(34.0, TAB_H - 4.0));
     claude_button(shell, viewport, ui, claude, &colors);
+    // Appearance, left of Claude: one place for every app's look (the apps hide their own switches).
+    appearance_button(shell, viewport, ui, claude.translate(vec2(-38.0, 0.0)), &colors);
 
     // The rest of the strip is the title bar: drag to move, double-click to maximize.
     let bar = Rect::from_min_max(pos2(plus.right() + 4.0, strip.top()), pos2(claude.left() - 4.0, strip.bottom()));
@@ -335,6 +337,37 @@ fn claude_button(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, rect: Rec
     if resp.clicked() {
         let ctx = ui.ctx().clone();
         shell.assistant.toggle_panel(&ctx, viewport);
+    }
+}
+
+/// Opens Septet's Appearance dialog (a half-filled circle: light and dark).
+fn appearance_button(shell: &mut Shell, viewport: ViewportId, ui: &mut Ui, rect: Rect, colors: &ShellColors) {
+    let resp = ui.interact(rect, Id::new(("septet-appearance-button", viewport)), Sense::click()).on_hover_text("Appearance: light, dark, accent colour");
+    let open = shell.appearance_dialog == Some(viewport);
+    let painter = ui.painter();
+    if open || resp.hovered() {
+        painter.rect_filled(rect, 6.0, colors.tab_hover);
+    }
+    let fg = if open {
+        colors.accent
+    } else if resp.hovered() {
+        colors.text
+    } else {
+        colors.text_dim
+    };
+    let c = rect.center();
+    let r = 6.5;
+    painter.circle_stroke(c, r, Stroke::new(1.5, fg));
+    // The right half filled.
+    let half: Vec<egui::Pos2> = (0..=16)
+        .map(|i| {
+            let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / 16.0;
+            c + vec2(a.cos(), a.sin()) * r
+        })
+        .collect();
+    painter.add(egui::Shape::convex_polygon(half, fg, Stroke::NONE));
+    if resp.clicked() {
+        shell.appearance_dialog = if open { None } else { Some(viewport) };
     }
 }
 

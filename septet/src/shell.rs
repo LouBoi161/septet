@@ -507,6 +507,15 @@ impl Shell {
             fps_probe(&ctx, viewport);
         }
         self.shortcuts(&ctx, wi);
+        if debug_drops() {
+            ctx.input(|i| {
+                if !i.raw.hovered_files.is_empty() || !i.raw.dropped_files.is_empty() {
+                    let names = |f: &[egui::HoveredFile]| f.iter().map(|f| f.path.clone()).collect::<Vec<_>>();
+                    let dropped: Vec<_> = i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect();
+                    eprintln!("septet window {viewport:?}: hovered {:?}, dropped {dropped:?}", names(&i.raw.hovered_files));
+                }
+            });
+        }
         self.windows[wi].geometry = ctx.input(|i| {
             let v = i.viewport();
             Some(([v.outer_rect?.min.x, v.outer_rect?.min.y], [v.inner_rect?.width(), v.inner_rect?.height()]))
@@ -547,7 +556,7 @@ impl Shell {
                 let s = &mut *guard;
                 s.iso.swap(&ctx);
                 self.bridge.before_app(&ctx, s);
-                self.route_drops(&ctx, s);
+                self.route_drops(&ctx, viewport, s);
                 let app = s.app.app();
                 app.logic(&ctx, frame);
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(content).layout(egui::Layout::top_down(egui::Align::Min)));
@@ -644,19 +653,31 @@ impl Shell {
     /// Files dropped from the file manager onto `slot`'s app: placed where they landed, for apps whose
     /// own drop handling can't see the pointer (winit drops carry no position). Otherwise, or when
     /// the pointer can't be read, the app handles the drop itself.
-    fn route_drops(&mut self, ctx: &Context, slot: &mut AppSlot) {
+    /// Files dropped from the file manager onto an app's tab. Septet decides for every app: what the
+    /// app takes (`accepts`, or a file it opens itself) is placed in it, as a drop on it does (where
+    /// it landed, for the apps that place at the pointer); any other file opens in the app made for
+    /// it, as a drop on Home does (a .pptx on Wordcraft opens in Deckcraft, a .cr3 in Lightcraft).
+    /// Files no app opens go to the app, which says it can't take them.
+    fn route_drops(&mut self, ctx: &Context, viewport: ViewportId, slot: &mut AppSlot) {
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
         if dropped.is_empty() {
             return;
         }
-        let Some(at) = crate::pointer::in_viewport(ctx) else { return };
-        let take = || ctx.input_mut(|i| i.raw.dropped_files.clear());
-        if slot.kind.spec().drops_at_pointer {
-            take();
-            for p in &dropped {
+        ctx.input_mut(|i| i.raw.dropped_files.clear());
+        let spec = slot.kind.spec();
+        let at = if spec.drops_at_pointer { crate::pointer::in_viewport(ctx) } else { None };
+        let (place, elsewhere) = split_drops(slot.kind, slot.app.document_title().is_some(), dropped);
+        if debug_drops() {
+            eprintln!("septet drops on {}: place {place:?} at {at:?}, open elsewhere {elsewhere:?}", spec.name);
+        }
+        if !place.is_empty() {
+            for p in &place {
                 self.recent.add(p, slot.kind);
             }
-            slot.app.place_paths(&dropped, Some(at));
+            slot.app.place_paths(&place, at);
+        }
+        if !elsewhere.is_empty() {
+            self.opens.push(OpenRequest { paths: elsewhere, app: None, window: Some(viewport), place: None });
         }
     }
 
@@ -1351,4 +1372,44 @@ fn fps_probe(ctx: &Context, viewport: ViewportId) {
             *e = (now, 0, BTreeMap::new());
         }
     });
+}
+
+/// `SEPTET_DEBUG_DROPS=1`: what the system hands over while files are dragged in and dropped, and
+/// where Septet sends them (standard error).
+fn debug_drops() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("SEPTET_DEBUG_DROPS").is_some())
+}
+
+/// Dropped files split into those `kind` takes (its own file types; what it `accepts` while a
+/// document is open to put it in; files no app opens) and those another app opens by default.
+fn split_drops(kind: AppKind, has_document: bool, paths: Vec<PathBuf>) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let spec = kind.spec();
+    paths.into_iter().partition(|p| {
+        let ext = p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+        spec.extensions.contains(&ext.as_str()) || (has_document && spec.accepts.contains(&ext.as_str())) || AppKind::for_path(p).is_none_or(|k| k == kind)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A picture dropped on Deckcraft goes on the slide; a presentation dropped on Wordcraft opens
+    /// in Deckcraft, a raw photo in Lightcraft; a file no app opens goes to the app it was dropped on.
+    #[test]
+    #[cfg(feature = "default")]
+    fn drops_go_to_the_app_that_takes_them() {
+        let p = |s: &str| PathBuf::from(s);
+        let (place, elsewhere) = split_drops(AppKind::Deckcraft, true, vec![p("a.JPG"), p("b.cr3"), p("c.pptx"), p("d.xyz")]);
+        assert_eq!(place, [p("a.JPG"), p("c.pptx"), p("d.xyz")]);
+        assert_eq!(elsewhere, [p("b.cr3")]);
+        // With nothing open to put it in, a picture opens where pictures open.
+        let (place, elsewhere) = split_drops(AppKind::Designcraft, false, vec![p("a.png"), p("b.idml")]);
+        assert_eq!((place, elsewhere), (vec![p("b.idml")], vec![p("a.png")]));
+        let (place, elsewhere) = split_drops(AppKind::Wordcraft, true, vec![p("talk.pptx"), p("photo.png"), p("note.md")]);
+        assert_eq!(place, [p("photo.png"), p("note.md")]);
+        assert_eq!(elsewhere, [p("talk.pptx")]);
+        assert_eq!(AppKind::for_path(&p("talk.pptx")), Some(AppKind::Deckcraft));
+    }
 }

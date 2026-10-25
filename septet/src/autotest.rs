@@ -17,6 +17,8 @@ enum Step {
     Shot(&'static str),
     Open(AppKind),
     OpenFile(PathBuf),
+    /// Files dropped from the file manager onto the first window (as winit delivers them).
+    DropFiles(Vec<PathBuf>),
     TearOff(AppKind),
     Activate(AppKind),
     CloseTab(AppKind),
@@ -132,6 +134,36 @@ impl Autotest {
         let mut steps = match std::env::var("SEPTET_AUTOTEST_SCENARIO").as_deref() {
             Ok("interop") => Self::interop(file, pdf),
             Ok("content") => Self::content(file, pdf),
+            // Files dropped from the file manager: each goes to the app that takes it
+            // (`SEPTET_AUTOTEST_FILE` a picture, `SEPTET_AUTOTEST_PPTX` a presentation).
+            Ok("drops") => {
+                let deck = std::env::var_os("SEPTET_AUTOTEST_PPTX").map(PathBuf::from);
+                let mut steps = vec![Step::Wait(2.0)];
+                let mut drop_on = |kind: AppKind, name: &'static str, paths: Vec<PathBuf>| {
+                    steps.extend([Step::Activate(kind), Step::Wait(1.5), Step::DropFiles(paths), Step::Wait(4.0), Step::Report, Step::Shot(name)]);
+                };
+                let pic: Vec<PathBuf> = file.iter().cloned().collect();
+                let mut all = vec![Step::Wait(2.0)];
+                for (kind, app) in [(AppKind::Deckcraft, "deckcraft"), (AppKind::Wordcraft, "wordcraft"), (AppKind::Designcraft, "designcraft")] {
+                    all.extend([Step::Open(kind), Step::Wait(6.0)]);
+                    let params =
+                        if kind == AppKind::Designcraft { serde_json::json!({"width": 420, "height": 300, "pages": 1}) } else { serde_json::json!({}) };
+                    all.extend([Step::Tool("app_execute", serde_json::json!({"app": app, "command": "file.new", "params": params})), Step::ToolWait(10.0)]);
+                }
+                drop_on(AppKind::Deckcraft, "d01-picture-on-deckcraft", pic.clone());
+                drop_on(AppKind::Wordcraft, "d02-picture-on-wordcraft", pic.clone());
+                drop_on(AppKind::Designcraft, "d03-picture-on-designcraft", pic);
+                drop_on(AppKind::Wordcraft, "d04-pptx-on-wordcraft", deck.into_iter().collect());
+                all.extend(steps);
+                all.extend([
+                    Step::Tool("app_inspect", serde_json::json!({"app": "deckcraft", "what": "documents"})),
+                    Step::Tool("app_inspect", serde_json::json!({"app": "deckcraft", "what": "slide"})),
+                    Step::ToolWait(10.0),
+                    Step::Wait(1.0),
+                    Step::Exit,
+                ]);
+                all
+            }
             // The Claude settings dialog against the Claude Code installed here (needs it signed in).
             Ok("assistant") => vec![
                 Step::Wait(2.0),
@@ -900,6 +932,13 @@ impl Autotest {
                 Step::OpenFile(path) => {
                     at.note(format!("open file {}", path.display()));
                     shell.opens.push(OpenRequest { paths: vec![path], app: None, window: None, place: None });
+                }
+                Step::DropFiles(paths) => {
+                    at.note(format!("drop files {paths:?}"));
+                    if let Some(w) = shell.windows.first() {
+                        shell.router.lock().inject_drops.insert(w.viewport, paths);
+                        ctx.request_repaint_of(w.viewport);
+                    }
                 }
                 Step::TearOff(kind) => {
                     if let Some((wi, ti)) = shell.find_app_tab(kind) {
