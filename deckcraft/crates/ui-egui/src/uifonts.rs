@@ -101,7 +101,8 @@ impl UiFonts {
 
     /// Install the interface fonts again when faces were added. True if they were.
     pub fn apply(&mut self, ctx: &egui::Context) -> bool {
-        if !std::mem::take(&mut self.changed) {
+        // Hosted, the host owns the fonts: the borrowed faces aren't installed (`hosted`).
+        if !std::mem::take(&mut self.changed) || crate::hosted::is_hosted() {
             return false;
         }
         crate::theme::install_fonts_with(ctx, &self.faces);

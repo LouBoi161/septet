@@ -16,15 +16,15 @@
 
 #[cfg(target_os = "macos")]
 mod apple_events;
-mod audio;
 mod control_server;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod display;
 #[cfg(any(target_os = "windows", test))]
 mod graphics;
 mod logging;
-#[cfg(not(target_arch = "wasm32"))]
-mod pasteboard;
+
+// The platform services, shared with an embedding host (`lib.rs`).
+use deckcraft_embed::{audio, pasteboard};
 
 use deckcraft_engine::Session;
 use deckcraft_ui_egui::{Services, SlideApp};

@@ -59,10 +59,11 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
         let rect = ui.max_rect();
         // Dragging the empty title bar moves the window.
         let drag = ui.interact(rect, ui.id().with("titledrag"), Sense::click_and_drag());
-        if drag.drag_started() {
+        // Hosted, the host's window chrome moves and maximizes the window (`hosted`).
+        if drag.drag_started() && !crate::hosted::is_hosted() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
         }
-        if drag.double_clicked() {
+        if drag.double_clicked() && !crate::hosted::is_hosted() {
             let max = ui.input(|i| i.viewport().maximized.unwrap_or(false));
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
         }
@@ -101,15 +102,7 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
         if icon_toggle(&mut right, Icon::CommentsBubble, "Comments", has_doc, app.ui.pane.as_deref() == Some("comments")).clicked() {
             let _ = app.run("view.pane", json!({"pane": "comments", "toggle": true}));
         }
-        if icon_toggle(
-            &mut right,
-            if app.ui.brightness == theme::Brightness::Dark { Icon::Sparkle } else { Icon::Palette },
-            "Light/Dark appearance",
-            true,
-            false,
-        )
-        .clicked()
-        {
+        if icon_toggle(&mut right, if app.is_dark() { Icon::Sparkle } else { Icon::Palette }, "Light/Dark appearance", true, false).clicked() {
             let _ = app.run("view.dark", json!({}));
         }
     });
@@ -2174,7 +2167,8 @@ fn record(app: &mut SlideApp, ui: &mut Ui) {
     });
     group(ui, |ui| {
         if big_button(ui, Icon::Help, "Learn\nMore", true).clicked() {
-            app.open_url(deckcraft_engine::links::APP_PAGE);
+            // A host build points at the source, not the original authors' site (`hosted`).
+            app.open_url(if crate::hosted::is_hosted() { deckcraft_engine::links::GITHUB } else { deckcraft_engine::links::APP_PAGE });
         }
     });
 }
@@ -2325,7 +2319,7 @@ fn view(app: &mut SlideApp, ui: &mut Ui) {
         if big_button_ex(ui, Icon::Grayscale, "Grayscale", true, false, gs).0.clicked() {
             app.ui.grayscale = !gs;
         }
-        let dark = app.ui.brightness == theme::Brightness::Dark;
+        let dark = app.is_dark();
         if big_button_ex(ui, Icon::Palette, "Dark\nMode", true, false, dark).0.clicked() {
             let _ = app.run("view.dark", json!({}));
         }

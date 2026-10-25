@@ -15,6 +15,7 @@ pub mod dialogs;
 pub mod doc_window;
 pub mod eyedropper;
 pub mod fillui;
+pub mod hosted;
 pub mod icons;
 pub mod media;
 pub mod menus;
@@ -957,6 +958,10 @@ impl SlideApp {
             }
             "view.collapseRibbon" => self.ui.ribbon_collapsed = !self.ui.ribbon_collapsed,
             "view.dark" => {
+                // While a host sets the theme, Dark Mode opens its appearance settings (`hosted`).
+                if hosted::open_appearance() {
+                    return Ok(json!({"dark": self.is_dark(), "theme": "host"}));
+                }
                 let on = self.flag(p, self.ui.brightness == theme::Brightness::Dark);
                 self.ui.brightness = if on { theme::Brightness::Dark } else { theme::Brightness::Light };
                 self.restyle = true;
@@ -1070,11 +1075,20 @@ impl SlideApp {
             }
             "app.links" => {
                 use deckcraft_engine::links::*;
+                // A host build doesn't point people at the original authors' site and community.
+                if hosted::is_hosted() {
+                    return Ok(json!({"github": GITHUB}));
+                }
                 return Ok(json!({"discord": DISCORD, "website": WEBSITE, "apps": APPS, "appPage": APP_PAGE, "github": GITHUB}));
             }
             _ => return Err(format!("unknown UI command `{id}`")),
         }
         Ok(Value::Null)
+    }
+
+    /// Whether the interface is dark: the host's theme while it sets one (`hosted`), else Dark Mode.
+    pub fn is_dark(&self) -> bool {
+        hosted::dark().unwrap_or(self.ui.brightness == theme::Brightness::Dark)
     }
 
     /// Whether ⌘A should act on the slide list: always in the sorter, in Normal view once the
@@ -1589,19 +1603,26 @@ impl SlideApp {
 
     /// Per-frame logic before layout: styles, control requests, screenshots, shortcuts.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        // Hosted, the host owns the zoom and the fonts (`hosted`).
         let scale = self.ui.ui_scale.clamp(0.5, 3.0);
-        if (ctx.zoom_factor() - scale).abs() > 1e-3 {
+        if (ctx.zoom_factor() - scale).abs() > 1e-3 && !hosted::is_hosted() {
             ctx.set_zoom_factor(scale);
         }
         if !self.styled {
-            theme::install_fonts_with(ctx, &self.ui_fonts.faces);
+            if !hosted::is_hosted() {
+                theme::install_fonts_with(ctx, &self.ui_fonts.faces);
+            }
             self.styled = true;
             self.restyle = true;
         } else {
             self.fonts_ready = true;
         }
+        if hosted::take_restyle() {
+            self.restyle = true;
+        }
         if self.restyle {
-            theme::apply(ctx, &theme::Tokens::for_brightness(self.ui.brightness));
+            let brightness = if self.is_dark() { theme::Brightness::Dark } else { theme::Brightness::Light };
+            theme::apply(ctx, &theme::Tokens::for_brightness(brightness));
             self.restyle = false;
         }
         let now = ctx.input(|i| i.time);
@@ -1642,8 +1663,9 @@ impl SlideApp {
         }
         // On the web, dropped files can only be read asynchronously: the host reads them and
         // delivers them through `Services::inbox`, tagged with the request captured at the drop.
+        // Hosted, the host takes dropped files and places them (`hosted`).
         #[cfg(not(target_arch = "wasm32"))]
-        for f in ctx.input(|i| i.raw.dropped_files.clone()) {
+        for f in ctx.input(|i| if hosted::is_hosted() { Vec::new() } else { i.raw.dropped_files.clone() }) {
             let name = f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped file".into());
             match f.bytes() {
                 Ok(bytes) => self.open_or_insert_bytes(&name, &bytes),
@@ -1872,7 +1894,7 @@ impl SlideApp {
         self.opening_ui(&ctx);
         if self.show.is_some() {
             self.anim_preview = None;
-            show::ui(self, ui);
+            show::ui_or_window(self, ui);
             doc_window::show(self, &ctx);
             self.perf.frame_ms = now_ms() - t0;
             return;

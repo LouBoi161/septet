@@ -160,7 +160,7 @@ fn buttons(ui: &mut Ui, ok_label: &str) -> (bool, bool) {
 /// What the Preferences dialog can change, as it was when the dialog opened.
 fn preferences_snapshot(app: &SlideApp) -> Value {
     json!({
-        "dark": app.ui.brightness == theme::Brightness::Dark,
+        "dark": app.is_dark(),
         "uiScale": app.ui.ui_scale,
         "prefs": serde_json::to_value(&app.session.prefs).unwrap_or(Value::Null),
     })
@@ -170,7 +170,7 @@ fn preferences_snapshot(app: &SlideApp) -> Value {
 fn restore_preferences(app: &mut SlideApp, d: &Dialog) {
     let Some(before) = d.params.get("before") else { return };
     if let Some(dark) = before.get("dark").and_then(Value::as_bool)
-        && dark != (app.ui.brightness == theme::Brightness::Dark)
+        && dark != app.is_dark()
     {
         let _ = app.run("view.dark", json!({ "on": dark }));
     }
@@ -2257,25 +2257,28 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 d.params = json!({ "before": preferences_snapshot(app) });
             }
             ui.label(egui::RichText::new("General").font(theme::bold(13.0)));
-            let mut dark = app.ui.brightness == theme::Brightness::Dark;
+            let mut dark = app.is_dark();
             if ui.checkbox(&mut dark, "Dark appearance").changed() {
                 let _ = app.run("view.dark", json!({"on": dark}));
             }
             // While the pointer holds the slider its value only waits in the dialog: applying it
             // would rescale the slider under the pointer and run it to an end (#767). It applies
             // on release, and at once from the keyboard.
-            let pending = d.fields.get("uiScale").and_then(|v| v.parse::<f32>().ok());
-            let mut scale = pending.unwrap_or(app.ui.ui_scale);
-            let r = ui.add(egui::Slider::new(&mut scale, 0.75..=1.75).text("Interface size"));
-            if r.is_pointer_button_down_on() {
-                if r.changed() || pending.is_some() {
-                    d.fields.insert("uiScale".into(), scale.to_string());
+            // Hosted, the host's UI size applies instead (`hosted`).
+            if !crate::hosted::is_hosted() {
+                let pending = d.fields.get("uiScale").and_then(|v| v.parse::<f32>().ok());
+                let mut scale = pending.unwrap_or(app.ui.ui_scale);
+                let r = ui.add(egui::Slider::new(&mut scale, 0.75..=1.75).text("Interface size"));
+                if r.is_pointer_button_down_on() {
+                    if r.changed() || pending.is_some() {
+                        d.fields.insert("uiScale".into(), scale.to_string());
+                    }
+                } else {
+                    if r.changed() || pending.is_some() {
+                        app.ui.ui_scale = scale;
+                    }
+                    d.fields.remove("uiScale");
                 }
-            } else {
-                if r.changed() || pending.is_some() {
-                    app.ui.ui_scale = scale;
-                }
-                d.fields.remove("uiScale");
             }
             ui.label(egui::RichText::new("Editing").font(theme::bold(13.0)));
             ui.checkbox(&mut app.session.prefs.smart_guides, "Show smart guides");
@@ -2773,8 +2776,14 @@ pub fn about(_app: &mut SlideApp, ui: &mut Ui) {
         ui.label("Presentations and slide shows, rebuilt from scratch in pure Rust.");
         ui.label("An open-source, clean-room project. Not affiliated with Microsoft.");
         ui.add_space(6.0);
-        ui.hyperlink_to("Join our community on Discord", deckcraft_engine::links::DISCORD);
-        ui.hyperlink_to("getartcraft.com/apps/deckcraft", deckcraft_engine::links::APP_PAGE);
+        // A host build is a modified version: it says what it is based on and doesn't link to the
+        // original authors' site and community (`hosted`).
+        if crate::hosted::is_hosted() {
+            ui.label("Based on DeckCraft by the ArtCraft team (MIT OR Apache-2.0).");
+        } else {
+            ui.hyperlink_to("Join our community on Discord", deckcraft_engine::links::DISCORD);
+            ui.hyperlink_to("getartcraft.com/apps/deckcraft", deckcraft_engine::links::APP_PAGE);
+        }
         ui.hyperlink_to("Source on GitHub", deckcraft_engine::links::GITHUB);
         ui.add_space(6.0);
         ui.label(egui::RichText::new("MIT OR Apache-2.0 · © 2026 ArtCraft Team and the DeckCraft contributors").size(11.0).color(t.text_faint));

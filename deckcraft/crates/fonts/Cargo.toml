@@ -8,6 +8,10 @@ description = "DeckCraft fonts: font database (craft-fonts + system), substitute
 [lints]
 workspace = true
 
+[features]
+# Septet turns this on: CRAFT_FONTS refers to the fonts embedded once for all apps.
+shared-craft-fonts = ["dep:shared-craft-fonts"]
+
 [dependencies]
 kurbo = { workspace = true }
 skrifa = { workspace = true }
@@ -16,3 +20,5 @@ unicode-bidi = { workspace = true }
 log = { workspace = true }
 # Last-resort face only (Ubuntu Light); no UI code.
 epaint_default_fonts = "0.36"
+# Septet: the suite's single copy of the craft fonts (`shared-craft-fonts` feature, see build.rs).
+shared-craft-fonts = { path = "../../../shared/craft-fonts", optional = true }

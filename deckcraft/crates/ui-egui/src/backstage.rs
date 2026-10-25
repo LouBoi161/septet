@@ -738,8 +738,11 @@ fn home(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outcome) 
             }
         });
     }
-    ui.add_space(30.0);
-    ui.hyperlink_to("Join the ArtCraft community on Discord", deckcraft_engine::links::DISCORD);
+    // A host build doesn't invite people to the original authors' community (`hosted`).
+    if !crate::hosted::is_hosted() {
+        ui.add_space(30.0);
+        ui.hyperlink_to("Join the ArtCraft community on Discord", deckcraft_engine::links::DISCORD);
+    }
 }
 
 /// New: a blank presentation, then every theme and starter template, with a search box.
@@ -1350,7 +1353,7 @@ fn account(app: &mut SlideApp, ui: &mut Ui) {
         ui.vertical(|ui| {
             ui.set_width(340.0);
             heading(ui, "Appearance");
-            let dark = app.ui.brightness == theme::Brightness::Dark;
+            let dark = app.is_dark();
             egui::ComboBox::from_id_salt("backstage_appearance").width(260.0).selected_text(if dark { "Dark" } else { "Light" }).show_ui(ui, |ui| {
                 for (on, label) in [(false, "Light"), (true, "Dark")] {
                     if ui.selectable_label(dark == on, label).clicked() {
@@ -1383,7 +1386,9 @@ fn account(app: &mut SlideApp, ui: &mut Ui) {
             ) {
                 let _ = app.run("app.about", json!({}));
             }
-            ui.hyperlink_to("Join our community on Discord", deckcraft_engine::links::DISCORD);
+            if !crate::hosted::is_hosted() {
+                ui.hyperlink_to("Join our community on Discord", deckcraft_engine::links::DISCORD);
+            }
             ui.hyperlink_to("Source on GitHub", deckcraft_engine::links::GITHUB);
         });
     });

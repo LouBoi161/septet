@@ -671,6 +671,45 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64, 
     keep
 }
 
+/// The show in the window, or, hosted (`crate::hosted`), in a full-screen window of its own when
+/// it fills the screen: the host's window holds other apps' tabs, and making it full screen would
+/// show them around the slides. Meanwhile the tab says where the show is and can end it. Reading
+/// view and a show browsed in a window stay in the tab.
+pub fn ui_or_window(app: &mut SlideApp, ui: &mut Ui) {
+    let fills =
+        app.show.as_ref().is_some_and(|s| !s.reading) && app.session.active().is_some_and(|d| show_fills_screen(false, &d.doc.show.show_type));
+    if !crate::hosted::is_hosted() || !fills {
+        return self::ui(app, ui);
+    }
+    let rect = ui.max_rect();
+    ui.painter().rect_filled(rect, 0.0, Color32::from_gray(16));
+    let mut end = false;
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(24.0)), |ui| {
+        ui.vertical_centered(|ui| {
+            ui.add_space((rect.height() / 2.0 - 60.0).max(0.0));
+            ui.label(egui::RichText::new("The slide show is running in its own window.").size(18.0).color(Color32::WHITE));
+            ui.label(egui::RichText::new("Esc there ends it.").size(14.0).color(Color32::from_gray(180)));
+            ui.add_space(12.0);
+            end = ui.button("End Show").clicked();
+        });
+    });
+    let ctx = ui.ctx().clone();
+    ctx.show_viewport_immediate(
+        egui::ViewportId::from_hash_of("deckcraft_show"),
+        egui::ViewportBuilder::default().with_title("Slide Show — DeckCraft").with_fullscreen(true),
+        |ui, _| {
+            if ui.input(|i| i.viewport().close_requested()) {
+                end = true;
+            }
+            ui.painter().rect_filled(ui.max_rect(), 0.0, Color32::BLACK);
+            self::ui(app, ui);
+        },
+    );
+    if end && app.show.is_some() {
+        let _ = app.run("show.end", json!({}));
+    }
+}
+
 pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     let Some((doc_uid, doc)) = app.session.active().map(|d| (d.uid, d.doc.clone())) else {
@@ -686,7 +725,8 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         show.show_start = now;
         show.timer = PresenterTimer::start(now);
         show.last_move = now;
-        if show_fills_screen(show.reading, &doc.show.show_type) {
+        // Hosted, a show that fills the screen already has a full-screen window (`ui_or_window`).
+        if show_fills_screen(show.reading, &doc.show.show_type) && !crate::hosted::is_hosted() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
         }
         show.after_enter(&doc, now);
@@ -1236,7 +1276,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         app.show = Some(show);
     } else {
         app.media.stop_owned(crate::media::Owner::Show);
-        if !show.reading {
+        if !show.reading && !crate::hosted::is_hosted() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
         }
         if show.rehearse {

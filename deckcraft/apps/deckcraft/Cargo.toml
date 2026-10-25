@@ -7,6 +7,12 @@ description = "DeckCraft desktop app"
 publish = false
 default-run = "deckcraft"
 
+# The desktop app as a library too (`src/lib.rs`): the platform services `main.rs` uses, and
+# `Embedded`, DeckCraft in a tab of a host window (Septet).
+[lib]
+name = "deckcraft_embed"
+path = "src/lib.rs"
+
 [lints]
 workspace = true
 
@@ -14,6 +20,9 @@ workspace = true
 deckcraft-engine = { workspace = true }
 deckcraft-ui-egui = { workspace = true }
 deckcraft-media = { workspace = true }
+# Slides drawn off the window for a host's agent (`embed`).
+deckcraft-render = { workspace = true }
+deckcraft-model = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "links", "wayland", "x11"] }
 egui = { workspace = true }
 serde_json = { workspace = true }
