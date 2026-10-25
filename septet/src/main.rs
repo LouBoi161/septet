@@ -42,15 +42,69 @@ pub const APP_ID: &str = "septet";
 
 struct Septet {
     shell: shell::Shell,
+    frames: Option<FrameLog>,
+}
+
+/// `SEPTET_DEBUG_FRAMES=1`: once a second, how many frames were drawn, the longest gap between
+/// two, and how long Septet's own work (logic + ui) took; the rest of a gap is painting and
+/// waiting for the GPU and the display. Septet's other windows and the apps' own (immediate
+/// viewports) are drawn and presented within `ui`, so their waits count as work: a window hidden
+/// behind another got a frame through about once a second (DeckCraft's Presenter View).
+#[derive(Default)]
+struct FrameLog {
+    start: Option<std::time::Instant>,
+    last: Option<std::time::Instant>,
+    since: Option<std::time::Instant>,
+    frames: u32,
+    max_gap: f64,
+    work: f64,
+    max_work: f64,
+}
+
+impl FrameLog {
+    fn begin(&mut self) {
+        let now = std::time::Instant::now();
+        if let Some(last) = self.last {
+            self.max_gap = self.max_gap.max((now - last).as_secs_f64());
+        }
+        self.last = Some(now);
+        self.start = Some(now);
+    }
+
+    fn end(&mut self) {
+        let now = std::time::Instant::now();
+        let work = self.start.map_or(0.0, |s| (now - s).as_secs_f64());
+        self.frames += 1;
+        self.work += work;
+        self.max_work = self.max_work.max(work);
+        let since = *self.since.get_or_insert(now);
+        if (now - since).as_secs_f64() >= 1.0 {
+            eprintln!(
+                "septet frames: {} in {:.2}s, longest gap {:.0} ms, work avg {:.1} ms max {:.0} ms",
+                self.frames,
+                (now - since).as_secs_f64(),
+                self.max_gap * 1000.0,
+                self.work / f64::from(self.frames) * 1000.0,
+                self.max_work * 1000.0
+            );
+            *self = FrameLog { last: self.last, since: Some(now), ..Default::default() };
+        }
+    }
 }
 
 impl eframe::App for Septet {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(f) = &mut self.frames {
+            f.begin();
+        }
         self.shell.logic(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.shell.ui(ui, frame);
+        if let Some(f) = &mut self.frames {
+            f.end();
+        }
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -166,7 +220,7 @@ fn main() -> eframe::Result {
             let updates = cc.storage.and_then(|s| eframe::get_value(s, update::STORAGE_KEY)).unwrap_or_default();
             let mut shell = shell::Shell::new(ctx, router, files, session, appearance, updates);
             shell.instance = primary.map(|p| p.serve(ctx.clone()));
-            Ok(Box::new(Septet { shell }))
+            Ok(Box::new(Septet { shell, frames: std::env::var_os("SEPTET_DEBUG_FRAMES").map(|_| FrameLog::default()) }))
         }),
     )
 }

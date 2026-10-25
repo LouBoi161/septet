@@ -557,6 +557,7 @@ impl Shell {
                 s.iso.swap(&ctx);
                 self.bridge.before_app(&ctx, s);
                 self.route_drops(&ctx, viewport, s);
+                s.app.set_other_screen(other_screen(&ctx, frame));
                 let app = s.app.app();
                 app.logic(&ctx, frame);
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(content).layout(egui::Layout::top_down(egui::Align::Min)));
@@ -1347,6 +1348,34 @@ pub fn window_builder(at: Option<Pos2>, size: Vec2) -> ViewportBuilder {
     b
 }
 
+/// A screen other than the one the window drawn in `ctx` is on, as an index into winit's
+/// `available_monitors()` (what `ViewportBuilder::with_monitor` takes). `None` with one screen,
+/// or when it can't be told where the window is.
+fn other_screen(ctx: &Context, frame: &eframe::Frame) -> Option<usize> {
+    let window = frame.winit_window()?;
+    let screens: Vec<Rect> = window
+        .available_monitors()
+        .map(|m| Rect::from_min_size(egui::pos2(m.position().x as f32, m.position().y as f32), egui::vec2(m.size().width as f32, m.size().height as f32)))
+        .collect();
+    if screens.len() < 2 {
+        return None;
+    }
+    // The screens are in physical pixels; the screen with the window's centre is its own.
+    let on = match ctx.input(|i| i.viewport().outer_rect) {
+        Some(r) => screens.iter().position(|s| s.contains((r * ctx.pixels_per_point()).center())),
+        // No window positions (Wayland): the main window still knows its screen.
+        None if ctx.viewport_id() == ViewportId::ROOT => window.current_monitor().and_then(|m| window.available_monitors().position(|a| a == m)),
+        None => None,
+    };
+    other_screen_than(&screens, on?)
+}
+
+/// The first of `screens` that doesn't overlap screen `on` (a mirrored screen shows the same).
+fn other_screen_than(screens: &[Rect], on: usize) -> Option<usize> {
+    let own = *screens.get(on)?;
+    screens.iter().position(|s| !s.intersect(own).is_positive())
+}
+
 /// `SEPTET_FPS=1`: once a second, how many frames a window drew and what asked for them.
 fn fps_probe(ctx: &Context, viewport: ViewportId) {
     use std::collections::BTreeMap;
@@ -1411,5 +1440,17 @@ mod tests {
         assert_eq!(place, [p("photo.png"), p("note.md")]);
         assert_eq!(elsewhere, [p("talk.pptx")]);
         assert_eq!(AppKind::for_path(&p("talk.pptx")), Some(AppKind::Deckcraft));
+    }
+
+    /// The other screen is one beside the window's (touching it is fine), never a mirror of it.
+    #[test]
+    fn the_other_screen_does_not_overlap_the_windows_screen() {
+        let r = |x: f32, w: f32| Rect::from_min_size(egui::pos2(x, 0.0), egui::vec2(w, 1440.0));
+        let side_by_side = [r(0.0, 2560.0), r(2560.0, 2560.0)];
+        assert_eq!(other_screen_than(&side_by_side, 0), Some(1));
+        assert_eq!(other_screen_than(&side_by_side, 1), Some(0));
+        assert_eq!(other_screen_than(&[r(0.0, 2560.0), r(0.0, 2560.0)], 0), None);
+        assert_eq!(other_screen_than(&[r(0.0, 2560.0), r(0.0, 2560.0), r(2560.0, 1920.0)], 1), Some(2));
+        assert_eq!(other_screen_than(&side_by_side, 2), None);
     }
 }

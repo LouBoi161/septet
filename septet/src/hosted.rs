@@ -56,6 +56,12 @@ pub trait HostedApp {
     /// While Septet sets the look, the app's theme commands open Septet's Appearance dialog
     /// through this.
     fn set_open_appearance(&mut self, _handler: Box<dyn FnMut()>) {}
+    /// A screen other than the one the app's window is on, as an index for
+    /// `egui::ViewportBuilder::with_monitor`; `None` without one. Set every frame, for a window
+    /// of the app's own that must not end up behind its full-screen window (DeckCraft's Presenter
+    /// View): Septet draws all its windows in one go, and the desktop takes a frame from a hidden
+    /// one only about once a second, so every window would wait for it.
+    fn set_other_screen(&mut self, _screen: Option<usize>) {}
     /// The app's Generative Fill and Generate Image commands call `handler` (`generate.rs`).
     /// Apps without them never call it.
     fn set_generate(&mut self, _handler: Box<dyn FnMut(Generate)>) {}
@@ -115,7 +121,7 @@ pub struct GenerativeSource {
 pub type AgentRender = Box<dyn FnOnce() -> Result<egui::ColorImage, String> + Send>;
 
 /// Implement [`HostedApp`] for an app's `Embedded`, with the optional parts it has: `agent`
-/// (phase 5) and `appearance` (A4).
+/// (phase 5), `appearance` (A4) and `screens` (windows of its own on another screen).
 macro_rules! hosted {
     ($ty:ty $(, $part:ident)*) => {
         impl HostedApp for $ty {
@@ -192,6 +198,11 @@ macro_rules! hosted_part {
             <$ty>::set_open_appearance(self, handler)
         }
     };
+    (screens, $ty:ty) => {
+        fn set_other_screen(&mut self, screen: Option<usize>) {
+            <$ty>::set_other_screen(self, screen)
+        }
+    };
     (photocraft_generate, $ty:ty) => {
         fn set_generate(&mut self, mut handler: Box<dyn FnMut(Generate)>) {
             <$ty>::set_generate(
@@ -231,7 +242,7 @@ hosted!(effectcraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "wordcraft")]
 hosted!(wordcraft_embed::Embedded, agent, appearance);
 #[cfg(feature = "deckcraft")]
-hosted!(deckcraft_embed::Embedded, agent, appearance);
+hosted!(deckcraft_embed::Embedded, agent, appearance, screens);
 
 /// An app's [`EntryPoints`] from its `Embedded` type, for its entry in `kinds::APPS`.
 macro_rules! entry_points {

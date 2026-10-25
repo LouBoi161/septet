@@ -134,6 +134,24 @@ impl Autotest {
         let mut steps = match std::env::var("SEPTET_AUTOTEST_SCENARIO").as_deref() {
             Ok("interop") => Self::interop(file, pdf),
             Ok("content") => Self::content(file, pdf),
+            // A presentation's slide show with its animations (`SEPTET_AUTOTEST_PPTX`), stepped
+            // through; with `SEPTET_DEBUG_FRAMES` the frame rate shows in the log.
+            Ok("show") => {
+                let deck = std::env::var_os("SEPTET_AUTOTEST_PPTX").map(PathBuf::from);
+                let exec = |command: &str| Step::Tool("app_execute", serde_json::json!({"app": "deckcraft", "command": command, "params": {}}));
+                let mut steps = vec![Step::Wait(2.0)];
+                steps.extend(deck.map(Step::OpenFile));
+                steps.extend([Step::Wait(6.0), Step::Activate(AppKind::Deckcraft), Step::Wait(2.0), exec("show.start"), Step::ToolWait(10.0), Step::Wait(3.0)]);
+                for i in 0..8 {
+                    steps.extend([Step::Press(AppKind::Deckcraft, vec![Key::ArrowRight]), Step::Wait(0.4)]);
+                    if i == 0 {
+                        steps.push(Step::Shot("s01-show"));
+                    }
+                    steps.push(Step::Wait(2.0));
+                }
+                steps.extend([exec("show.end"), Step::ToolWait(5.0), Step::Wait(1.0), Step::Report, Step::Exit]);
+                steps
+            }
             // Files dropped from the file manager: each goes to the app that takes it
             // (`SEPTET_AUTOTEST_FILE` a picture, `SEPTET_AUTOTEST_PPTX` a presentation).
             Ok("drops") => {

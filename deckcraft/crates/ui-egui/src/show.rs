@@ -918,7 +918,11 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         let done: Vec<(ShapeId, usize)> = plays.iter().map(|p| (p.trigger, p.step)).collect();
         let key = Key { slide: idx, step, size, doc: std::sync::Arc::as_ptr(&doc) as usize, hidden: hidden.clone(), plays: done, gif };
         let back_key = BackKey { slide: idx, size, doc: key.doc };
-        let tex = if !animating && show.tex.as_ref().is_some_and(|(k, _)| *k == key) {
+        // A Morph shows frames of its own: the slide's frame, unseen until it ends, isn't rendered
+        // again for every one of them (the slide's first animation often starts with it).
+        let morphing =
+            show.trans.as_ref().is_some_and(|tr| tr.kind == "morph" && tr.from.is_some_and(|i| i < doc.slides.len()) && now - tr.start < tr.dur);
+        let tex = if show.tex.as_ref().is_some_and(|(k, _)| (!animating && *k == key) || morphing) {
             show.tex.as_ref().map(|(_, t)| t.clone())
         } else {
             // The frame rendered ahead of time, when it is this one (waiting for it beats starting over).
@@ -961,7 +965,6 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             }
         }
         let mut drew = false;
-        let morphing = show.trans.as_ref().is_some_and(|tr| tr.kind == "morph" && tr.from.is_some() && now - tr.start < tr.dur);
         let tl = if morphing { Some(show.timeline(&doc).clone()) } else { None };
         let morph = match (&show.trans, tl) {
             (Some(tr), Some(tl)) => {
@@ -1977,6 +1980,11 @@ fn render_thumb(ctx: &egui::Context, show: &mut Show, doc: &Presentation, i: usi
 }
 
 fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64, keep: &mut bool) {
+    // Hosted: full screen on another screen, or not at all (`crate::hosted::set_other_screen`).
+    let screen = crate::hosted::is_hosted().then(crate::hosted::other_screen);
+    if screen == Some(None) {
+        return;
+    }
     let cur = show.state.slide;
     let next = show.state.peek_next(doc);
     let cur_tex = show.tex.as_ref().map(|(_, t)| t.clone());
@@ -2006,9 +2014,13 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
     let button = |ui: &mut Ui, s: &str| {
         ui.add(egui::Button::new(egui::RichText::new(s).size(15.0).color(Color32::WHITE)).fill(Color32::from_gray(60)).min_size(vec2(0.0, 30.0)))
     };
+    let builder = egui::ViewportBuilder::default().with_title("Presenter View — DeckCraft").with_inner_size([1100.0, 700.0]);
     ctx.show_viewport_immediate(
         egui::ViewportId::from_hash_of("deckcraft_presenter"),
-        egui::ViewportBuilder::default().with_title("Presenter View — DeckCraft").with_inner_size([1100.0, 700.0]),
+        match screen.flatten() {
+            Some(i) => builder.with_monitor(i),
+            None => builder,
+        },
         |ui, _| {
             if !keyboard(ui.ctx(), show, doc, now, true) {
                 *keep = false;

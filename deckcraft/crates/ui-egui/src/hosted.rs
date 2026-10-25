@@ -4,8 +4,9 @@
 //! UI zoom and dropped files. While hosted, DeckCraft leaves those alone: it never calls
 //! `ctx.set_fonts` (the host installed [`crate::theme::font_definitions`] among its own), never
 //! sets the zoom factor, doesn't read dropped files itself (the host places them), and its title
-//! bar doesn't move or maximize the window. A full-screen slide show opens a window of its own
-//! instead of making the host's window full screen. A host may also set light or dark
+//! bar doesn't move or maximize the window. A full-screen slide show makes the host's window full
+//! screen and covers its tabs; its Presenter View fills another screen ([`set_other_screen`]) or
+//! is left out with one screen. A host may also set light or dark
 //! ([`set_dark`]), an accent colour ([`set_accent`]) and more contrast ([`set_contrast`]) for all
 //! the apps it shows; none of them is saved as DeckCraft's own. Standalone, nothing changes.
 
@@ -161,6 +162,27 @@ pub fn current_replay() -> Option<Replay> {
         return None;
     }
     REPLAY.with_borrow(Clone::clone)
+}
+
+thread_local! {
+    static OTHER_SCREEN: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+/// A screen other than the one the host's window is on, as an index into winit's
+/// `available_monitors()` (what [`egui::ViewportBuilder::with_monitor`] takes); `None` when the
+/// window has the only screen or the host can't tell. The host sets it every frame.
+///
+/// The Presenter View goes full screen there and is left out without one. On the show's screen
+/// its window would be hidden behind the show, and the host draws all its windows in one go: the
+/// desktop takes a frame from a hidden window only about once a second, so the show moved at a
+/// frame a second.
+pub fn set_other_screen(screen: Option<usize>) {
+    OTHER_SCREEN.set(screen);
+}
+
+/// The host's other screen ([`set_other_screen`]).
+pub fn other_screen() -> Option<usize> {
+    OTHER_SCREEN.get()
 }
 
 /// `c` recoloured from the theme's accent `from` to `to`: `to`'s hue, with `c`'s saturation and

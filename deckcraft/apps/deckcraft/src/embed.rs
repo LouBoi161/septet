@@ -216,6 +216,12 @@ impl Embedded {
     pub fn set_open_appearance(&mut self, handler: Box<dyn FnMut()>) {
         hosted::set_open_appearance(handler);
     }
+
+    /// A screen other than the one Septet's window is on (a winit monitor index), for the
+    /// Presenter View; `None` without one (see `hosted::set_other_screen`).
+    pub fn set_other_screen(&mut self, screen: Option<usize>) {
+        hosted::set_other_screen(screen);
+    }
 }
 
 impl Embedded {

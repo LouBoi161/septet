@@ -51,6 +51,8 @@ Neu: `apps/deckcraft/src/lib.rs` (Bibliothek `deckcraft_embed`), `apps/deckcraft
 | `crates/ui-egui/src/show.rs` | `ui_or_window`: gehostet Septets Fenster auf Vollbild, Show als `Area` (Foreground) darüber; `restore_fullscreen` | wie oben |
 | `crates/ui-egui/src/ribbon.rs` | Hell/Dunkel-Knopf in der Titelleiste und „Dark Mode“ unter Ansicht gehostet weg | ein Darstellungs-Knopf in Septets Leiste |
 | `apps/deckcraft/src/pickers.rs` (neu), `Cargo.toml` (`pollster`) | Dateiwähler gehostet nebenläufig (`rfd::AsyncFileDialog`, Elternfenster), Aktion läuft mit der Antwort erneut | Septet blieb stehen, solange ein Wähler offen war |
+| `crates/ui-egui/src/show.rs` (2026-10-25 nachts) | `presenter_window`: gehostet als Vollbild auf einem anderen Bildschirm (`with_monitor(hosted::other_screen())`), mit nur einem Bildschirm keine Referentenansicht; `hosted::set_other_screen` (Septet setzt es jedes Bild über `Embedded::set_other_screen`) | Show lief mit 1 Bild/s: die Referentenansicht (ein sofortiges Viewport) lag hinter der Vollbild-Show, GNOME/XWayland nimmt einem verdeckten Fenster nur etwa ein Bild pro Sekunde ab, und egui zeichnet sofortige Viewports innerhalb des Bilds des Hauptfensters – jedes Bild wartete ~1 s |
+| `crates/ui-egui/src/show.rs` (ebenso, nicht nur gehostet) | Während eines Morph-Übergangs wird das (unsichtbare) Folienbild nicht in jedem Bild neu gerendert | Folien, deren erste Animation mit dem Übergang startet, renderten pro Bild Morph und Animation (2560×1440: ~55 statt ~36 ms) |
 
 ## Darstellungs-Knopf: in allen Apps gehostet ausgeblendet (2026-10-25)
 
