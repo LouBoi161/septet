@@ -262,6 +262,7 @@ impl Autotest {
                     AppKind::Filmcraft,
                     AppKind::Effectcraft,
                     AppKind::Wordcraft,
+                    AppKind::Deckcraft,
                 ];
                 // Each app's own theme command opens Septet's dialog while Septet sets the look. (Claude
                 // reaches only these apps' theme commands; the others' are tested in their crates.)
@@ -271,6 +272,7 @@ impl Autotest {
                     (AppKind::Filmcraft, "view.theme.light", serde_json::json!({})),
                     (AppKind::Lightcraft, "view.theme", serde_json::json!({"theme": "paper"})),
                     (AppKind::Wordcraft, "view.interfaceTheme", serde_json::json!({"value": "light"})),
+                    (AppKind::Deckcraft, "view.dark", serde_json::json!({"on": false})),
                 ];
                 let short = |k: AppKind| k.name().to_ascii_lowercase();
                 let shot = |name: String| Step::Shot(Box::leak(name.into_boxed_str()));
@@ -283,9 +285,10 @@ impl Autotest {
                 ];
                 for kind in &apps {
                     steps.extend([Step::Open(*kind), Step::Wait(6.0)]);
-                    // Wordcraft starts on File › Home with no document, where its theme command doesn't run.
-                    if *kind == AppKind::Wordcraft {
-                        steps.extend([Step::Tool("app_execute", serde_json::json!({"app": "wordcraft", "command": "file.new"})), Step::ToolWait(10.0)]);
+                    // Wordcraft starts on File › Home with no document, where its theme command doesn't run;
+                    // Deckcraft on its start screen, which shows little of its editor's colours.
+                    if matches!(*kind, AppKind::Wordcraft | AppKind::Deckcraft) {
+                        steps.extend([Step::Tool("app_execute", serde_json::json!({"app": short(*kind), "command": "file.new"})), Step::ToolWait(10.0)]);
                     }
                     steps.push(shot(format!("a03-{}-lightest", short(*kind))));
                 }
@@ -492,7 +495,7 @@ impl Autotest {
             ],
             AppKind::Pdfcraft => vec![("doc_create", json!({"from": "blank", "pages": 2, "width": 400, "height": 300, "name": "Layers"}))],
             // No layers panel.
-            AppKind::Wordcraft => vec![("file.new", json!({}))],
+            AppKind::Wordcraft | AppKind::Deckcraft => vec![("file.new", json!({}))],
         };
         // More commands after these: `SEPTET_AUTOTEST_CMDS` = [["command", {params}], …].
         let more: Vec<(String, serde_json::Value)> =
@@ -615,6 +618,34 @@ impl Autotest {
                 "paragraph",
                 2,
                 vec![run("file.exportPdf", json!({}))],
+            ),
+            AppKind::Deckcraft => (
+                run("file.new", json!({})),
+                "shape",
+                vec![
+                    run("slide.new", json!({"layout": "titleOnly", "title": "Hello from Septet"})),
+                    run("shape.insert", json!({"preset": "ellipse", "rect": [100, 150, 300, 200]})),
+                    run("shape.fill", json!({"color": "#e8a33d"})),
+                    run("transition.set", json!({"kind": "fade"})),
+                    run("animation.add", json!({"effect": "fade"})),
+                ],
+                "shape",
+                2,
+                // A file picker and a dialog are refused; the show opens a full-screen window of its own.
+                vec![
+                    run("app.insertPictureDialog", json!({})),
+                    run("app.about", json!({})),
+                    call("app_render", json!({"target": "deck", "max_side": 800})),
+                    run("show.start", json!({"from": 1})),
+                    Step::ToolWait(10.0),
+                    Step::Wait(3.0),
+                    Step::Report,
+                    Step::Shot("x02b-show"),
+                    run("show.end", json!({})),
+                    Step::ToolWait(10.0),
+                    Step::Wait(1.5),
+                    Step::Shot("x02c-show-ended"),
+                ],
             ),
             AppKind::Unknown => unreachable!("autotests name installed apps"),
             AppKind::Effectcraft => (

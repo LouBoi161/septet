@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 build = "build.rs"
-description = "Septet: Photocraft, Vectorcraft, Lightcraft, Designcraft, Pdfcraft, Filmcraft, Effectcraft and Wordcraft in one tabbed, multi-window shell"
+description = "Septet: Photocraft, Vectorcraft, Lightcraft, Designcraft, Pdfcraft, Filmcraft, Effectcraft, Wordcraft and Deckcraft in one tabbed, multi-window shell"
 
 [dependencies]
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "persistence"] }
@@ -39,6 +39,7 @@ pdfcraft-ui-egui = { path = "../pdfcraft/crates/ui-egui", optional = true }
 filmcraft-ui-egui = { path = "../filmcraft/crates/ui-egui", optional = true }
 effectcraft-ui-egui = { path = "../effectcraft/crates/ui-egui", optional = true }
 wordcraft-ui-egui = { path = "../wordcraft/crates/ui-egui", optional = true }
+deckcraft-ui-egui = { path = "../deckcraft/crates/ui-egui", optional = true }
 # The apps' desktop packages, used as libraries (their `embed` API builds each app for a tab).
 photocraft = { path = "../photocraft/apps/photocraft", optional = true }
 vectorcraft = { path = "../vectorcraft/apps/vectorcraft", optional = true }
@@ -48,6 +49,7 @@ pdfcraft = { path = "../pdfcraft/apps/pdfcraft", optional = true }
 filmcraft = { path = "../filmcraft/apps/filmcraft", optional = true }
 effectcraft = { path = "../effectcraft/apps/effectcraft", optional = true }
 wordcraft = { path = "../wordcraft/apps/wordcraft", optional = true }
+deckcraft = { path = "../deckcraft/apps/deckcraft", optional = true }
 # The apps' font crates, only to turn on `shared-craft-fonts`: the craft fonts are embedded once
 # (`shared/craft-fonts`), not once per app.
 photocraft-text = { path = "../photocraft/crates/text", optional = true, features = ["shared-craft-fonts"] }
@@ -57,11 +59,12 @@ designcraft-fonts = { path = "../designcraft/crates/fonts", optional = true, fea
 pdfcraft-fonts = { path = "../pdfcraft/crates/fonts", optional = true, features = ["shared-craft-fonts"] }
 filmcraft-text = { path = "../filmcraft/crates/text", optional = true, features = ["shared-craft-fonts"] }
 wordcraft-fonts = { path = "../wordcraft/crates/fonts", optional = true, features = ["shared-craft-fonts"] }
+deckcraft-fonts = { path = "../deckcraft/crates/fonts", optional = true, features = ["shared-craft-fonts"] }
 
 # One feature per app; a build without one leaves the app out (`kinds::APPS`). Saved sessions and
 # recent files that name it are skipped.
 [features]
-default = ["photocraft", "vectorcraft", "lightcraft", "designcraft", "pdfcraft", "filmcraft", "effectcraft", "wordcraft"]
+default = ["photocraft", "vectorcraft", "lightcraft", "designcraft", "pdfcraft", "filmcraft", "effectcraft", "wordcraft", "deckcraft"]
 photocraft = ["dep:photocraft", "dep:photocraft-ui-egui", "dep:photocraft-text"]
 vectorcraft = ["dep:vectorcraft", "dep:vectorcraft-ui-egui", "dep:vectorcraft-text"]
 lightcraft = ["dep:lightcraft", "dep:lightcraft-ui-egui", "dep:lightcraft-engine"]
@@ -70,6 +73,7 @@ pdfcraft = ["dep:pdfcraft", "dep:pdfcraft-ui-egui", "dep:pdfcraft-fonts"]
 filmcraft = ["dep:filmcraft", "dep:filmcraft-ui-egui", "dep:filmcraft-text"]
 effectcraft = ["dep:effectcraft", "dep:effectcraft-ui-egui"]
 wordcraft = ["dep:wordcraft", "dep:wordcraft-ui-egui", "dep:wordcraft-fonts"]
+deckcraft = ["dep:deckcraft", "dep:deckcraft-ui-egui", "dep:deckcraft-fonts"]
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 # Only for EventLoopBuilderExtX11 (XWayland by default, see main.rs).

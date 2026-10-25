@@ -1,11 +1,12 @@
 # Plan: Aus sieben Apps werden zwölf
 
-Stand: 2026-10-24. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
+Stand: 2026-10-25. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
 erledigt (MR !2 am 2026-10-14 gemergt), **Phase A gemergt** (MR !3 am 2026-10-22: A1–A5 und H0 fertig; der Rest von A4,
 Lightcraft und hoher Kontrast, gemergt mit MR !5 am 2026-10-24), dritter Abgleich gemergt (MR !4 am 2026-10-22), Phase H
 (ComfyUI) gemergt (MR !6 am 2026-10-24), vierter Abgleich gemergt (MR !7 am 2026-10-24); **Phase B begonnen:
 WordCraft gemergt** (MR !8 am 2026-10-24); **Apps installieren/deinstallieren und Updates in der App** (2026-10-25,
-siehe unten), **Release 0.3.0** am 2026-10-25 (GitHub und GitLab); als Nächstes DeckCraft. Grundlage: Untersuchung der Upstream-Repos
+siehe unten), **Release 0.3.0** am 2026-10-25 (GitHub und GitLab); **DeckCraft eingebaut** (Branch `phase-b-deckcraft`,
+2026-10-25, siehe Phase B). Grundlage: Untersuchung der Upstream-Repos
 (`storytold/wordcraft`, `deckcraft`, `gridcraft`, `cadcraft`, `soundcraft`, `craft-launcher`, alle v0.4.0 vom
 2026-10-10) und des Septet-Codes.
 
@@ -208,7 +209,7 @@ Skills für Claude, Autotest-Szenario, Theme-Anbindung.
 | App | Größe | Besonderheiten |
 |---|---|---|
 | WordCraft | M | `zoom_with_keyboard` und Schriften sind global; Sprache liegt in einem `thread_local`; Vorlesen startet externe Programme; Layout pro Render teuer (cachen). 422 Befehle, Seiten-Render auf der CPU vorhanden. |
-| DeckCraft | M | Engine setzt einen globalen Panic-Hook (`engine/src/guard.rs`), setzt jeden Frame `set_zoom_factor`, öffnet eigenen Audio-Ausgang, Vollbild und ein zweites Fenster für die Referentenansicht, schließt Fenster direkt. Alles im Hosted-Modus umleiten. 226 Befehle. |
+| DeckCraft (erledigt) | M | Engine setzt einen globalen Panic-Hook (`engine/src/guard.rs`), setzt jeden Frame `set_zoom_factor`, öffnet eigenen Audio-Ausgang, Vollbild und ein zweites Fenster für die Referentenansicht, schließt Fenster direkt. Alles im Hosted-Modus umleiten. 226 Befehle. |
 | GridCraft | M–L | Kein Offscreen-Render für Tabellen. Abkürzung: GridCraft kann PDF; das PDF rendert Septet mit hayro, das schon im Binary ist. Fängt fallengelassene Dateien selbst ab (kollidiert mit „Platzieren“); statischer Textur-Cache. 313 Befehle. |
 | CADCraft | S–M | Globales `install_io()` einmal aufrufen; GPU-Canvas über `egui_wgpu`-Callback; `undo` heißt dort nicht `edit.undo`; interaktive Befehle (Kommandozeile mit Nachfragen) für Claude sperren. 277 Befehle, PNG/SVG/PDF-Render vorhanden. |
 
@@ -224,6 +225,27 @@ in Upstream-Dateien: `docs/suite/upstream-patches.md`.
 Offen bei WordCraft: Ziehen aus WordCraft in andere Apps (`outgoing_drag`), `place_paths` an der Mausposition,
 Neuladen extern geänderter Dateien beim Sichtbarwerden, Layout pro Render cachen (bisher kein Problem gesehen),
 CJK-Zusatzschriften für Eingabemethoden gehostet (`set_fonts` fällt weg, `add_font` wäre nötig).
+
+**Stand 2026-10-25: DeckCraft eingebaut** (Branch `phase-b-deckcraft`): Subtree **v0.11.1** (neuer als die geplante
+v0.10.0), ArtCraft-Marken entfernt, Embed-API (`deckcraft/apps/deckcraft/src/embed.rs`, Bibliothek `deckcraft_embed`),
+`hosted`-Modul (`deckcraft/crates/ui-egui/src/hosted.rs`) nach dem WordCraft-Muster. Die Punkte aus der Tabelle oben:
+- Panic-Hook (`guard.rs`): bleibt. Er protokolliert nur und ruft den vorherigen Hook auf, stört Septet also nicht.
+- `set_zoom_factor` jeden Frame: gehostet aus; der Regler „Interface size“ in den Einstellungen ist gehostet ausgeblendet.
+- Eigener Audio-Ausgang (cpal): bleibt; der Strom öffnet sich erst beim Abspielen. Verstecken des Tabs stoppt Medien.
+- Vollbild: gehostet öffnet die Bildschirmpräsentation ein **eigenes Vollbild-Fenster** (`show::ui_or_window`); der Tab
+  zeigt „The slide show is running in its own window“ mit „End Show“. Leseansicht und „Browsed“-Shows bleiben im Tab.
+  Die Referentenansicht ist wie upstream ein zweites Fenster. Verstecken des Tabs beendet die Show.
+- Fenster schließen: geht über Septets Router (Close → Tab schließen); DeckCrafts Quit-Dialog fragt bei Ungespeichertem.
+- Fallengelassene Dateien liest DeckCraft gehostet nicht selbst (Septet legt sie mit `place_paths` ab).
+Dazu: Schriften nicht setzen (auch nicht die Fallback-Schriften aus `uifonts`), Titelleiste bewegt das Fenster nicht,
+Hell/Dunkel/Akzent/Kontrast von Septet, „Dark Mode“ öffnet Septets Darstellung, Community-Links weg. Claude-Werkzeuge:
+Engine- und UI-Befehle (Dialoge und Dateiwähler abgewiesen, `file.close`/`file.revert` mit Ungespeichertem nur mit
+`force`), Ansichten document/slide/shape/text/selection/animations/comments/history/documents/show, Render `slide` und
+`deck` (alle Folien als Raster). Skill `septet:deckcraft`. `shared/craft-fonts` liest jetzt auch `latin-manifest.txt`
+(DeckCrafts Präsentationsschriften, ab neueren craft-fonts-Ständen).
+Offen bei DeckCraft: Dateiwähler sind synchron (`rfd`, wie upstream) und halten Septet an, solange sie offen sind;
+Ziehen aus DeckCraft in andere Apps; Ablegen an der Mausposition; Vollbild auf echtem Bildschirm (nur Xvfb geprüft,
+dort ohne Fenstermanager); Windows/macOS.
 
 ### Phase C: Alles miteinander kompatibel
 

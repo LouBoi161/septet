@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [photocraft, vectorcraft, lightcraft, designcraft, pdfcraft, filmcraft, effectcraft, wordcraft]
+        app: [photocraft, vectorcraft, lightcraft, designcraft, pdfcraft, filmcraft, effectcraft, wordcraft, deckcraft]
     steps:
       - uses: actions/checkout@v4
 

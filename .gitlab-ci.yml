@@ -24,7 +24,7 @@ check:
   interruptible: true
   parallel:
     matrix:
-      - APP: [photocraft, vectorcraft, lightcraft, designcraft, pdfcraft, filmcraft, effectcraft, wordcraft]
+      - APP: [photocraft, vectorcraft, lightcraft, designcraft, pdfcraft, filmcraft, effectcraft, wordcraft, deckcraft]
   cache:
     key: check-$APP
     paths:
