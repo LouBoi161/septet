@@ -56,7 +56,7 @@ The builds are not signed by Microsoft or Apple (that needs paid certificates):
   back picks up the edit. Designcraft's *Edit Original* (Links panel) does the same for placed images.
 - **Files**: drop them on a tab to open them in that app, on the tab strip to open each in the app
   made for it, or on an app to place them where you let go.
-- **Shortcuts**: Ctrl+PageUp/PageDown switch tabs, Ctrl+Alt+1…8 jump to an app, Ctrl+Shift+T new tab,
+- **Shortcuts**: Ctrl+PageUp/PageDown switch tabs, Ctrl+Alt+1…9 jump to an app, Ctrl+Shift+T new tab,
   Ctrl+Alt+W close tab.
 
 ## Apps and updates
