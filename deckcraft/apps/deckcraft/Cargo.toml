@@ -38,6 +38,8 @@ rfd = { workspace = true }
 arboard = { workspace = true, features = ["image-data"] }
 image = { workspace = true }
 cpal = "0.16"
+# Waits for an `rfd::AsyncFileDialog` on a background thread (`pickers`); rfd already depends on it.
+pollster = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Finder double-click, Open With, Dock drops and `open -a DeckCraft deck.pptx` arrive as a

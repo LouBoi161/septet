@@ -527,6 +527,12 @@ pub struct SlideApp {
     next_file_id: u64,
     /// Picks and drops whose bytes have not arrived yet.
     pending_files: Vec<PendingFile>,
+    /// Hosted (`hosted`): the part of the host's window the app was given this frame. Widgets
+    /// outside it (the host's chat field) are the host's.
+    hosted_rect: Option<egui::Rect>,
+    /// Hosted: the window a full-screen show took over, and whether it was full screen before
+    /// (`show::ui_or_window`).
+    pub(crate) show_window: Option<(egui::ViewportId, bool)>,
 }
 
 fn grid_options_touched(p: &Value) -> bool {
@@ -597,6 +603,8 @@ impl SlideApp {
             twisting: false,
             next_file_id: 1,
             pending_files: Vec::new(),
+            hosted_rect: None,
+            show_window: None,
         }
     }
 
@@ -750,6 +758,7 @@ impl SlideApp {
     /// on the web. `extra` adds `file.export` params (the PDF's layout, slides…). The
     /// presentation keeps its own file. Returns whether a file was written or handed over.
     pub fn export_as(&mut self, fmt: &str, extra: Value) -> bool {
+        let _replay = hosted::Replayable::new(hosted::Replay::Export { fmt: fmt.to_string(), extra: extra.clone() });
         let Some(slide) = self.session.active().map(|d| d.selection.slide) else { return false };
         let (ext, format, all) = match fmt {
             "pdf" => ("pdf", "pdf", false),
@@ -1221,6 +1230,7 @@ impl SlideApp {
     }
 
     fn pick_and_open(&mut self) {
+        let _replay = hosted::Replayable::new(hosted::Replay::Open);
         if let Some(pick) = self.services.pick_open.as_mut() {
             if let Some(path) = pick("open") {
                 self.open_path_in_background(&path);
@@ -1279,6 +1289,7 @@ impl SlideApp {
     /// Home › New Slide › Reuse Slides…: pick a presentation and insert all its slides after the
     /// current one (desktop only: the browser picker opens what it picks as a document).
     fn pick_and_reuse(&mut self, keep: bool) {
+        let _replay = hosted::Replayable::new(hosted::Replay::Reuse { keep });
         let Some(pick) = self.services.pick_open.as_mut() else {
             self.set_status("Reuse Slides needs the desktop app".to_string());
             return;
@@ -1309,6 +1320,7 @@ impl SlideApp {
 
     /// Pick a file and run `cmd` with it (`name` + `data`, or `path`) added to `extra`.
     fn pick_and_run(&mut self, purpose: &str, cmd: &str, extra: &Value) {
+        let _replay = hosted::Replayable::new(hosted::Replay::Run { purpose: purpose.to_string(), cmd: cmd.to_string(), extra: extra.clone() });
         if let Some(pick) = self.services.pick_open.as_mut() {
             if let Some(path) = pick(purpose) {
                 let mut args = if extra.is_object() { extra.clone() } else { json!({}) };
@@ -1343,6 +1355,7 @@ impl SlideApp {
     }
 
     pub fn save_as_dialog(&mut self, format: &str) {
+        let _replay = hosted::Replayable::new(hosted::Replay::SaveAs { format: format.to_string() });
         let name = self.session.active().map(|d| d.title()).unwrap_or_else(|| "Presentation".into());
         let ext = if format == "pptx" { "pptx" } else { "deckcraft" };
         let suggested = format!("{name}.{ext}");
@@ -1370,6 +1383,8 @@ impl SlideApp {
     /// Save every presentation with unsaved changes (asking for a location where needed).
     /// Returns false if one wasn't saved (cancelled or failed).
     pub fn save_all(&mut self) -> bool {
+        // The Quit dialog closes the window right after: its Save as must finish first.
+        let _now = hosted::NoDefer::new();
         let dirty: Vec<usize> = self.session.documents().iter().enumerate().filter(|(_, d)| d.is_dirty()).map(|(i, _)| i).collect();
         for i in dirty {
             self.session.set_active(i);
@@ -1765,6 +1780,7 @@ impl SlideApp {
             && !ctx.text_edit_focused()
             && !ctx.any_popup_open()
             && let Some(id) = ctx.memory(|m| m.focused())
+            && self.owns_widget(ctx, id)
         {
             ctx.memory_mut(|m| m.surrender_focus(id));
         }
@@ -1862,6 +1878,45 @@ impl SlideApp {
         self.drain_requests();
     }
 
+    /// Run again the action that asked for a file picker, now that the host has its answer
+    /// (`hosted::current_replay`): the picker then answers at once with it.
+    pub fn replay_pick(&mut self, replay: hosted::Replay) {
+        match replay {
+            hosted::Replay::Open => self.pick_and_open(),
+            hosted::Replay::Run { purpose, cmd, extra } => self.pick_and_run(&purpose, &cmd, &extra),
+            hosted::Replay::Reuse { keep } => self.pick_and_reuse(keep),
+            // The File tab's Save As and Export pages close once the file is written, as they do
+            // when the picker answers at once.
+            hosted::Replay::SaveAs { format } => {
+                let before = self.session.active().map(|d| (d.path.clone(), d.is_dirty()));
+                self.save_as_dialog(&format);
+                if self.session.active().map(|d| (d.path.clone(), d.is_dirty())) != before {
+                    self.close_backstage();
+                }
+            }
+            hosted::Replay::Export { fmt, extra } => {
+                if self.export_as(&fmt, extra) {
+                    self.close_backstage();
+                }
+            }
+        }
+    }
+
+    /// Hosted: after the show was ended from outside a frame, the window it made full screen goes
+    /// back to how it was.
+    pub fn restore_show_window(&mut self, ctx: &egui::Context) {
+        show::restore_fullscreen(self, ctx);
+    }
+
+    /// Whether the widget `id` is the app's: always standalone; hosted, when it lies in the part of
+    /// the window the app was given (the host's chat field next to it keeps its keyboard focus).
+    fn owns_widget(&self, ctx: &egui::Context, id: egui::Id) -> bool {
+        match self.hosted_rect {
+            Some(area) => ctx.read_response(id).is_none_or(|r| area.expand(1.0).contains_rect(r.rect)),
+            None => true,
+        }
+    }
+
     /// Offer the copy or cut on the system clipboard.
     ///
     /// Slides go out as plain text. Text goes out as HTML plus the same plain words, so a paste
@@ -1883,6 +1938,10 @@ impl SlideApp {
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        if hosted::is_hosted() {
+            self.hosted_rect = Some(ui.max_rect());
+        }
+        show::restore_fullscreen(self, &ctx);
         if !self.fonts_ready {
             ctx.request_repaint();
             return;

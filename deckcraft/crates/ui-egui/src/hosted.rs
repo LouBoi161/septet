@@ -102,6 +102,67 @@ pub fn refuse_dialog() -> bool {
     refuse
 }
 
+/// What asked for a file picker, to run again with the picked file: a host shows the picker
+/// without blocking its window ([`current_replay`]) and then calls `SlideApp::replay_pick`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Replay {
+    /// File › Open.
+    Open,
+    /// Pick a file for a command (insert a picture, audio, video; change a picture; a theme…).
+    Run { purpose: String, cmd: String, extra: serde_json::Value },
+    /// Reuse Slides.
+    Reuse { keep: bool },
+    /// Save As.
+    SaveAs { format: String },
+    /// Export (a copy in another format).
+    Export { fmt: String, extra: serde_json::Value },
+}
+
+thread_local! {
+    static REPLAY: RefCell<Option<Replay>> = const { RefCell::new(None) };
+    static NO_DEFER: Cell<u32> = const { Cell::new(0) };
+}
+
+/// While alive, a picker asked for can be shown later and `replay` run again with its answer.
+pub struct Replayable(Option<Replay>);
+
+impl Replayable {
+    pub fn new(replay: Replay) -> Self {
+        Replayable(REPLAY.replace(Some(replay)))
+    }
+}
+
+impl Drop for Replayable {
+    fn drop(&mut self) {
+        REPLAY.set(self.0.take());
+    }
+}
+
+/// While alive, pickers answer at once (Save in the Quit dialog must finish before it closes).
+pub(crate) struct NoDefer;
+
+impl NoDefer {
+    pub(crate) fn new() -> Self {
+        NO_DEFER.set(NO_DEFER.get().saturating_add(1));
+        NoDefer
+    }
+}
+
+impl Drop for NoDefer {
+    fn drop(&mut self) {
+        NO_DEFER.set(NO_DEFER.get().saturating_sub(1));
+    }
+}
+
+/// The action asking for a file picker now, if the host may show the picker later and run it
+/// again with the answer; `None` when the picker must answer at once.
+pub fn current_replay() -> Option<Replay> {
+    if NO_DEFER.get() > 0 {
+        return None;
+    }
+    REPLAY.with_borrow(Clone::clone)
+}
+
 /// `c` recoloured from the theme's accent `from` to `to`: `to`'s hue, with `c`'s saturation and
 /// brightness relative to `from` and its own alpha. Greys (white text, grey fills) stay.
 fn recolor(c: egui::Color32, from: egui::Color32, to: egui::Color32) -> egui::Color32 {

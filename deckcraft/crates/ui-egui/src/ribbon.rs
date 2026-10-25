@@ -102,7 +102,10 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
         if icon_toggle(&mut right, Icon::CommentsBubble, "Comments", has_doc, app.ui.pane.as_deref() == Some("comments")).clicked() {
             let _ = app.run("view.pane", json!({"pane": "comments", "toggle": true}));
         }
-        if icon_toggle(&mut right, if app.is_dark() { Icon::Sparkle } else { Icon::Palette }, "Light/Dark appearance", true, false).clicked() {
+        // Hosted, Septet's bar has the one appearance button (`hosted`).
+        if !crate::hosted::is_hosted()
+            && icon_toggle(&mut right, if app.is_dark() { Icon::Sparkle } else { Icon::Palette }, "Light/Dark appearance", true, false).clicked()
+        {
             let _ = app.run("view.dark", json!({}));
         }
     });
@@ -2319,8 +2322,9 @@ fn view(app: &mut SlideApp, ui: &mut Ui) {
         if big_button_ex(ui, Icon::Grayscale, "Grayscale", true, false, gs).0.clicked() {
             app.ui.grayscale = !gs;
         }
+        // Hosted, Septet's bar has the one appearance button (`hosted`).
         let dark = app.is_dark();
-        if big_button_ex(ui, Icon::Palette, "Dark\nMode", true, false, dark).0.clicked() {
+        if !crate::hosted::is_hosted() && big_button_ex(ui, Icon::Palette, "Dark\nMode", true, false, dark).0.clicked() {
             let _ = app.run("view.dark", json!({}));
         }
     });

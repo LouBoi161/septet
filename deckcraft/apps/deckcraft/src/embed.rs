@@ -10,6 +10,7 @@ use deckcraft_engine::Session;
 use deckcraft_ui_egui::{Services, SlideApp, hosted};
 use serde_json::{Value, json};
 
+use crate::pickers::Pickers;
 use crate::{audio, pasteboard};
 
 /// A picture for the host's agent, made on a worker thread ([`Embedded::agent_render`]).
@@ -27,6 +28,8 @@ pub struct Embedded {
     app: SlideApp,
     ctx: egui::Context,
     open_externally: Option<Box<dyn FnMut(&Path) -> bool>>,
+    /// File pickers shown without blocking the host's window.
+    pickers: Pickers,
 }
 
 impl Embedded {
@@ -37,7 +40,8 @@ impl Embedded {
     pub fn new(ctx: &egui::Context, render_state: Option<&eframe::egui_wgpu::RenderState>, storage: Option<&dyn eframe::Storage>) -> Self {
         hosted::set_hosted(true);
         let _ = (render_state, storage);
-        let mut app = SlideApp::new(Session::new(), services());
+        let pickers = Pickers::default();
+        let mut app = SlideApp::new(Session::new(), services(&pickers));
         load_prefs(&mut app);
         // AutoRecover: reopen what a previous run left unsaved, then keep it current.
         if std::env::var_os("DECKCRAFT_NO_RECOVERY").is_none() {
@@ -49,7 +53,7 @@ impl Embedded {
             }
         }
         app.integrated_titlebar = false;
-        Embedded { app, ctx: ctx.clone(), open_externally: None }
+        Embedded { app, ctx: ctx.clone(), open_externally: None, pickers }
     }
 
     /// Before [`Embedded::new`]: keep DeckCraft's settings (`ui.json`, `prefs.json`) and its
@@ -95,15 +99,22 @@ impl Embedded {
     }
 
     /// Place files as dropping them on the window does: pictures, audio and video go on the
-    /// current slide, presentations and outlines open. With no presentation open, they open.
-    /// DeckCraft can't map `at` to the slide from outside a frame.
+    /// current slide, outlines become slides; presentations open (from their path, so Save keeps
+    /// writing to them). With no presentation open, a new one takes the rest. DeckCraft can't map
+    /// `at` to the slide from outside a frame.
     pub fn place_paths(&mut self, paths: &[PathBuf], at: Option<egui::Pos2>) {
         let _ = at;
-        if self.app.session.active().is_none() {
-            self.open_paths(paths);
-            return;
+        let (decks, rest): (Vec<PathBuf>, Vec<PathBuf>) = paths.iter().cloned().partition(|p| {
+            let ext = p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+            PRESENTATIONS.contains(&ext.as_str())
+        });
+        if !decks.is_empty() {
+            self.open_paths(&decks);
         }
-        for path in paths {
+        if !rest.is_empty() && self.app.session.active().is_none() {
+            let _ = self.app.run("file.new", json!({}));
+        }
+        for path in &rest {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "dropped file".into());
             match std::fs::read(path) {
                 Ok(bytes) => self.app.open_or_insert_bytes(&name, &bytes),
@@ -116,8 +127,8 @@ impl Embedded {
         self.ctx.request_repaint();
     }
 
-    /// Hidden: a running slide show ends and audio and video stop (the show's window can't stay
-    /// without the tab that draws it). Shown: the next frame draws.
+    /// Hidden: a running slide show ends (the window it made full screen goes back) and audio and
+    /// video stop. Shown: the next frame draws.
     pub fn set_visible(&mut self, visible: bool) {
         if visible {
             self.ctx.request_repaint();
@@ -125,6 +136,7 @@ impl Embedded {
         }
         if self.app.show.is_some() {
             let _ = self.app.run("show.end", json!({}));
+            self.app.restore_show_window(&self.ctx);
         }
         self.app.media.stop_owned(deckcraft_ui_egui::media::Owner::Editor);
     }
@@ -421,10 +433,16 @@ impl Embedded {
 }
 
 impl eframe::App for Embedded {
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // The tab's close: with unsaved changes DeckCraft asks first (its Quit dialog cancels the
         // close) and closes the tab once that is answered, as its window does.
         self.app.logic(ctx);
+        // A picker an action asked for, shown off the UI thread; with its answer the action runs again.
+        self.pickers.show(frame, ctx);
+        if let Some(replay) = self.pickers.answered() {
+            self.app.replay_pick(replay);
+            self.pickers.forget_answer();
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -447,6 +465,9 @@ const AGENT_BLOCKED: &[&str] = &["app.palette", "app.openDialog", "app.dialog", 
 
 /// Commands that throw away the active presentation's unsaved changes.
 const DISCARDS: &[&str] = &["file.close", "file.revert", "app.closePresentation"];
+
+/// The presentations DeckCraft opens, by extension.
+const PRESENTATIONS: &[&str] = &["deckcraft", "slidecraft", "pptx", "potx", "ppsx"];
 
 /// What Send To writes: extension, `file.export` format.
 const EXPORTS: &[(&str, &str)] = &[
@@ -529,37 +550,13 @@ fn save_prefs(app: &SlideApp) {
     }
 }
 
-/// The desktop services `main.rs` gives the app; the file pickers stay closed for the host's
-/// agent ([`hosted::agent_call`]).
-fn services() -> Services {
+/// The desktop services `main.rs` gives the app, with file pickers that don't block the host's
+/// window (`pickers`) and stay closed for the host's agent ([`hosted::agent_call`]).
+fn services(pickers: &Pickers) -> Services {
+    let (open, save) = pickers.hooks();
     Services {
-        pick_open: Some(Box::new(|purpose: &str| {
-            if hosted::refuse_dialog() {
-                return None;
-            }
-            let d = rfd::FileDialog::new();
-            let d = match purpose {
-                "picture" => d.add_filter("Pictures", &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"]),
-                "audio" => d.add_filter(
-                    "Audio",
-                    &["wav", "mp3", "m4a", "m4b", "aac", "flac", "ogg", "oga", "opus", "aif", "aiff", "aifc", "caf", "wma", "weba", "mka"],
-                ),
-                "video" => d.add_filter("Video", &["mp4", "m4v", "mov", "webm", "mkv", "wmv"]),
-                "theme" => d.add_filter("Themes and presentations", &["thmx", "pptx", "potx", "ppsx"]).add_filter("Office Theme", &["thmx"]),
-                _ => d
-                    .add_filter("Presentations", &["deckcraft", "pptx", "potx", "ppsx"])
-                    .add_filter("DeckCraft", &["deckcraft"])
-                    .add_filter("PowerPoint", &["pptx", "potx", "ppsx"])
-                    .add_filter("Outline", &["txt", "md"]),
-            };
-            d.pick_file().map(|p| p.to_string_lossy().to_string())
-        })),
-        pick_save: Some(Box::new(|name: &str| {
-            if hosted::refuse_dialog() {
-                return None;
-            }
-            rfd::FileDialog::new().set_file_name(name).save_file().map(|p| p.to_string_lossy().to_string())
-        })),
+        pick_open: Some(open),
+        pick_save: Some(save),
         read: Some(Box::new(|p: &str| std::fs::read(p).map_err(|e| e.to_string()))),
         write: Some(Box::new(|p: &str, b: &[u8]| std::fs::write(p, b).map_err(|e| e.to_string()))),
         clipboard_image: Some(Box::new(pasteboard::image_png)),

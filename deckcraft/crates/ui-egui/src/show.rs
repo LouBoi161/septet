@@ -671,42 +671,47 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64, 
     keep
 }
 
-/// The show in the window, or, hosted (`crate::hosted`), in a full-screen window of its own when
-/// it fills the screen: the host's window holds other apps' tabs, and making it full screen would
-/// show them around the slides. Meanwhile the tab says where the show is and can end it. Reading
-/// view and a show browsed in a window stay in the tab.
+/// The show in the window, or, hosted (`crate::hosted`), over the whole host window made full
+/// screen when the show fills the screen: the host's tab strip and chat panel would otherwise
+/// frame the slides. It stays in that window, not a window of its own: an immediate viewport is
+/// only drawn with its parent, and a full-screen show covering the host's window leaves that
+/// window occluded, which the desktop then throttles to about a frame a second. Reading view and
+/// a show browsed in a window stay in the tab.
 pub fn ui_or_window(app: &mut SlideApp, ui: &mut Ui) {
     let fills =
         app.show.as_ref().is_some_and(|s| !s.reading) && app.session.active().is_some_and(|d| show_fills_screen(false, &d.doc.show.show_type));
     if !crate::hosted::is_hosted() || !fills {
         return self::ui(app, ui);
     }
-    let rect = ui.max_rect();
-    ui.painter().rect_filled(rect, 0.0, Color32::from_gray(16));
-    let mut end = false;
-    ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(24.0)), |ui| {
-        ui.vertical_centered(|ui| {
-            ui.add_space((rect.height() / 2.0 - 60.0).max(0.0));
-            ui.label(egui::RichText::new("The slide show is running in its own window.").size(18.0).color(Color32::WHITE));
-            ui.label(egui::RichText::new("Esc there ends it.").size(14.0).color(Color32::from_gray(180)));
-            ui.add_space(12.0);
-            end = ui.button("End Show").clicked();
-        });
-    });
     let ctx = ui.ctx().clone();
-    ctx.show_viewport_immediate(
-        egui::ViewportId::from_hash_of("deckcraft_show"),
-        egui::ViewportBuilder::default().with_title("Slide Show — DeckCraft").with_fullscreen(true),
-        |ui, _| {
-            if ui.input(|i| i.viewport().close_requested()) {
-                end = true;
-            }
-            ui.painter().rect_filled(ui.max_rect(), 0.0, Color32::BLACK);
-            self::ui(app, ui);
-        },
-    );
-    if end && app.show.is_some() {
-        let _ = app.run("show.end", json!({}));
+    if app.show_window.is_none() {
+        let was = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        app.show_window = Some((ctx.viewport_id(), was));
+        if !was {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+        }
+    }
+    let rect = ctx.content_rect();
+    egui::Area::new(egui::Id::new("deckcraft_show")).order(egui::Order::Foreground).fixed_pos(rect.min).constrain(false).show(&ctx, |area| {
+        // The whole window is the show's: the host's widgets under it get no pointer.
+        area.allocate_rect(rect, Sense::hover());
+        let mut ui = area.new_child(egui::UiBuilder::new().max_rect(rect));
+        ui.set_clip_rect(rect);
+        ui.painter().rect_filled(rect, 0.0, Color32::BLACK);
+        self::ui(app, &mut ui);
+    });
+    restore_fullscreen(app, &ctx);
+}
+
+/// Hosted: once the show has ended, the window it took over goes back to how it was.
+pub(crate) fn restore_fullscreen(app: &mut SlideApp, ctx: &egui::Context) {
+    if app.show.is_some() {
+        return;
+    }
+    if let Some((window, was)) = app.show_window.take()
+        && !was
+    {
+        ctx.send_viewport_cmd_to(window, egui::ViewportCommand::Fullscreen(false));
     }
 }
 
@@ -725,7 +730,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         show.show_start = now;
         show.timer = PresenterTimer::start(now);
         show.last_move = now;
-        // Hosted, a show that fills the screen already has a full-screen window (`ui_or_window`).
+        // Hosted, `ui_or_window` makes the host's window full screen.
         if show_fills_screen(show.reading, &doc.show.show_type) && !crate::hosted::is_hosted() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
         }
