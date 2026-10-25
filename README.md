@@ -2,8 +2,8 @@
 
 <h1 align="center">Septet</h1>
 
-<p align="center">Eight creative apps in one workspace — photo editing, vector graphics, raw photo
-development, page layout, PDF, video editing, motion graphics and word processing. Tabs that can be different apps,
+<p align="center">Nine creative apps in one workspace — photo editing, vector graphics, raw photo
+development, page layout, PDF, video editing, motion graphics, word processing and presentations. Tabs that can be different apps,
 tabs you can pull into windows of their own, and copy, paste and drag &amp; drop between the apps.</p>
 
 <p align="center"><b><a href="https://gitlab.com/louiswalder6/septet/-/releases">Download (GitLab)</a></b>
@@ -19,6 +19,7 @@ tabs you can pull into windows of their own, and copy, paste and drag &amp; drop
 | Filmcraft | Video editing | Video, audio, projects |
 | Effectcraft | Motion graphics and visual effects | Projects, footage |
 | Wordcraft | Word processing and documents | DOCX, ODT, RTF, Markdown, … |
+| Deckcraft | Presentations and slide shows | PPTX, POTX, PPSX, .deckcraft |
 
 ## Download
 
@@ -55,7 +56,7 @@ The builds are not signed by Microsoft or Apple (that needs paid certificates):
   back picks up the edit. Designcraft's *Edit Original* (Links panel) does the same for placed images.
 - **Files**: drop them on a tab to open them in that app, on the tab strip to open each in the app
   made for it, or on an app to place them where you let go.
-- **Shortcuts**: Ctrl+PageUp/PageDown switch tabs, Ctrl+Alt+1…8 jump to an app, Ctrl+Shift+T new tab,
+- **Shortcuts**: Ctrl+PageUp/PageDown switch tabs, Ctrl+Alt+1…9 jump to an app, Ctrl+Shift+T new tab,
   Ctrl+Alt+W close tab.
 
 ## Apps and updates
@@ -104,7 +105,7 @@ without it those scripts show as empty boxes.
 
 ```
 septet/        the shell: tabs, windows, Home, clipboard and drag-and-drop bridges
-photocraft/ …  the eight apps (each with an `embed` API: apps/<app>/src/embed.rs)
+photocraft/ …  the nine apps (each with an `embed` API: apps/<app>/src/embed.rs)
 scripts/       third-party license list
 .github/       release builds for Windows, Linux and macOS
 ```
@@ -124,8 +125,8 @@ beside it.
 noncommercial — personal projects, study, schools, research, charities. Commercial use is not
 permitted.
 
-**The eight apps** are [PhotoCraft, VectorCraft, LightCraft, DesignCraft, PdfCraft, FilmCraft,
-EffectCraft and WordCraft](https://github.com/storytold) by the ArtCraft team and contributors, used and changed
+**The nine apps** are [PhotoCraft, VectorCraft, LightCraft, DesignCraft, PdfCraft, FilmCraft,
+EffectCraft, WordCraft and DeckCraft](https://github.com/storytold) by the ArtCraft team and contributors, used and changed
 under their own license, the MIT License or the Apache License 2.0 — those folders, including the
 changes made for Septet, stay under that license. See [NOTICE.md](NOTICE.md) and
 `THIRD-PARTY-LICENSES.md` (in every download) for details.

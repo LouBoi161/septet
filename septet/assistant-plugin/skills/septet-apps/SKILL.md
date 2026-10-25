@@ -1,6 +1,6 @@
 ---
 name: septet-apps
-description: The hub for working inside Septet - which of the apps (Photocraft, Vectorcraft, Lightcraft, Designcraft, Pdfcraft, Filmcraft, Effectcraft, Wordcraft) opens which files, the workspace rules, septet_open vs septet_place, driving open documents with the app_* tools, the render-and-look verify loop, checking for CLI tools, and which septet skill to load next. Use at the start of any creative task in Septet, or when unsure which app or file format to use.
+description: The hub for working inside Septet - which of the apps (Photocraft, Vectorcraft, Lightcraft, Designcraft, Pdfcraft, Filmcraft, Effectcraft, Wordcraft, Deckcraft) opens which files, the workspace rules, septet_open vs septet_place, driving open documents with the app_* tools, the render-and-look verify loop, checking for CLI tools, and which septet skill to load next. Use at the start of any creative task in Septet, or when unsure which app or file format to use.
 ---
 
 # Working in Septet
@@ -20,6 +20,7 @@ show them in the apps with the `septet_*` tools. The user watches the apps chang
 | **Filmcraft** (video) | `.fcproj` projects; media → imported into the bin (not onto the timeline); `.srt/.vtt` → caption track; `.otio/.fcpxml/.xml/.edl/.aaf/.omf` → sequences merged into the project | same as open (bin) |
 | **Effectcraft** (motion) | `.ecproj` projects; images, SVG, PSD, PDF/AI, video → imported into the project | footage → layers / Project panel. **Lottie only via `app_execute` `file.importLottie` (File ▸ Import ▸ Lottie…)** |
 | **Wordcraft** (word processing) | `.docx/.docm/.dotx/.doc`, RTF, ODT, Markdown, text, HTML, LaTeX; **one document at a time** (opening replaces it, asking to save first) | at the caret: pictures; text documents (docx, rtf, odt, md, txt, html) inserted as text; fonts added; a spreadsheet becomes the mail-merge list |
+| **Deckcraft** (presentations) | `.pptx/.potx/.ppsx`, `.deckcraft`; several presentations open at once (each opens as another one) | on the current slide: pictures (png, jpg, gif, webp, svg), audio and video |
 
 Without `app`, `septet_open` picks the app by extension (the first app in the table that lists it in Septet's
 list, which includes a few extensions an app then fails to open, e.g. `.indd`, `.epub`, `.dcraft` for
@@ -62,7 +63,7 @@ They run the same commands as the app's menus, so every change is one Undo step 
 
 Each app has its own skill with its important commands, ids and quirks: load it before driving that app
 (`septet:photocraft`, `septet:vectorcraft`, `septet:lightcraft`, `septet:designcraft`, `septet:pdfcraft`,
-`septet:filmcraft`, `septet:effectcraft`, `septet:wordcraft`).
+`septet:filmcraft`, `septet:effectcraft`, `septet:wordcraft`, `septet:deckcraft`).
 
 Saving or exporting outside the workspace, changing app settings, printing and signing ask the user first. Window
 commands (quit, resize, focus, screenshots) are blocked in Septet.
@@ -109,6 +110,7 @@ Useful tools may or may not be installed: `ffmpeg`/`ffprobe`, `magick` (ImageMag
 | Palettes, contrast, print colour | `septet:color` |
 | Print, PDF, multi-page documents, merging PDFs | `septet:print-and-pdf` |
 | Letters, reports, CVs, Word documents | `septet:wordcraft` |
+| Presentations, slides, talks, PowerPoint files | `septet:deckcraft` |
 | Photos and raster images | `septet:image-editing` |
 | Video cuts, subtitles, ffmpeg | `septet:video-editing` |
 | Animation, Lottie, Effectcraft | `septet:motion-lottie` |

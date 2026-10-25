@@ -6,10 +6,10 @@
 [workspace]
 resolver = "3"
 members = ["septet", "shared/craft-fonts"]
-exclude = ["designcraft", "effectcraft", "filmcraft", "lightcraft", "pdfcraft", "photocraft", "vectorcraft", "wordcraft"]
+exclude = ["designcraft", "effectcraft", "filmcraft", "lightcraft", "pdfcraft", "photocraft", "vectorcraft", "wordcraft", "deckcraft"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "PolyForm-Noncommercial-1.0.0"
 rust-version = "1.95"
@@ -28,6 +28,12 @@ krilla = { git = "https://github.com/storytold/craft-libs", rev = "ca50d63b773c9
 hayro-cmap = { path = "pdfcraft/vendor/hayro-cmap" }
 vello_common = { path = "pdfcraft/vendor/vello_common" }
 lopdf = { path = "pdfcraft/vendor/lopdf" }
+# winit 0.30.13 (the latest 0.30) refused every file drag from a Wayland app under GNOME's
+# XWayland: it wants XdndTypeList, which GNOME doesn't set, and answers XdndActionPrivate, which
+# GNOME takes as a refusal. The copy asks for the files anyway and answers Copy
+# (septet/vendor/winit/src/platform_impl/linux/x11/{event_processor,dnd}.rs, marked "Septet:");
+# drop it once winit does that itself.
+winit = { path = "septet/vendor/winit" }
 
 [profile.dev.package."*"]
 opt-level = 2

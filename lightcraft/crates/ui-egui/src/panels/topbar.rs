@@ -224,40 +224,43 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 x -= 40.0;
             }
             // Appearance Mode: a click steps Auto → Light → Dark → Auto; the icon shows the mode
-            let (icon, mode) = appearance_icon(app.ui.settings.appearance_mode);
-            let r = Rect::from_center_size(pos2(x, full.center().y), vec2(28.0, 28.0));
-            let tip = format!("{}: {}", crate::i18n::tr("Appearance Mode"), crate::i18n::tr(mode));
-            let resp = ui.interact(r, egui::Id::new(("top", "appearance")), Sense::click()).on_hover_text(tip.clone());
-            crate::widgets::announce(&resp, tip.clone());
-            register(ui.ctx(), "icon:appearance", r);
-            paint(ui.painter(), r.shrink(5.0), icon, if resp.hovered() { t.text } else { t.icon });
-            if resp.clicked() {
-                let _ = app.run("view.appearance", json!({}));
-            }
-            crate::widgets::context_menu(&resp, |ui| {
-                let settings = ui.button(crate::i18n::tr("Appearance Settings…"));
-                register(ui.ctx(), "menu:appearanceSettings", settings.rect);
-                if settings.clicked() {
-                    let _ = app.run("app.settings", json!({"tab": "interface"}));
-                    ui.close();
+            // Hosted, Septet's bar has the one appearance button (`hosted`).
+            if !crate::hosted::is_hosted() {
+                let (icon, mode) = appearance_icon(app.ui.settings.appearance_mode);
+                let r = Rect::from_center_size(pos2(x, full.center().y), vec2(28.0, 28.0));
+                let tip = format!("{}: {}", crate::i18n::tr("Appearance Mode"), crate::i18n::tr(mode));
+                let resp = ui.interact(r, egui::Id::new(("top", "appearance")), Sense::click()).on_hover_text(tip.clone());
+                crate::widgets::announce(&resp, tip.clone());
+                register(ui.ctx(), "icon:appearance", r);
+                paint(ui.painter(), r.shrink(5.0), icon, if resp.hovered() { t.text } else { t.icon });
+                if resp.clicked() {
+                    let _ = app.run("view.appearance", json!({}));
                 }
-                let favorites = app.ui.settings.favorite_themes.clone();
-                for dark in [false, true] {
-                    let group: Vec<_> =
-                        crate::theme::ThemeKind::ALL.iter().filter(|k| k.is_dark() == dark && favorites.iter().any(|id| id == k.id())).collect();
-                    if !group.is_empty() {
-                        ui.separator();
+                crate::widgets::context_menu(&resp, |ui| {
+                    let settings = ui.button(crate::i18n::tr("Appearance Settings…"));
+                    register(ui.ctx(), "menu:appearanceSettings", settings.rect);
+                    if settings.clicked() {
+                        let _ = app.run("app.settings", json!({"tab": "interface"}));
+                        ui.close();
                     }
-                    for kind in group {
-                        let r = ui.selectable_label(app.shown_theme(ui.ctx()) == *kind, crate::i18n::tr(kind.label()));
-                        register(ui.ctx(), format!("menu:themeFavorite-{}", kind.id()), r.rect);
-                        if r.clicked() {
-                            let _ = app.run("view.theme", json!({"theme": kind.id()}));
-                            ui.close();
+                    let favorites = app.ui.settings.favorite_themes.clone();
+                    for dark in [false, true] {
+                        let group: Vec<_> =
+                            crate::theme::ThemeKind::ALL.iter().filter(|k| k.is_dark() == dark && favorites.iter().any(|id| id == k.id())).collect();
+                        if !group.is_empty() {
+                            ui.separator();
+                        }
+                        for kind in group {
+                            let r = ui.selectable_label(app.shown_theme(ui.ctx()) == *kind, crate::i18n::tr(kind.label()));
+                            register(ui.ctx(), format!("menu:themeFavorite-{}", kind.id()), r.rect);
+                            if r.clicked() {
+                                let _ = app.run("view.theme", json!({"theme": kind.id()}));
+                                ui.close();
+                            }
                         }
                     }
-                }
-            });
+                });
+            }
             let _ = Align2::CENTER_CENTER;
         });
 }

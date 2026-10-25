@@ -17,6 +17,8 @@ enum Step {
     Shot(&'static str),
     Open(AppKind),
     OpenFile(PathBuf),
+    /// Files dropped from the file manager onto the first window (as winit delivers them).
+    DropFiles(Vec<PathBuf>),
     TearOff(AppKind),
     Activate(AppKind),
     CloseTab(AppKind),
@@ -132,6 +134,54 @@ impl Autotest {
         let mut steps = match std::env::var("SEPTET_AUTOTEST_SCENARIO").as_deref() {
             Ok("interop") => Self::interop(file, pdf),
             Ok("content") => Self::content(file, pdf),
+            // A presentation's slide show with its animations (`SEPTET_AUTOTEST_PPTX`), stepped
+            // through; with `SEPTET_DEBUG_FRAMES` the frame rate shows in the log.
+            Ok("show") => {
+                let deck = std::env::var_os("SEPTET_AUTOTEST_PPTX").map(PathBuf::from);
+                let exec = |command: &str| Step::Tool("app_execute", serde_json::json!({"app": "deckcraft", "command": command, "params": {}}));
+                let mut steps = vec![Step::Wait(2.0)];
+                steps.extend(deck.map(Step::OpenFile));
+                steps.extend([Step::Wait(6.0), Step::Activate(AppKind::Deckcraft), Step::Wait(2.0), exec("show.start"), Step::ToolWait(10.0), Step::Wait(3.0)]);
+                for i in 0..8 {
+                    steps.extend([Step::Press(AppKind::Deckcraft, vec![Key::ArrowRight]), Step::Wait(0.4)]);
+                    if i == 0 {
+                        steps.push(Step::Shot("s01-show"));
+                    }
+                    steps.push(Step::Wait(2.0));
+                }
+                steps.extend([exec("show.end"), Step::ToolWait(5.0), Step::Wait(1.0), Step::Report, Step::Exit]);
+                steps
+            }
+            // Files dropped from the file manager: each goes to the app that takes it
+            // (`SEPTET_AUTOTEST_FILE` a picture, `SEPTET_AUTOTEST_PPTX` a presentation).
+            Ok("drops") => {
+                let deck = std::env::var_os("SEPTET_AUTOTEST_PPTX").map(PathBuf::from);
+                let mut steps = vec![Step::Wait(2.0)];
+                let mut drop_on = |kind: AppKind, name: &'static str, paths: Vec<PathBuf>| {
+                    steps.extend([Step::Activate(kind), Step::Wait(1.5), Step::DropFiles(paths), Step::Wait(4.0), Step::Report, Step::Shot(name)]);
+                };
+                let pic: Vec<PathBuf> = file.iter().cloned().collect();
+                let mut all = vec![Step::Wait(2.0)];
+                for (kind, app) in [(AppKind::Deckcraft, "deckcraft"), (AppKind::Wordcraft, "wordcraft"), (AppKind::Designcraft, "designcraft")] {
+                    all.extend([Step::Open(kind), Step::Wait(6.0)]);
+                    let params =
+                        if kind == AppKind::Designcraft { serde_json::json!({"width": 420, "height": 300, "pages": 1}) } else { serde_json::json!({}) };
+                    all.extend([Step::Tool("app_execute", serde_json::json!({"app": app, "command": "file.new", "params": params})), Step::ToolWait(10.0)]);
+                }
+                drop_on(AppKind::Deckcraft, "d01-picture-on-deckcraft", pic.clone());
+                drop_on(AppKind::Wordcraft, "d02-picture-on-wordcraft", pic.clone());
+                drop_on(AppKind::Designcraft, "d03-picture-on-designcraft", pic);
+                drop_on(AppKind::Wordcraft, "d04-pptx-on-wordcraft", deck.into_iter().collect());
+                all.extend(steps);
+                all.extend([
+                    Step::Tool("app_inspect", serde_json::json!({"app": "deckcraft", "what": "documents"})),
+                    Step::Tool("app_inspect", serde_json::json!({"app": "deckcraft", "what": "slide"})),
+                    Step::ToolWait(10.0),
+                    Step::Wait(1.0),
+                    Step::Exit,
+                ]);
+                all
+            }
             // The Claude settings dialog against the Claude Code installed here (needs it signed in).
             Ok("assistant") => vec![
                 Step::Wait(2.0),
@@ -262,6 +312,7 @@ impl Autotest {
                     AppKind::Filmcraft,
                     AppKind::Effectcraft,
                     AppKind::Wordcraft,
+                    AppKind::Deckcraft,
                 ];
                 // Each app's own theme command opens Septet's dialog while Septet sets the look. (Claude
                 // reaches only these apps' theme commands; the others' are tested in their crates.)
@@ -271,6 +322,7 @@ impl Autotest {
                     (AppKind::Filmcraft, "view.theme.light", serde_json::json!({})),
                     (AppKind::Lightcraft, "view.theme", serde_json::json!({"theme": "paper"})),
                     (AppKind::Wordcraft, "view.interfaceTheme", serde_json::json!({"value": "light"})),
+                    (AppKind::Deckcraft, "view.dark", serde_json::json!({"on": false})),
                 ];
                 let short = |k: AppKind| k.name().to_ascii_lowercase();
                 let shot = |name: String| Step::Shot(Box::leak(name.into_boxed_str()));
@@ -283,9 +335,10 @@ impl Autotest {
                 ];
                 for kind in &apps {
                     steps.extend([Step::Open(*kind), Step::Wait(6.0)]);
-                    // Wordcraft starts on File › Home with no document, where its theme command doesn't run.
-                    if *kind == AppKind::Wordcraft {
-                        steps.extend([Step::Tool("app_execute", serde_json::json!({"app": "wordcraft", "command": "file.new"})), Step::ToolWait(10.0)]);
+                    // Wordcraft starts on File › Home with no document, where its theme command doesn't run;
+                    // Deckcraft on its start screen, which shows little of its editor's colours.
+                    if matches!(*kind, AppKind::Wordcraft | AppKind::Deckcraft) {
+                        steps.extend([Step::Tool("app_execute", serde_json::json!({"app": short(*kind), "command": "file.new"})), Step::ToolWait(10.0)]);
                     }
                     steps.push(shot(format!("a03-{}-lightest", short(*kind))));
                 }
@@ -492,7 +545,7 @@ impl Autotest {
             ],
             AppKind::Pdfcraft => vec![("doc_create", json!({"from": "blank", "pages": 2, "width": 400, "height": 300, "name": "Layers"}))],
             // No layers panel.
-            AppKind::Wordcraft => vec![("file.new", json!({}))],
+            AppKind::Wordcraft | AppKind::Deckcraft => vec![("file.new", json!({}))],
         };
         // More commands after these: `SEPTET_AUTOTEST_CMDS` = [["command", {params}], …].
         let more: Vec<(String, serde_json::Value)> =
@@ -615,6 +668,34 @@ impl Autotest {
                 "paragraph",
                 2,
                 vec![run("file.exportPdf", json!({}))],
+            ),
+            AppKind::Deckcraft => (
+                run("file.new", json!({})),
+                "shape",
+                vec![
+                    run("slide.new", json!({"layout": "titleOnly", "title": "Hello from Septet"})),
+                    run("shape.insert", json!({"preset": "ellipse", "rect": [100, 150, 300, 200]})),
+                    run("shape.fill", json!({"color": "#e8a33d"})),
+                    run("transition.set", json!({"kind": "fade"})),
+                    run("animation.add", json!({"effect": "fade"})),
+                ],
+                "shape",
+                2,
+                // A file picker and a dialog are refused; the show opens a full-screen window of its own.
+                vec![
+                    run("app.insertPictureDialog", json!({})),
+                    run("app.about", json!({})),
+                    call("app_render", json!({"target": "deck", "max_side": 800})),
+                    run("show.start", json!({"from": 1})),
+                    Step::ToolWait(10.0),
+                    Step::Wait(3.0),
+                    Step::Report,
+                    Step::Shot("x02b-show"),
+                    run("show.end", json!({})),
+                    Step::ToolWait(10.0),
+                    Step::Wait(1.5),
+                    Step::Shot("x02c-show-ended"),
+                ],
             ),
             AppKind::Unknown => unreachable!("autotests name installed apps"),
             AppKind::Effectcraft => (
@@ -869,6 +950,13 @@ impl Autotest {
                 Step::OpenFile(path) => {
                     at.note(format!("open file {}", path.display()));
                     shell.opens.push(OpenRequest { paths: vec![path], app: None, window: None, place: None });
+                }
+                Step::DropFiles(paths) => {
+                    at.note(format!("drop files {paths:?}"));
+                    if let Some(w) = shell.windows.first() {
+                        shell.router.lock().inject_drops.insert(w.viewport, paths);
+                        ctx.request_repaint_of(w.viewport);
+                    }
                 }
                 Step::TearOff(kind) => {
                     if let Some((wi, ti)) = shell.find_app_tab(kind) {

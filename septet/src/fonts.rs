@@ -62,5 +62,7 @@ mod tests {
         filmcraft_text::fonts::CRAFT_FONTS.iter().for_each(|f| check(f.family, f.style, f.bytes));
         #[cfg(feature = "wordcraft")]
         wordcraft_fonts::CRAFT_FONTS.iter().for_each(|f| check(f.family, f.style, f.bytes));
+        #[cfg(feature = "deckcraft")]
+        deckcraft_fonts::CRAFT_FONTS.iter().for_each(|f| check(f.family, f.style, f.bytes));
     }
 }

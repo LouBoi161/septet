@@ -101,16 +101,19 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     }
     crate::panels::export_mode::quick_export(app, ui.ctx(), pos2(qx - 340.0, rect.max.y + 4.0));
     // Appearance Mode: click for the next one (Auto, Light, Dark); the icon shows the current one.
-    let (icon, mode) = match app.session.prefs.appearance.appearance_mode.as_str() {
-        "auto" => (Icon::Monitor, tl!("Sync with system")),
-        "light" => (Icon::Sun, tl!("Light")),
-        _ => (Icon::Moon, tl!("Dark")),
-    };
-    let tip = format!("{}: {mode}", tl!("Appearance Mode"));
-    let appearance = btn(ui, icon, "appearance", &tip, app);
-    appearance.context_menu(|ui| crate::panels::settings::appearance_context_menu(app, ui));
-    if appearance.clicked() {
-        crate::panels::settings::cycle_appearance(app, ui.ctx());
+    // Hosted, Septet's bar has the one appearance button (`hosted`).
+    if !crate::hosted::is_hosted() {
+        let (icon, mode) = match app.session.prefs.appearance.appearance_mode.as_str() {
+            "auto" => (Icon::Monitor, tl!("Sync with system")),
+            "light" => (Icon::Sun, tl!("Light")),
+            _ => (Icon::Moon, tl!("Dark")),
+        };
+        let tip = format!("{}: {mode}", tl!("Appearance Mode"));
+        let appearance = btn(ui, icon, "appearance", &tip, app);
+        appearance.context_menu(|ui| crate::panels::settings::appearance_context_menu(app, ui));
+        if appearance.clicked() {
+            crate::panels::settings::cycle_appearance(app, ui.ctx());
+        }
     }
     let ws_resp = btn(ui, Icon::Workspaces, "workspaces", tl!("Workspaces"), app);
     // workspace name (caps)

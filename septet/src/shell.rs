@@ -507,6 +507,15 @@ impl Shell {
             fps_probe(&ctx, viewport);
         }
         self.shortcuts(&ctx, wi);
+        if debug_drops() {
+            ctx.input(|i| {
+                if !i.raw.hovered_files.is_empty() || !i.raw.dropped_files.is_empty() {
+                    let names = |f: &[egui::HoveredFile]| f.iter().map(|f| f.path.clone()).collect::<Vec<_>>();
+                    let dropped: Vec<_> = i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect();
+                    eprintln!("septet window {viewport:?}: hovered {:?}, dropped {dropped:?}", names(&i.raw.hovered_files));
+                }
+            });
+        }
         self.windows[wi].geometry = ctx.input(|i| {
             let v = i.viewport();
             Some(([v.outer_rect?.min.x, v.outer_rect?.min.y], [v.inner_rect?.width(), v.inner_rect?.height()]))
@@ -547,7 +556,8 @@ impl Shell {
                 let s = &mut *guard;
                 s.iso.swap(&ctx);
                 self.bridge.before_app(&ctx, s);
-                self.route_drops(&ctx, s);
+                self.route_drops(&ctx, viewport, s);
+                s.app.set_other_screen(other_screen(&ctx, frame));
                 let app = s.app.app();
                 app.logic(&ctx, frame);
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(content).layout(egui::Layout::top_down(egui::Align::Min)));
@@ -644,19 +654,31 @@ impl Shell {
     /// Files dropped from the file manager onto `slot`'s app: placed where they landed, for apps whose
     /// own drop handling can't see the pointer (winit drops carry no position). Otherwise, or when
     /// the pointer can't be read, the app handles the drop itself.
-    fn route_drops(&mut self, ctx: &Context, slot: &mut AppSlot) {
+    /// Files dropped from the file manager onto an app's tab. Septet decides for every app: what the
+    /// app takes (`accepts`, or a file it opens itself) is placed in it, as a drop on it does (where
+    /// it landed, for the apps that place at the pointer); any other file opens in the app made for
+    /// it, as a drop on Home does (a .pptx on Wordcraft opens in Deckcraft, a .cr3 in Lightcraft).
+    /// Files no app opens go to the app, which says it can't take them.
+    fn route_drops(&mut self, ctx: &Context, viewport: ViewportId, slot: &mut AppSlot) {
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
         if dropped.is_empty() {
             return;
         }
-        let Some(at) = crate::pointer::in_viewport(ctx) else { return };
-        let take = || ctx.input_mut(|i| i.raw.dropped_files.clear());
-        if slot.kind.spec().drops_at_pointer {
-            take();
-            for p in &dropped {
+        ctx.input_mut(|i| i.raw.dropped_files.clear());
+        let spec = slot.kind.spec();
+        let at = if spec.drops_at_pointer { crate::pointer::in_viewport(ctx) } else { None };
+        let (place, elsewhere) = split_drops(slot.kind, slot.app.document_title().is_some(), dropped);
+        if debug_drops() {
+            eprintln!("septet drops on {}: place {place:?} at {at:?}, open elsewhere {elsewhere:?}", spec.name);
+        }
+        if !place.is_empty() {
+            for p in &place {
                 self.recent.add(p, slot.kind);
             }
-            slot.app.place_paths(&dropped, Some(at));
+            slot.app.place_paths(&place, at);
+        }
+        if !elsewhere.is_empty() {
+            self.opens.push(OpenRequest { paths: elsewhere, app: None, window: Some(viewport), place: None });
         }
     }
 
@@ -1326,6 +1348,34 @@ pub fn window_builder(at: Option<Pos2>, size: Vec2) -> ViewportBuilder {
     b
 }
 
+/// A screen other than the one the window drawn in `ctx` is on, as an index into winit's
+/// `available_monitors()` (what `ViewportBuilder::with_monitor` takes). `None` with one screen,
+/// or when it can't be told where the window is.
+fn other_screen(ctx: &Context, frame: &eframe::Frame) -> Option<usize> {
+    let window = frame.winit_window()?;
+    let screens: Vec<Rect> = window
+        .available_monitors()
+        .map(|m| Rect::from_min_size(egui::pos2(m.position().x as f32, m.position().y as f32), egui::vec2(m.size().width as f32, m.size().height as f32)))
+        .collect();
+    if screens.len() < 2 {
+        return None;
+    }
+    // The screens are in physical pixels; the screen with the window's centre is its own.
+    let on = match ctx.input(|i| i.viewport().outer_rect) {
+        Some(r) => screens.iter().position(|s| s.contains((r * ctx.pixels_per_point()).center())),
+        // No window positions (Wayland): the main window still knows its screen.
+        None if ctx.viewport_id() == ViewportId::ROOT => window.current_monitor().and_then(|m| window.available_monitors().position(|a| a == m)),
+        None => None,
+    };
+    other_screen_than(&screens, on?)
+}
+
+/// The first of `screens` that doesn't overlap screen `on` (a mirrored screen shows the same).
+fn other_screen_than(screens: &[Rect], on: usize) -> Option<usize> {
+    let own = *screens.get(on)?;
+    screens.iter().position(|s| !s.intersect(own).is_positive())
+}
+
 /// `SEPTET_FPS=1`: once a second, how many frames a window drew and what asked for them.
 fn fps_probe(ctx: &Context, viewport: ViewportId) {
     use std::collections::BTreeMap;
@@ -1351,4 +1401,56 @@ fn fps_probe(ctx: &Context, viewport: ViewportId) {
             *e = (now, 0, BTreeMap::new());
         }
     });
+}
+
+/// `SEPTET_DEBUG_DROPS=1`: what the system hands over while files are dragged in and dropped, and
+/// where Septet sends them (standard error).
+fn debug_drops() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("SEPTET_DEBUG_DROPS").is_some())
+}
+
+/// Dropped files split into those `kind` takes (its own file types; what it `accepts` while a
+/// document is open to put it in; files no app opens) and those another app opens by default.
+fn split_drops(kind: AppKind, has_document: bool, paths: Vec<PathBuf>) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let spec = kind.spec();
+    paths.into_iter().partition(|p| {
+        let ext = p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+        spec.extensions.contains(&ext.as_str()) || (has_document && spec.accepts.contains(&ext.as_str())) || AppKind::for_path(p).is_none_or(|k| k == kind)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A picture dropped on Deckcraft goes on the slide; a presentation dropped on Wordcraft opens
+    /// in Deckcraft, a raw photo in Lightcraft; a file no app opens goes to the app it was dropped on.
+    #[test]
+    #[cfg(feature = "default")]
+    fn drops_go_to_the_app_that_takes_them() {
+        let p = |s: &str| PathBuf::from(s);
+        let (place, elsewhere) = split_drops(AppKind::Deckcraft, true, vec![p("a.JPG"), p("b.cr3"), p("c.pptx"), p("d.xyz")]);
+        assert_eq!(place, [p("a.JPG"), p("c.pptx"), p("d.xyz")]);
+        assert_eq!(elsewhere, [p("b.cr3")]);
+        // With nothing open to put it in, a picture opens where pictures open.
+        let (place, elsewhere) = split_drops(AppKind::Designcraft, false, vec![p("a.png"), p("b.idml")]);
+        assert_eq!((place, elsewhere), (vec![p("b.idml")], vec![p("a.png")]));
+        let (place, elsewhere) = split_drops(AppKind::Wordcraft, true, vec![p("talk.pptx"), p("photo.png"), p("note.md")]);
+        assert_eq!(place, [p("photo.png"), p("note.md")]);
+        assert_eq!(elsewhere, [p("talk.pptx")]);
+        assert_eq!(AppKind::for_path(&p("talk.pptx")), Some(AppKind::Deckcraft));
+    }
+
+    /// The other screen is one beside the window's (touching it is fine), never a mirror of it.
+    #[test]
+    fn the_other_screen_does_not_overlap_the_windows_screen() {
+        let r = |x: f32, w: f32| Rect::from_min_size(egui::pos2(x, 0.0), egui::vec2(w, 1440.0));
+        let side_by_side = [r(0.0, 2560.0), r(2560.0, 2560.0)];
+        assert_eq!(other_screen_than(&side_by_side, 0), Some(1));
+        assert_eq!(other_screen_than(&side_by_side, 1), Some(0));
+        assert_eq!(other_screen_than(&[r(0.0, 2560.0), r(0.0, 2560.0)], 0), None);
+        assert_eq!(other_screen_than(&[r(0.0, 2560.0), r(0.0, 2560.0), r(2560.0, 1920.0)], 1), Some(2));
+        assert_eq!(other_screen_than(&side_by_side, 2), None);
+    }
 }

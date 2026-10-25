@@ -699,7 +699,8 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         photocraft_engine::prefs::AppearanceMode::Light => ("sun", tl!("Light")),
                     };
                     let appearance_tip = format!("{}: {}", tl!("Appearance Mode"), appearance_label);
-                    if icons_shown >= 2 {
+                    // Hosted, Septet's bar has the one appearance button (`hosted`).
+                    if icons_shown >= 2 && !crate::hosted::is_hosted() {
                         let button = icons::button(ui, theme_icon, 28.0, false, &appearance_tip);
                         if button.clicked() {
                             crate::prefs_ui::cycle_appearance(app, ui.ctx());

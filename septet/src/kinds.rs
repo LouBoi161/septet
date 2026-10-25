@@ -23,6 +23,7 @@ pub enum AppKind {
     Filmcraft,
     Effectcraft,
     Wordcraft,
+    Deckcraft,
     #[serde(other)]
     Unknown,
 }
@@ -257,6 +258,29 @@ pub static APPS: &[AppSpec] = &[
         limits: "Wordcraft shows one document at a time: septet_open replaces it (asking to save first); make a new one with \
                  app_execute `file.new`. Commands act at the caret or selection: select text first (`select.text`, `caret.*`)",
         entry: crate::hosted::entry_points!(wordcraft_embed::Embedded),
+    },
+    #[cfg(feature = "deckcraft")]
+    AppSpec {
+        kind: AppKind::Deckcraft,
+        name: "Deckcraft",
+        badge: "Dk",
+        tagline: "Presentations and slide shows",
+        role: "presentations and slide shows",
+        color: Color32::from_rgb(0xf2, 0x6b, 0x1d),
+        icon: egui::include_image!("../../deckcraft/assets/app-icon/hicolor/scalable/apps/ai.storyteller.deckcraft.svg"),
+        extensions: &["deckcraft", "pptx", "potx", "ppsx"],
+        also_opens: &[],
+        accepts: &["svg", "png", "jpg", "jpeg", "webp", "gif"],
+        paste: Paste::Itself,
+        own_close_prompt: true,
+        drops_at_pointer: false,
+        inspect: "document (slides with titles, layouts, shape counts; selection; size; theme), slide (`index`), shape (`id`), text (`id`), \
+                  selection, animations (`slide`), comments, history, documents, show",
+        render: "slide (`slide`, 0-based; the current one by default), deck (all slides in a grid, up to 24 from `from`)",
+        limits: "Deckcraft keeps several presentations open and shows one (app_inspect `documents`): septet_open opens another, \
+                 `file.new` makes one. Slide indices are 0-based in every command. A full-screen slide show (`show.start`) opens a \
+                 window of its own; `show.end` ends it",
+        entry: crate::hosted::entry_points!(deckcraft_embed::Embedded),
     },
 ];
 

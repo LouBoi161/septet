@@ -10,9 +10,9 @@ the top level of this repository — is licensed under the
 noncommercial purpose (personal use, study, hobby projects, charities, schools, research …), but not
 for commercial purposes.
 
-**The eight apps** in `photocraft/`, `vectorcraft/`, `lightcraft/`, `designcraft/`, `pdfcraft/`,
-`filmcraft/`, `effectcraft/` and `wordcraft/` are PhotoCraft, VectorCraft, LightCraft, DesignCraft,
-PdfCraft, FilmCraft, EffectCraft and WordCraft by the ArtCraft team and contributors
+**The nine apps** in `photocraft/`, `vectorcraft/`, `lightcraft/`, `designcraft/`, `pdfcraft/`,
+`filmcraft/`, `effectcraft/`, `wordcraft/` and `deckcraft/` are PhotoCraft, VectorCraft, LightCraft,
+DesignCraft, PdfCraft, FilmCraft, EffectCraft, WordCraft and DeckCraft by the ArtCraft team and contributors
 (<https://github.com/storytold>), changed for Septet. They stay under their own license, the
 **MIT License or the Apache License 2.0**, at your option — see `LICENSE-MIT`, `LICENSE-APACHE` and
 `NOTICE` in each folder. The changes made for Septet inside those folders are under the same license.

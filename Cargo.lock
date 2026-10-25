@@ -1791,6 +1791,14 @@ version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=82a24b006eefa036b43c09a67fb9a3fbd17ffe63#82a24b006eefa036b43c09a67fb9a3fbd17ffe63"
 
 [[package]]
+name = "craft-media"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=f0ad6c1e1d297908915f4be315b0fcfc9be7b5d4#f0ad6c1e1d297908915f4be315b0fcfc9be7b5d4"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-pdf"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=89dcbb3060377a26c99a6d80caa16084366704c4#89dcbb3060377a26c99a6d80caa16084366704c4"
@@ -1799,6 +1807,15 @@ dependencies = [
  "hayro 0.7.1 (git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d)",
  "hayro-interpret 0.7.0 (git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d)",
  "hayro-syntax 0.7.2 (git+https://github.com/storytold/craft-libs?rev=ca50d63b773c99f96e75c77ce5a1d21e7c9cda0d)",
+ "krilla",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-pdf"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef#9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef"
+dependencies = [
  "krilla",
  "thiserror 2.0.21",
 ]
@@ -2158,6 +2175,289 @@ name = "data-url"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
+
+[[package]]
+name = "deckcraft"
+version = "0.11.1"
+dependencies = [
+ "arboard",
+ "chrono",
+ "cpal",
+ "deckcraft-engine",
+ "deckcraft-media",
+ "deckcraft-model",
+ "deckcraft-render",
+ "deckcraft-ui-egui",
+ "eframe",
+ "egui",
+ "fmv-macos-events",
+ "image",
+ "log",
+ "pollster 0.4.0",
+ "rfd",
+ "serde_json",
+ "winit",
+ "winresource",
+]
+
+[[package]]
+name = "deckcraft-anim"
+version = "0.11.1"
+dependencies = [
+ "deckcraft-geom",
+ "deckcraft-model",
+ "serde",
+]
+
+[[package]]
+name = "deckcraft-av1"
+version = "0.11.1"
+dependencies = [
+ "deckcraft-bitstream",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "deckcraft-bitstream"
+version = "0.11.1"
+dependencies = [
+ "craft-media",
+]
+
+[[package]]
+name = "deckcraft-color"
+version = "0.11.1"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "deckcraft-engine"
+version = "0.11.1"
+dependencies = [
+ "chrono",
+ "deckcraft-color",
+ "deckcraft-fonts",
+ "deckcraft-format",
+ "deckcraft-geom",
+ "deckcraft-media",
+ "deckcraft-model",
+ "deckcraft-pdf",
+ "deckcraft-pptx",
+ "deckcraft-render",
+ "deckcraft-text",
+ "i_overlay",
+ "image",
+ "js-sys",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "deckcraft-fonts"
+version = "0.11.1"
+dependencies = [
+ "epaint_default_fonts",
+ "harfrust 0.13.3",
+ "kurbo 0.13.1",
+ "log",
+ "shared-craft-fonts",
+ "skrifa 0.47.0",
+ "unicode-bidi",
+]
+
+[[package]]
+name = "deckcraft-format"
+version = "0.11.1"
+dependencies = [
+ "deckcraft-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "zip 3.0.0",
+]
+
+[[package]]
+name = "deckcraft-geom"
+version = "0.11.1"
+dependencies = [
+ "kurbo 0.13.1",
+ "serde",
+]
+
+[[package]]
+name = "deckcraft-h264"
+version = "0.11.1"
+dependencies = [
+ "deckcraft-bitstream",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "deckcraft-hevc"
+version = "0.11.1"
+dependencies = [
+ "deckcraft-bitstream",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "deckcraft-isobmff"
+version = "0.11.1"
+dependencies = [
+ "craft-media",
+]
+
+[[package]]
+name = "deckcraft-matroska"
+version = "0.11.1"
+dependencies = [
+ "craft-media",
+]
+
+[[package]]
+name = "deckcraft-media"
+version = "0.11.1"
+dependencies = [
+ "deckcraft-av1",
+ "deckcraft-h264",
+ "deckcraft-hevc",
+ "deckcraft-isobmff",
+ "deckcraft-matroska",
+ "deckcraft-ogg",
+ "deckcraft-opus",
+ "deckcraft-vp9",
+ "image",
+ "log",
+ "symphonia",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "deckcraft-metafile"
+version = "0.11.1"
+dependencies = [
+ "image",
+ "kurbo 0.13.1",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "deckcraft-model"
+version = "0.11.1"
+dependencies = [
+ "deckcraft-color",
+ "deckcraft-geom",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "deckcraft-ogg"
+version = "0.11.1"
+
+[[package]]
+name = "deckcraft-opus"
+version = "0.11.1"
+
+[[package]]
+name = "deckcraft-pdf"
+version = "0.11.1"
+dependencies = [
+ "craft-pdf 0.1.0 (git+https://github.com/storytold/craft-libs?rev=9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef)",
+ "deckcraft-fonts",
+ "deckcraft-model",
+ "deckcraft-render",
+ "deckcraft-text",
+ "krilla",
+ "kurbo 0.13.1",
+ "log",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "deckcraft-pptx"
+version = "0.11.1"
+dependencies = [
+ "deckcraft-color",
+ "deckcraft-geom",
+ "deckcraft-model",
+ "log",
+ "quick-xml 0.41.0",
+ "thiserror 2.0.21",
+ "zip 3.0.0",
+]
+
+[[package]]
+name = "deckcraft-render"
+version = "0.11.1"
+dependencies = [
+ "deckcraft-anim",
+ "deckcraft-color",
+ "deckcraft-fonts",
+ "deckcraft-geom",
+ "deckcraft-metafile",
+ "deckcraft-model",
+ "deckcraft-text",
+ "image",
+ "kurbo 0.13.1",
+ "log",
+ "skrifa 0.47.0",
+ "vello_common 0.2.0",
+ "vello_cpu 0.2.0",
+]
+
+[[package]]
+name = "deckcraft-text"
+version = "0.11.1"
+dependencies = [
+ "chrono",
+ "deckcraft-color",
+ "deckcraft-fonts",
+ "deckcraft-geom",
+ "deckcraft-model",
+ "unicode-bidi",
+ "unicode-linebreak",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "deckcraft-ui-egui"
+version = "0.11.1"
+dependencies = [
+ "deckcraft-anim",
+ "deckcraft-color",
+ "deckcraft-engine",
+ "deckcraft-fonts",
+ "deckcraft-geom",
+ "deckcraft-media",
+ "deckcraft-model",
+ "deckcraft-render",
+ "deckcraft-text",
+ "egui",
+ "js-sys",
+ "log",
+ "serde",
+ "serde_json",
+ "toml 1.1.7+spec-1.1.0",
+]
+
+[[package]]
+name = "deckcraft-vp9"
+version = "0.11.1"
+dependencies = [
+ "deckcraft-bitstream",
+ "rayon",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "der"
@@ -6240,6 +6540,48 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "45f2b4f6b5da34d400d4c112eadcc14512cc5d04307a8eee182586d9bebd7ce6"
 
 [[package]]
+name = "i_float"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ecaff1ce29bcacd72cdf581ba6fce636ef4c4e0b2da7e7846dd0137d98141e2"
+dependencies = [
+ "libm",
+]
+
+[[package]]
+name = "i_key_sort"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14269ee362009550495e20650ff3c2bca14a8147fe251e216760381ffed90b6f"
+
+[[package]]
+name = "i_overlay"
+version = "9.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "913fd692c02408adc76cead636f8e7e07c705f8b995a8b54b454b995e8e197d5"
+dependencies = [
+ "i_float",
+ "i_key_sort",
+ "i_shape",
+ "i_tree",
+]
+
+[[package]]
+name = "i_shape"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa1878f91ef7921feaf1b2346253ebc5e661878b22d5715195c1d5dcf0f20ae5"
+dependencies = [
+ "i_float",
+]
+
+[[package]]
+name = "i_tree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "048af31de955890c62a8506fec511335a5089e91e1c516537add16f96c507d84"
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6962,6 +7304,7 @@ dependencies = [
  "indexmap",
  "pdf-writer",
  "png 0.18.1",
+ "rayon",
  "rustc-hash 2.1.3",
  "rustybuzz",
  "siphasher",
@@ -11681,10 +12024,13 @@ checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "septet"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
+ "deckcraft",
+ "deckcraft-fonts",
+ "deckcraft-ui-egui",
  "designcraft",
  "designcraft-fonts",
  "designcraft-ui-egui",
@@ -12470,11 +12816,14 @@ dependencies = [
  "symphonia-bundle-flac",
  "symphonia-bundle-mp3",
  "symphonia-codec-aac",
+ "symphonia-codec-adpcm",
  "symphonia-codec-alac",
  "symphonia-codec-pcm",
  "symphonia-codec-vorbis",
  "symphonia-core",
+ "symphonia-format-caf",
  "symphonia-format-isomp4",
+ "symphonia-format-mkv",
  "symphonia-format-ogg",
  "symphonia-format-riff",
  "symphonia-metadata",
@@ -12511,6 +12860,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c263845aa86881416849c1729a54c7f55164f8b96111dba59de46849e73a790"
 dependencies = [
  "lazy_static",
+ "log",
+ "symphonia-core",
+]
+
+[[package]]
+name = "symphonia-codec-adpcm"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2dddc50e2bbea4cfe027441eece77c46b9f319748605ab8f3443350129ddd07f"
+dependencies = [
  "log",
  "symphonia-core",
 ]
@@ -12560,12 +12919,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "symphonia-format-caf"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8faf379316b6b6e6bbc274d00e7a592e0d63ff1a7e182ce8ba25e24edd3d096"
+dependencies = [
+ "log",
+ "symphonia-core",
+ "symphonia-metadata",
+]
+
+[[package]]
 name = "symphonia-format-isomp4"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "243739585d11f81daf8dac8d9f3d18cc7898f6c09a259675fc364b382c30e0a5"
 dependencies = [
  "encoding_rs",
+ "log",
+ "symphonia-core",
+ "symphonia-metadata",
+ "symphonia-utils-xiph",
+]
+
+[[package]]
+name = "symphonia-format-mkv"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "122d786d2c43a49beb6f397551b4a050d8229eaa54c7ddf9ee4b98899b8742d0"
+dependencies = [
+ "lazy_static",
  "log",
  "symphonia-core",
  "symphonia-metadata",
@@ -15119,8 +15502,6 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 [[package]]
 name = "winit"
 version = "0.30.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6755fa58a9f8350bd1e472d4c3fcc25f824ec358933bba33306d0b63df5978d"
 dependencies = [
  "ahash",
  "android-activity",
