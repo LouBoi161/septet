@@ -62,6 +62,11 @@ pub trait HostedApp {
     /// View): Septet draws all its windows in one go, and the desktop takes a frame from a hidden
     /// one only about once a second, so every window would wait for it.
     fn set_other_screen(&mut self, _screen: Option<usize>) {}
+    /// The app draws over the whole window (DeckCraft's slide show, the window made full
+    /// screen): the shell leaves out its tab strip, which lies above everything apps draw.
+    fn covers_window(&self) -> bool {
+        false
+    }
     /// The app's Generative Fill and Generate Image commands call `handler` (`generate.rs`).
     /// Apps without them never call it.
     fn set_generate(&mut self, _handler: Box<dyn FnMut(Generate)>) {}
@@ -121,7 +126,8 @@ pub struct GenerativeSource {
 pub type AgentRender = Box<dyn FnOnce() -> Result<egui::ColorImage, String> + Send>;
 
 /// Implement [`HostedApp`] for an app's `Embedded`, with the optional parts it has: `agent`
-/// (phase 5), `appearance` (A4) and `screens` (windows of its own on another screen).
+/// (phase 5), `appearance` (A4) and `screens` (windows of its own on another screen, a show over
+/// the whole window).
 macro_rules! hosted {
     ($ty:ty $(, $part:ident)*) => {
         impl HostedApp for $ty {
@@ -201,6 +207,9 @@ macro_rules! hosted_part {
     (screens, $ty:ty) => {
         fn set_other_screen(&mut self, screen: Option<usize>) {
             <$ty>::set_other_screen(self, screen)
+        }
+        fn covers_window(&self) -> bool {
+            <$ty>::covers_window(self)
         }
     };
     (photocraft_generate, $ty:ty) => {

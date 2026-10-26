@@ -521,7 +521,16 @@ impl Shell {
             Some(([v.outer_rect?.min.x, v.outer_rect?.min.y], [v.inner_rect?.width(), v.inner_rect?.height()]))
         });
         let full = ui.max_rect();
-        crate::tabstrip::strip(self, wi, &ctx, full);
+        // An app that has taken over the whole window (a slide show) has no strip over it.
+        let covered = match self.windows[wi].active_tab().map(|t| t.kind) {
+            Some(TabKind::App(kind)) => self.apps.get(&kind).is_some_and(|s| s.try_borrow().is_ok_and(|s| s.app.covers_window())),
+            _ => false,
+        };
+        if covered {
+            self.windows[wi].strip = Rect::from_min_size(full.min, egui::Vec2::ZERO);
+        } else {
+            crate::tabstrip::strip(self, wi, &ctx, full);
+        }
         self.strip_drops(&ctx, wi);
         let mut content = Rect::from_min_max(egui::pos2(full.left(), self.windows[wi].strip.bottom()), full.max);
         // The Claude panel takes the right side; the app keeps at least 420 points.

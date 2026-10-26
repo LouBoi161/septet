@@ -1908,6 +1908,11 @@ impl SlideApp {
         show::restore_fullscreen(self, ctx);
     }
 
+    /// Hosted: a slide show has taken over the host's whole window (`show::ui_or_window`).
+    pub fn show_covers_window(&self) -> bool {
+        self.show_window.is_some()
+    }
+
     /// Whether the widget `id` is the app's: always standalone; hosted, when it lies in the part of
     /// the window the app was given (the host's chat field next to it keeps its keyboard focus).
     fn owns_widget(&self, ctx: &egui::Context, id: egui::Id) -> bool {

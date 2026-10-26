@@ -222,6 +222,12 @@ impl Embedded {
     pub fn set_other_screen(&mut self, screen: Option<usize>) {
         hosted::set_other_screen(screen);
     }
+
+    /// A slide show has made Septet's window full screen and draws over all of it: the host
+    /// leaves out what it would draw on top (its tab strip).
+    pub fn covers_window(&self) -> bool {
+        self.app.show_covers_window()
+    }
 }
 
 impl Embedded {

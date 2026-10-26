@@ -1,12 +1,12 @@
 # Plan: Aus sieben Apps werden zwölf
 
-Stand: 2026-10-25. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
+Stand: 2026-10-26. Status: **Phase 0 erledigt** (MR !1 am 2026-10-13 auf `main` gemergt), zweiter Abgleich
 erledigt (MR !2 am 2026-10-14 gemergt), **Phase A gemergt** (MR !3 am 2026-10-22: A1–A5 und H0 fertig; der Rest von A4,
 Lightcraft und hoher Kontrast, gemergt mit MR !5 am 2026-10-24), dritter Abgleich gemergt (MR !4 am 2026-10-22), Phase H
 (ComfyUI) gemergt (MR !6 am 2026-10-24), vierter Abgleich gemergt (MR !7 am 2026-10-24); **Phase B begonnen:
 WordCraft gemergt** (MR !8 am 2026-10-24); **Apps installieren/deinstallieren und Updates in der App** (2026-10-25,
-siehe unten), **Release 0.3.0** am 2026-10-25 (GitHub und GitLab); **DeckCraft eingebaut** (Branch `phase-b-deckcraft`,
-2026-10-25, siehe Phase B). Grundlage: Untersuchung der Upstream-Repos
+siehe unten), **Release 0.3.0** am 2026-10-25 (GitHub und GitLab); **DeckCraft gemergt** (MR !10 am 2026-10-26, siehe
+Phase B), **Release 0.4.0** am 2026-10-26 (GitHub und GitLab). Grundlage: Untersuchung der Upstream-Repos
 (`storytold/wordcraft`, `deckcraft`, `gridcraft`, `cadcraft`, `soundcraft`, `craft-launcher`, alle v0.4.0 vom
 2026-10-10) und des Septet-Codes.
 
@@ -250,8 +250,15 @@ Dateiwähler gehostet nebenläufig (`pickers.rs`), außer an seltenen Stellen (F
 die Hell/Dunkel-Knöpfe aller Apps gehostet ausgeblendet; **Drag & Drop**: Septet verteilt jetzt alle Datei-Drops
 selbst (`shell.rs` `route_drops`/`split_drops`: was die App aufnimmt, wird abgelegt, sonst öffnet die Standard-App),
 Diagnose mit `SEPTET_DEBUG_DROPS=1`, Autotest `drops`.
-Offen bei DeckCraft: Ziehen aus DeckCraft in andere Apps; Ablegen an der Mausposition; Vollbild auf echtem Bildschirm (nur Xvfb geprüft,
-dort ohne Fenstermanager); Windows/macOS.
+**Gemergt mit MR !10 und veröffentlicht als 0.4.0 (2026-10-26).** Vor dem Merge noch: Show als Ebene über Septets
+Vollbild-Fenster statt eigenem Fenster; Referentenansicht als Vollbild auf einem anderen Bildschirm, bei nur einem
+Bildschirm weggelassen (verdeckt drosselte GNOME sie auf ~1 Bild/s, und damit alle Fenster); Drag & Drop unter GNOME
+mit gepatchtem winit (`septet/vendor/winit`). Vom User auf dem echten GNOME-Desktop geprüft: flüssige Show mit
+Animationen, pptx-Import/Speichern, Nachfrage beim Schließen, Drag & Drop.
+Danach (2026-10-26): Tableiste ausgeblendet, solange die Show das Fenster übernommen hat (`HostedApp::covers_window`).
+Offen bei DeckCraft: Fenster bleibt nach der Show manchmal im Vollbild; verdeckte Referentenansicht lässt die Show
+ruckeln; „Nach vorheriger“-Animationen starten mit dem Übergang (upstream gleich); seltene blockierende Dateiwähler;
+Ziehen aus DeckCraft in andere Apps; Ablegen an der Mausposition; Windows/macOS.
 
 ### Phase C: Alles miteinander kompatibel
 
